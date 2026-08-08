@@ -1,7 +1,7 @@
 # libKCD2/KCSE migration audit
 
 This is the capability matrix for the native multiplayer client. The removed
-KCD2MP implementation records intended behavior only; it is not an engine ABI
+KCD2Online implementation records intended behavior only; it is not an engine ABI
 reference and is never used as a fallback.
 
 | Capability | Native implementation | Verification |
@@ -15,11 +15,11 @@ reference and is never used as a fallback.
 | Inventory/equipment | Native item creation, logical instance GUID, count/quality/condition, slot-ordered equip/unequip/delete, draw/holster | Transaction and rollback tests plus active probe |
 | RPG profile | Absolute money, 10 stats, 35 skills, normalized progress, inventory, equipment, and avatar state | Full capture/apply/reconcile/rollback tests |
 | Sandbox | Native save/load lock, deferred engine `unload`, lifecycle completion gate, and root-main-menu return | Console FIFO dispatch avoids unloading from KCSE `PostUpdate`; main-menu open is VTable-validated and SEH-guarded |
-| UI boundary | Copied POD snapshots and commands, compatibility-gated by the shared KCD2MP version (`0.1.1`) | ABI size/project-version tests; no engine pointer crosses the boundary |
+| UI boundary | Copied POD snapshots and commands, compatibility-gated by the shared KCD2Online version (`0.1.2`) | ABI size/project-version tests; no engine pointer crosses the boundary |
 
 ## Runtime ownership and capability publication
 
-`KCD2MPKCSEClient.dll` owns the client state machine, network thread, identity
+`KCD2OnlineKCSEClient.dll` owns the client state machine, network thread, identity
 store, and all engine-facing state. `d3d12.dll` only consumes the versioned UI
 ABI. Entity, Actor, Soul, item, and WUID values never cross the UI ABI or the
 network protocol.

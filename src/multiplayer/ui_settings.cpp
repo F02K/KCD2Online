@@ -2,7 +2,7 @@
 
 #include <config/config.hpp>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	namespace
 	{

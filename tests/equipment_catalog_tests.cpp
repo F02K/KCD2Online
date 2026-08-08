@@ -16,7 +16,7 @@ namespace
 		temporary_directory()
 		{
 			path = std::filesystem::temp_directory_path()
-			    / ("kcd2mp-equipment-"
+			    / ("kcd2o-equipment-"
 			       + std::to_string(
 			           std::chrono::steady_clock::now()
 			               .time_since_epoch()
@@ -35,7 +35,7 @@ namespace
 
 	void write_pak(
 	    const std::filesystem::path &path,
-	    const std::vector<kcd2mp::npc::catalog_document> &documents)
+	    const std::vector<kcd2o::npc::catalog_document> &documents)
 	{
 		std::filesystem::create_directories(path.parent_path());
 		auto *archive = zip_open(path.string().c_str(), 6, 'w');
@@ -56,7 +56,7 @@ namespace
 
 int main(int argc, char **argv)
 {
-	using namespace kcd2mp::npc;
+	using namespace kcd2o::npc;
 	const std::vector<catalog_document> documents{
 	    {
 	        "Libs/Tables/item/equipment_slot.xml",

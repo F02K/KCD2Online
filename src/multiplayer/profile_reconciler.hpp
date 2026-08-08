@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	class profile_backend
 	{

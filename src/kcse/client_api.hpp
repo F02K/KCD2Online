@@ -1,14 +1,14 @@
 #pragma once
 
-#include "generated/kcd2mp_version.hpp"
+#include "generated/kcd2o_version.hpp"
 
 #include <cstddef>
 #include <cstdint>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
-	inline constexpr wchar_t client_module_name[] = L"KCD2MPKCSEClient.dll";
-	inline constexpr char client_query_export[] = "KCD2MP_QueryClient";
+	inline constexpr wchar_t client_module_name[] = L"KCD2OnlineKCSEClient.dll";
+	inline constexpr char client_query_export[] = "KCD2Online_QueryClient";
 
 	inline constexpr std::size_t short_text_capacity = 64;
 	inline constexpr std::size_t text_capacity = 256;
@@ -120,9 +120,9 @@ namespace kcd2mp::kcse
 	[[nodiscard]] constexpr bool compatible(const client_api *api) noexcept
 	{
 		return api && api->struct_size == sizeof(client_api)
-		    && api->version_major == kcd2mp_version_major
-		    && api->version_minor == kcd2mp_version_minor
-		    && api->version_patch == kcd2mp_version_patch
+		    && api->version_major == kcd2o_version_major
+		    && api->version_minor == kcd2o_version_minor
+		    && api->version_patch == kcd2o_version_patch
 		    && api->get_runtime_status && api->connect && api->disconnect
 		    && api->send_chat && api->select_avatar && api->get_status
 		    && api->attempt_sleep && api->request_respawn

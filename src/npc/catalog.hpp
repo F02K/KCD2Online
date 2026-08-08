@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace kcd2mp::npc
+namespace kcd2o::npc
 {
 	inline constexpr std::string_view default_soul_id =
 	    "763db0bb-4469-497d-bdc9-712b3df91b5a";

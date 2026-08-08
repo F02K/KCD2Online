@@ -35,7 +35,7 @@ def build_generator(
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
-        prefix="kcd2mp-game-data-generator.", dir=str(output.parent)
+        prefix="kcd2o-game-data-generator.", dir=str(output.parent)
     ) as temporary:
         root = pathlib.Path(temporary)
         dist = root / "dist"

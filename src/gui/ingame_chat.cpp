@@ -1,7 +1,7 @@
 #include "gui/ingame_chat.hpp"
 
 #include "gui/renderer.hpp"
-#ifdef KCD2MP_NATIVE_MULTIPLAYER_MENU
+#ifdef KCD2Online_NATIVE_MULTIPLAYER_MENU
 	#include "gui/native_ui_localization.hpp"
 #endif
 #include "kcse/client_api.hpp"
@@ -27,7 +27,7 @@ namespace big::ingame_chat
 		constexpr double message_fade_seconds      = 3.0;
 		constexpr std::size_t closed_message_count = 5;
 		constexpr std::size_t open_message_count   = 12;
-		constexpr std::size_t maximum_input_bytes  = kcd2mp::kcse::text_capacity - 1;
+		constexpr std::size_t maximum_input_bytes  = kcd2o::kcse::text_capacity - 1;
 
 		std::atomic_bool g_open{};
 		std::atomic_bool g_can_open{};
@@ -41,7 +41,7 @@ namespace big::ingame_chat
 			std::string input;
 			std::uint64_t input_generation{};
 			std::size_t history_size{};
-			kcd2mp::player_id last_sender{};
+			kcd2o::player_id last_sender{};
 			std::uint64_t last_server_time_ms{};
 			std::string last_text;
 			double last_activity_time{};
@@ -75,7 +75,7 @@ namespace big::ingame_chat
 			text.resize(length);
 		}
 
-		bool history_changed(chat_view_state &state, const std::vector<kcd2mp::chat_entry> &history)
+		bool history_changed(chat_view_state &state, const std::vector<kcd2o::chat_entry> &history)
 		{
 			const auto size_changed = state.history_size != history.size();
 			const auto last_changed =
@@ -114,7 +114,7 @@ namespace big::ingame_chat
 
 		std::string chat_text(std::string_view key)
 		{
-#ifdef KCD2MP_NATIVE_MULTIPLAYER_MENU
+#ifdef KCD2Online_NATIVE_MULTIPLAYER_MENU
 			return ingame_ui::localized(key);
 #else
 			if (key == "chat.title")
@@ -129,7 +129,7 @@ namespace big::ingame_chat
 #endif
 		}
 
-		void draw_message(const kcd2mp::chat_entry &entry, kcd2mp::player_id local_player, float alpha)
+		void draw_message(const kcd2o::chat_entry &entry, kcd2o::player_id local_player, float alpha)
 		{
 			const auto server     = entry.sender == 0;
 			const auto local      = entry.sender == local_player && local_player != 0;
@@ -160,9 +160,9 @@ namespace big::ingame_chat
 
 	void render(bool mod_gui_open)
 	{
-		auto &client         = kcd2mp::kcse::ui_client();
+		auto &client         = kcd2o::kcse::ui_client();
 		const auto status    = client.status();
-		const auto connected = status.state == kcd2mp::client_state::connected;
+		const auto connected = status.state == kcd2o::client_state::connected;
 		g_can_open.store(connected && !mod_gui_open, std::memory_order_release);
 
 		auto &state = view_state();
@@ -240,7 +240,7 @@ namespace big::ingame_chat
 			flags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_AlwaysAutoResize;
 		}
 
-		if (ImGui::Begin("##KCD2MPIngameChat", nullptr, flags))
+		if (ImGui::Begin("##KCD2OnlineIngameChat", nullptr, flags))
 		{
 			const auto window_position = ImGui::GetWindowPos();
 			const auto accent_color = ImGui::ColorConvertFloat4ToU32(with_alpha(ImVec4(0.66F, 0.47F, 0.22F, 0.88F), alpha));
@@ -271,7 +271,7 @@ namespace big::ingame_chat
 			const auto first = history.size() > count ? history.size() - count : 0;
 			if (open)
 			{
-				if (ImGui::BeginChild("##KCD2MPChatHistory", {0.0F, 182.0F * scale}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar))
+				if (ImGui::BeginChild("##KCD2OnlineChatHistory", {0.0F, 182.0F * scale}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar))
 				{
 					for (std::size_t index = first; index < history.size(); ++index)
 					{
@@ -302,7 +302,7 @@ namespace big::ingame_chat
 					ImGui::SetKeyboardFocusHere();
 				}
 				ImGui::SetNextItemWidth(-1.0F);
-				const auto input_id   = "##KCD2MPChatInput" + std::to_string(state.input_generation);
+				const auto input_id   = "##KCD2OnlineChatInput" + std::to_string(state.input_generation);
 				const auto input_hint = chat_text("chat.input_hint");
 				ImGui::InputTextWithHint(input_id.c_str(), input_hint.c_str(), &state.input);
 				trim_to_input_capacity(state.input);

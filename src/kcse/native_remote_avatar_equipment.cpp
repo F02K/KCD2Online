@@ -20,7 +20,7 @@
 #include <random>
 #include <ranges>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	namespace
 	{
@@ -139,7 +139,7 @@ namespace kcd2mp::kcse
 			}
 			if (!native.database.FindClassByGuid(guid))
 			{
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.remote-appearance.item-skipped",
 				    std::format(
 				        "player_id={} definition=\"{}\" slot=\"{}\" "
@@ -226,7 +226,7 @@ namespace kcd2mp::kcse
 				                == item.wire->equipped_slot();
 			        }))
 				continue;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-appearance.CreateItem.begin",
 			    std::format(
 			        "player_id={} entity_id={} definition=\"{}\" "
@@ -236,7 +236,7 @@ namespace kcd2mp::kcse
 			        item.wire->definition_id(),
 			        item.wire->equipped_slot()));
 			auto *created = native.inventory.CreateItem(item.guid, 1.0F, 1);
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    created ? "join.remote-appearance.CreateItem.returned"
 			            : "join.remote-appearance.CreateItem.nil",
 			    std::format(
@@ -246,7 +246,7 @@ namespace kcd2mp::kcse
 			        static_cast<void *>(created)));
 			if (!created)
 			{
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.remote-appearance.item-skipped",
 				    std::format(
 				        "player_id={} definition=\"{}\" slot=\"{}\" "
@@ -258,7 +258,7 @@ namespace kcd2mp::kcse
 			}
 
 			const auto instance = make_instance_guid();
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-appearance.SetInstanceGuid.begin",
 			    std::format(
 			        "player_id={} entity_id={} item={}",
@@ -271,7 +271,7 @@ namespace kcd2mp::kcse
 			    item.wire->definition_id(),
 			    item.wire->equipped_slot(),
 			    instance_text});
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-appearance.EquipItem.begin",
 			    std::format(
 			        "player_id={} entity_id={} item={} instance=\"{}\"",
@@ -280,7 +280,7 @@ namespace kcd2mp::kcse
 			        static_cast<void *>(created),
 			        instance_text));
 			native.soul.m_inventorySoul.EquipItem(created, true);
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-appearance.EquipItem.returned",
 			    std::format(
 			        "player_id={} entity_id={} item_flags=0x{:08X}",
@@ -290,7 +290,7 @@ namespace kcd2mp::kcse
 
 			if ((created->m_flags & native_item_equipped) == 0)
 			{
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.remote-appearance.item-skipped",
 				    std::format(
 				        "player_id={} definition=\"{}\" slot=\"{}\" "
@@ -321,7 +321,7 @@ namespace kcd2mp::kcse
 				continue;
 			}
 
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-appearance.item-skipped",
 			    std::format(
 			        "player_id={} definition=\"{}\" requested_slot=\"{}\" "

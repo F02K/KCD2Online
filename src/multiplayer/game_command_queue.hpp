@@ -7,7 +7,7 @@
 #include <mutex>
 #include <vector>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	class game_command_queue
 	{

@@ -19,7 +19,7 @@
 #include <cstring>
 #include <format>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	namespace
 	{
@@ -80,7 +80,7 @@ namespace kcd2mp::kcse
 				return environment->pScriptSystem->ExecuteBuffer(
 				    script.data(),
 				    script.size(),
-				    "KCD2MP world sync",
+				    "KCD2Online world sync",
 				    nullptr);
 			}
 			__except(EXCEPTION_EXECUTE_HANDLER)
@@ -89,7 +89,7 @@ namespace kcd2mp::kcse
 			}
 #else
 			return environment->pScriptSystem->ExecuteBuffer(
-			    script.data(), script.size(), "KCD2MP world sync", nullptr);
+			    script.data(), script.size(), "KCD2Online world sync", nullptr);
 #endif
 		}
 
@@ -138,18 +138,18 @@ namespace kcd2mp::kcse
 			if (!entity || entity->GetId() == 0 || entity->GetGuid() == 0)
 				return std::nullopt;
 			const auto script = std::format(
-			    "KCD2MP_world_inventory_source=0 "
-			    "KCD2MP_world_is_door=false KCD2MP_world_open=false "
-			    "KCD2MP_world_inventory=nil local e=System.GetEntity({}) "
+			    "KCD2Online_world_inventory_source=0 "
+			    "KCD2Online_world_is_door=false KCD2Online_world_open=false "
+			    "KCD2Online_world_inventory=nil local e=System.GetEntity({}) "
 			    "if e then if e.GetInventoryToOpen~=nil then "
-			    "KCD2MP_world_inventory_source=1 "
-			    "KCD2MP_world_inventory=e:GetInventoryToOpen() "
+			    "KCD2Online_world_inventory_source=1 "
+			    "KCD2Online_world_inventory=e:GetInventoryToOpen() "
 			    "elseif e.inventoryId~=nil and e.Open~=nil and e.Close~=nil "
 			    "and e.OnInventoryClosed~=nil then "
-			    "KCD2MP_world_inventory_source=2 "
-			    "KCD2MP_world_inventory=e.inventoryId "
-			    "elseif e.LockType=='door' then KCD2MP_world_is_door=true end "
-			    "KCD2MP_world_open=(e.bOpened==1 or e.nDirection==1) end",
+			    "KCD2Online_world_inventory_source=2 "
+			    "KCD2Online_world_inventory=e.inventoryId "
+			    "elseif e.LockType=='door' then KCD2Online_world_is_door=true end "
+			    "KCD2Online_world_open=(e.bOpened==1 or e.nDirection==1) end",
 			    entity->GetId());
 			if (!execute_script(script))
 				return std::nullopt;
@@ -158,13 +158,13 @@ namespace kcd2mp::kcse
 			ScriptAnyValue is_door;
 			ScriptAnyValue opened;
 			if (!read_script_global(
-			        "KCD2MP_world_inventory_source", inventory_source)
+			        "KCD2Online_world_inventory_source", inventory_source)
 			    || inventory_source.type != ANY_TNUMBER
 			    || inventory_source.number < 0.0F
 			    || inventory_source.number > 2.0F
-			    || !read_script_global("KCD2MP_world_is_door", is_door)
+			    || !read_script_global("KCD2Online_world_is_door", is_door)
 			    || is_door.type != ANY_TBOOLEAN
-			    || !read_script_global("KCD2MP_world_open", opened)
+			    || !read_script_global("KCD2Online_world_open", opened)
 			    || opened.type != ANY_TBOOLEAN)
 			{
 				return std::nullopt;
@@ -181,7 +181,7 @@ namespace kcd2mp::kcse
 			if (result.kind == protocol::WORLD_OBJECT_KIND_CONTAINER)
 			{
 				ScriptAnyValue inventory;
-				if (!read_script_global("KCD2MP_world_inventory", inventory))
+				if (!read_script_global("KCD2Online_world_inventory", inventory))
 					return std::nullopt;
 				const auto wuid = script_wuid(inventory);
 				if (!wuid)

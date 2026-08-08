@@ -20,7 +20,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	namespace
 	{
@@ -141,19 +141,19 @@ namespace kcd2mp::kcse
 			__try
 			{
 #endif
-				scripts->SetGlobalAny("KCD2MP_world_item_handle", item_handle);
-				scripts->SetGlobalAny("KCD2MP_world_item_player", player_handle);
+				scripts->SetGlobalAny("KCD2Online_world_item_handle", item_handle);
+				scripts->SetGlobalAny("KCD2Online_world_item_player", player_handle);
 				constexpr char script[] =
-				    "local p=System.GetEntity(KCD2MP_world_item_player) "
+				    "local p=System.GetEntity(KCD2Online_world_item_player) "
 				    "if p and p.human then "
-				    "p.human:PlaceItem(KCD2MP_world_item_handle,p.id,false) end";
+				    "p.human:PlaceItem(KCD2Online_world_item_handle,p.id,false) end";
 				const auto result = scripts->ExecuteBuffer(
 				    script,
 				    sizeof(script) - 1,
-				    "KCD2MP dropped item sync",
+				    "KCD2Online dropped item sync",
 				    nullptr);
-				scripts->SetGlobalToNull("KCD2MP_world_item_handle");
-				scripts->SetGlobalToNull("KCD2MP_world_item_player");
+				scripts->SetGlobalToNull("KCD2Online_world_item_handle");
+				scripts->SetGlobalToNull("KCD2Online_world_item_player");
 				return result;
 #ifdef _WIN32
 			}

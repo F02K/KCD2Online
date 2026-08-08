@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	namespace
 	{
@@ -18,7 +18,9 @@ namespace kcd2mp::server
 		constexpr float interest_leave_radius = 150.0F;
 		constexpr float discovery_radius = 180.0F;
 		constexpr float maximum_npc_speed = 40.0F;
-		constexpr auto lease_duration = std::chrono::seconds(2);
+		// A short burst of packet loss must not cause authority to flap between
+		// nearby players. Updates renew this lease continuously.
+		constexpr auto lease_duration = std::chrono::seconds(5);
 
 		std::optional<std::uint64_t> parse_authored_guid(
 		    std::string_view value)
@@ -57,8 +59,8 @@ namespace kcd2mp::server
 
 		bool reserved_managed_actor_name(std::string_view name)
 		{
-			return name.starts_with("KCD2MP_Remote_")
-			    || name.starts_with("KCD2MP_Dynamic_");
+			return name.starts_with("KCD2Online_Remote_")
+			    || name.starts_with("KCD2Online_Dynamic_");
 		}
 
 		bool same_inventory(
@@ -128,48 +130,7 @@ namespace kcd2mp::server
 				    : kind_name == "animal" ? protocol::NPC_KIND_ANIMAL
 				                              : protocol::NPC_KIND_UNSPECIFIED;
 				if (guid && is_valid_npc_kind(kind))
-				{
 					m_catalog.insert_or_assign(*guid, kind);
-					const auto position = npc.find("position");
-					if (position == npc.end() || !position->is_array()
-					    || position->size() != 3)
-						continue;
-
-					entry created;
-					created.state.set_npc_id(*guid);
-					created.state.set_generation(1);
-					created.state.set_authored_guid(*guid);
-					created.state.set_kind(kind);
-					created.state.set_dynamic(false);
-					created.state.set_entity_class(
-					    npc.value("entity_class", std::string{}));
-					created.state.set_entity_name(
-					    npc.value("name", std::string{}));
-					auto *transform = created.state.mutable_transform();
-					transform->mutable_position()->set_x((*position)[0].get<float>());
-					transform->mutable_position()->set_y((*position)[1].get<float>());
-					transform->mutable_position()->set_z((*position)[2].get<float>());
-					auto *rotation = transform->mutable_rotation();
-					rotation->set_w(1.0F);
-					if (const auto value = npc.find("rotation");
-					    value != npc.end() && value->is_array()
-					    && value->size() == 4)
-					{
-						rotation->set_x((*value)[0].get<float>());
-						rotation->set_y((*value)[1].get<float>());
-						rotation->set_z((*value)[2].get<float>());
-						rotation->set_w((*value)[3].get<float>());
-						(void)normalize_rotation(rotation);
-					}
-					transform->mutable_velocity();
-					auto *gameplay = created.state.mutable_gameplay();
-					gameplay->set_revision(1);
-					gameplay->set_health(100.0F);
-					gameplay->set_max_health(100.0F);
-					gameplay->set_behavior(protocol::NPC_BEHAVIOR_IDLE);
-					created.state.set_revision(1);
-					m_entries.emplace(*guid, std::move(created));
-				}
 			}
 			m_catalog_required = true;
 			break;
@@ -184,6 +145,7 @@ namespace kcd2mp::server
 	    bool animals_enabled,
 	    npc_time_point now)
 	{
+		(void)reporter;
 		for (const auto &observation : message.observations())
 		{
 			// Managed remote players and server-created dynamic NPCs must always
@@ -206,6 +168,12 @@ namespace kcd2mp::server
 			    && (m_catalog_required ? catalog_entry == m_catalog.end() : true);
 			if (!enabled(observation.kind(), humans_enabled, animals_enabled)
 			    || catalog_conflict || (!catalogued && !runtime_dynamic)
+			    // A runtime Entity GUID is local to one game process. Treating it as
+			    // a global identity makes two clients at the same location create
+			    // two canonical NPCs and then spawn each other's copy. Until KCD2Online
+			    // has a server-authored spawn provenance/binding protocol, only
+			    // catalog-backed authored NPCs are safe to replicate.
+			    || runtime_dynamic
 			    || (reporter_transform
 			        && distance_squared(*reporter_transform, observation.transform())
 			            > discovery_radius * discovery_radius))
@@ -214,47 +182,16 @@ namespace kcd2mp::server
 			std::uint64_t npc_id = observation.known_npc_id();
 			if (npc_id != 0 && !m_entries.contains(npc_id))
 				continue;
-			if (npc_id == 0 && runtime_dynamic)
-			{
-				const auto key = observation.authored_guid();
-				const auto mapped = m_dynamic_ids.find(key);
-				if (mapped != m_dynamic_ids.end())
-					npc_id = mapped->second;
-				else
-				{
-					while (m_next_dynamic_id == 0
-					    || m_entries.contains(m_next_dynamic_id))
-						++m_next_dynamic_id;
-					npc_id = m_next_dynamic_id++;
-					m_dynamic_ids.emplace(key, npc_id);
-				}
-			}
 			if (npc_id == 0)
 				npc_id = observation.authored_guid();
 
 			auto found = m_entries.find(npc_id);
 			if (found != m_entries.end())
 			{
-				// Conflicting runtime classifications never replace the catalog or
-				// first positively classified observation.
+				// A conflicting classification never replaces the first validated
+				// authored observation.
 				if (found->second.state.kind() != observation.kind())
 					continue;
-				// Catalog entries are created server-side before clients arrive.
-				// Their first trustworthy in-range observation replaces the static
-				// authored transform with the currently streamed schedule position.
-				if (!found->second.observed
-				    && found->second.state.authority_player_id() == 0)
-				{
-					*found->second.state.mutable_transform() =
-					    observation.transform();
-					if (observation.has_gameplay())
-						*found->second.state.mutable_gameplay() =
-						    observation.gameplay();
-					found->second.state.set_revision(
-					    found->second.state.revision() + 1);
-					found->second.last_update = now;
-					found->second.observed = true;
-				}
 				continue;
 			}
 
@@ -263,12 +200,7 @@ namespace kcd2mp::server
 			created.state.set_generation(1);
 			created.state.set_authored_guid(observation.authored_guid());
 			created.state.set_kind(observation.kind());
-			created.state.set_dynamic(runtime_dynamic);
-			if (runtime_dynamic)
-			{
-				created.state.set_entity_class(observation.entity_class());
-				created.state.set_entity_name(observation.entity_name());
-			}
+			created.state.set_dynamic(false);
 			*created.state.mutable_transform() = observation.transform();
 			if (observation.has_gameplay())
 				*created.state.mutable_gameplay() = observation.gameplay();
@@ -283,7 +215,6 @@ namespace kcd2mp::server
 			(void)normalize_rotation(created.state.mutable_transform()->mutable_rotation());
 			created.state.set_revision(1);
 			created.last_update = now;
-			created.observed = true;
 			m_entries.emplace(npc_id, std::move(created));
 		}
 	}
@@ -528,16 +459,6 @@ namespace kcd2mp::server
 	std::size_t npc_registry::size() const noexcept
 	{
 		return m_entries.size();
-	}
-
-	bool npc_registry::catalog_allows(
-	    std::uint64_t guid,
-	    protocol::NpcKind kind) const
-	{
-		if (!m_catalog_required)
-			return true;
-		const auto found = m_catalog.find(guid);
-		return found != m_catalog.end() && found->second == kind;
 	}
 
 	float npc_registry::distance_squared(

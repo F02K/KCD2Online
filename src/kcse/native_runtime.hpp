@@ -28,7 +28,7 @@ namespace wh::guimodule
 	struct S_EntityMapMark;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	struct local_activity_start
 	{
@@ -133,6 +133,7 @@ namespace kcd2mp::kcse
 		void fail_native_world_start(std::string error);
 		void restore_save_load();
 		void begin_native_unload(std::string_view reason);
+		void queue_native_unload_if_safe();
 		void finish_native_unload_if_complete();
 		void open_main_menu_if_pending();
 		[[nodiscard]] bool native_world_unloaded() const;
@@ -173,7 +174,11 @@ namespace kcd2mp::kcse
 		sandbox_poll_result m_sandbox_progress;
 		bool m_save_load_locked{};
 		bool m_unload_pending{};
+		bool m_unload_teardown_started{};
+		bool m_unload_command_queued{};
+		bool m_unload_deferred_logged{};
 		bool m_main_menu_pending{};
+		bool m_level_load_complete{};
 		bool m_probe_transform_verified{};
 		bool m_probe_complete{};
 		std::atomic<bool> m_probe_failed{};
@@ -185,7 +190,6 @@ namespace kcd2mp::kcse
 		std::string m_world_start_level_id;
 		std::string m_world_start_level_name;
 		bool m_world_start_requires_lifecycle{};
-		std::chrono::steady_clock::time_point m_world_start_deadline{};
 		std::optional<local_activity_start> m_pending_activity_start;
 		protocol::PlayerActivityKind m_native_activity_kind{
 		    protocol::PLAYER_ACTIVITY_KIND_NONE};

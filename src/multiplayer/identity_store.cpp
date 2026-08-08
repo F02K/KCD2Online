@@ -12,12 +12,12 @@
 #include <Windows.h>
 #include <dpapi.h>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	namespace
 	{
 		constexpr std::string_view entropy_text =
-		    "KCD2MP multiplayer identity store v1";
+		    "KCD2Online multiplayer identity store v1";
 
 		DATA_BLOB blob(std::span<const std::byte> bytes)
 		{
@@ -38,7 +38,7 @@ namespace kcd2mp
 			DATA_BLOB output{};
 			if (!CryptProtectData(
 			        &input,
-			        L"KCD2MP identity tokens",
+			        L"KCD2Online identity tokens",
 			        &entropy,
 			        nullptr,
 			        nullptr,
@@ -164,7 +164,7 @@ namespace kcd2mp
 		}
 		buffer.resize(length);
 		return std::filesystem::path(buffer)
-		    / "KCD2MP"
+		    / "KCD2Online"
 		    / "multiplayer-identities.bin";
 	}
 

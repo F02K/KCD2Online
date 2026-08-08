@@ -13,7 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace kcd2mp::npc
+namespace kcd2o::npc
 {
 	using owner_id = std::uint64_t;
 	using native_handle = std::uintptr_t;

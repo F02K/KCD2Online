@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	using token_hash = std::array<std::byte, 32>;
 

@@ -32,7 +32,7 @@ namespace
 		temporary_directory()
 		{
 			path = std::filesystem::temp_directory_path()
-			    / ("kcd2mp-identity-tests-"
+			    / ("kcd2o-identity-tests-"
 			        + std::to_string(GetCurrentProcessId()) + "-"
 			        + std::to_string(GetTickCount64()));
 			std::filesystem::create_directories(path);
@@ -67,7 +67,7 @@ int main()
 		    }
 		    std::_Exit(1);
 	    });
-	using kcd2mp::identity_store;
+	using kcd2o::identity_store;
 
 	temporary_directory directory;
 	const auto path = directory.path / "identities.bin";

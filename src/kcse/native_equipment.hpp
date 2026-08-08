@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	inline constexpr std::array<std::string_view, 8>
 	    native_weapon_equipment_slots{

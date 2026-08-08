@@ -9,7 +9,7 @@
 #include <cmath>
 #include <type_traits>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	namespace
 	{
@@ -148,6 +148,12 @@ namespace kcd2mp
 				return "ServerNpcAuthority";
 			case protocol::Envelope::kServerNpcSnapshot:
 				return "ServerNpcSnapshot";
+			case protocol::Envelope::kClientNpcUpdateBatch:
+				return "ClientNpcUpdateBatch";
+			case protocol::Envelope::kServerNpcMotion:
+				return "ServerNpcMotion";
+			case protocol::Envelope::kServerNpcGameplayUpdate:
+				return "ServerNpcGameplayUpdate";
 			case protocol::Envelope::PAYLOAD_NOT_SET: return "PayloadNotSet";
 			}
 			return "InvalidEnvelopePayload";
@@ -243,7 +249,7 @@ namespace kcd2mp
 	{
 		const auto trace_id =
 		    kcse::join_trace::begin_join(options.address);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.request.validating",
 		    std::format(
 		        "trace={} display_name_length={} content_hash_length={} "
@@ -255,7 +261,7 @@ namespace kcd2mp
 		if (!is_valid_display_name(options.display_name)
 		    || options.address.empty())
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.request.rejected",
 			    "invalid display name or empty server target");
 			kcse::join_trace::finish_join("request validation failed");
@@ -263,7 +269,7 @@ namespace kcd2mp
 		}
 		if (!m_runtime.can_start_join())
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.runtime-gate.rejected",
 			    "can_start_join=false");
 			std::scoped_lock lock(m_state_mutex);
@@ -276,7 +282,7 @@ namespace kcd2mp
 			std::scoped_lock lock(m_state_mutex);
 			if (m_status.state != client_state::disconnected)
 			{
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.request.rejected",
 				    std::format(
 				        "client_state={}",
@@ -286,7 +292,7 @@ namespace kcd2mp
 				return false;
 			}
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.prepare.begin",
 		    "calling client_runtime::prepare_multiplayer");
 		if (!m_runtime.prepare_multiplayer())
@@ -296,13 +302,13 @@ namespace kcd2mp
 			m_status.error = gate.diagnostic.empty()
 			    ? "Multiplayer runtime initialization could not start."
 			    : gate.diagnostic;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.runtime.prepare.failed",
 			    m_status.error);
 			kcse::join_trace::finish_join(m_status.error);
 			return false;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.prepare.accepted",
 		    "native capability probe requested");
 		{
@@ -327,6 +333,7 @@ namespace kcd2mp
 			m_deferred_world_items.clear();
 			m_npcs.clear();
 			m_npc_by_guid.clear();
+			m_npc_motion_revisions.clear();
 			m_human_npcs_disabled = false;
 			m_animal_npcs_disabled = false;
 			m_last_npc_sampled = {};
@@ -356,11 +363,11 @@ namespace kcd2mp
 			if (!transition_state_locked(client_state::runtime_preflight))
 				return false;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.state.initialized",
 		    "state=runtime-preflight; client caches cleared");
 		ensure_network_thread();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.network-thread.ready",
 		    "connect will be queued after native preflight");
 		return true;
@@ -368,7 +375,7 @@ namespace kcd2mp
 
 	void multiplayer_client::disconnect()
 	{
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.disconnect.requested",
 		    "client disconnect requested; deferring native capture to game thread");
 		{
@@ -392,7 +399,7 @@ namespace kcd2mp
 
 	void multiplayer_client::fail(std::string error)
 	{
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.client.fail",
 		    error);
 		{
@@ -544,7 +551,7 @@ namespace kcd2mp
 			{
 				m_remote_players.clear();
 				m_local_correction.reset();
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.runtime-epoch.expected",
 				    std::format(
 				        "session_id={} target_level={}",
@@ -574,6 +581,7 @@ namespace kcd2mp
 			m_deferred_world_items.clear();
 			m_npcs.clear();
 			m_npc_by_guid.clear();
+			m_npc_motion_revisions.clear();
 			m_environment_revision = 0;
 			m_weather_revision = 0;
 			m_sleep_revision = 0;
@@ -642,7 +650,7 @@ namespace kcd2mp
 		}
 		if (manual_disconnect)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.disconnect.game-thread.begin",
 			    std::format(
 			        "capture_profile={}",
@@ -653,7 +661,7 @@ namespace kcd2mp
 					queue_profile_snapshot(*profile, true);
 			}
 			queue_network(disconnect_command{});
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.disconnect.game-thread.complete",
 			    "final profile and transport close were queued in order");
 			return;
@@ -782,7 +790,7 @@ namespace kcd2mp
 		}
 
 		const auto gate = m_runtime.capability();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.preflight.poll",
 		    std::format(
 		        "available={} pending={} diagnostic=\"{}\"",
@@ -803,7 +811,7 @@ namespace kcd2mp
 				(void)transition_state_locked(
 				    client_state::disconnected,
 				    error);
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.runtime.preflight.failed",
 				    error);
 				kcse::join_trace::finish_join(error);
@@ -822,11 +830,11 @@ namespace kcd2mp
 			if (!transition_state_locked(client_state::connecting))
 				return;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.preflight.complete",
 		    std::format("target=\"{}\"", options->address));
 		queue_network(connect_command{std::move(*options)});
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.network.connect.queued",
 		    "connect command enqueued for network thread");
 	}
@@ -835,12 +843,12 @@ namespace kcd2mp
 	{
 		if (m_network_thread.joinable())
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.network-thread.reuse",
 			    "existing std::jthread is joinable");
 			return;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.network-thread.create",
 		    "starting std::jthread");
 		m_network_thread = std::jthread(
@@ -898,11 +906,11 @@ namespace kcd2mp
 		    kcse::join_trace::thread_role::network);
 		try
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.network-loop.enter",
 			    "GameNetworkingSockets runtime construction begins");
 			net::runtime runtime;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.network-loop.runtime-ready",
 			    "GameNetworkingSockets runtime constructed");
 			std::optional<net::client_transport> transport;
@@ -918,7 +926,7 @@ namespace kcd2mp
 			{
 				if (!transport || !transport->has_connection())
 				{
-					KCD2MP_JOIN_TRACE(
+					KCD2Online_JOIN_TRACE(
 					    "join.network.send.skipped",
 					    std::format(
 					        "message={} reason=no-active-connection",
@@ -929,7 +937,7 @@ namespace kcd2mp
 				const auto encoded = encode(envelope, delivery, &error);
 				if (!encoded)
 				{
-					KCD2MP_JOIN_TRACE(
+					KCD2Online_JOIN_TRACE(
 					    "join.network.encode.failed",
 					    std::format(
 					        "message={} error=\"{}\"",
@@ -937,7 +945,7 @@ namespace kcd2mp
 					        error));
 					return false;
 				}
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.network.send.begin",
 				    std::format(
 				        "message={} bytes={} reliability={}",
@@ -947,8 +955,12 @@ namespace kcd2mp
 				            ? "reliable"
 				            : "unreliable"));
 				const auto sent =
-				    transport->send(encoded->bytes, delivery, &error);
-				KCD2MP_JOIN_TRACE(
+				    transport->send(
+				        encoded->bytes,
+				        delivery,
+				        lane_for(envelope),
+				        &error);
+				KCD2Online_JOIN_TRACE(
 				    sent ? "join.network.send.ok"
 				         : "join.network.send.failed",
 				    std::format(
@@ -960,14 +972,14 @@ namespace kcd2mp
 
 			auto create_transport = [&]
 			{
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.transport.create.begin",
 				    "constructing client transport and callbacks");
 				transport.emplace(net::client_callbacks{
 				    .connected =
 				        [&]
 				        {
-					        KCD2MP_JOIN_TRACE(
+					        KCD2Online_JOIN_TRACE(
 					            "join.transport.connected",
 					            std::format(
 					                "target=\"{}\"; building ClientHello",
@@ -976,7 +988,7 @@ namespace kcd2mp
 						        return;
 					        protocol::Envelope envelope;
 					        auto *hello = envelope.mutable_client_hello();
-					        hello->set_version(kcd2mp_version);
+					        hello->set_version(kcd2o_version);
 					        hello->set_whgame_timestamp(supported_whgame_timestamp);
 					        hello->set_whgame_image_size(
 					            supported_whgame_image_size);
@@ -1000,13 +1012,13 @@ namespace kcd2mp
 					            runtime.address_library_entries);
 					        runtime_info->set_address_library_sha256(
 					            runtime.address_library_sha256);
-					        KCD2MP_JOIN_TRACE(
+					        KCD2Online_JOIN_TRACE(
 					            "join.handshake.client-hello.ready",
 					            std::format(
 					                "version={} game={} release={} "
 					                "epoch={} capabilities=0x{:X} addresslib=\"{}:{}\" "
 					                "format={} entries={} sha256={}",
-					                kcd2mp_version,
+					                kcd2o_version,
 					                runtime.game_version,
 					                runtime.release_index,
 					                runtime.epoch,
@@ -1026,7 +1038,7 @@ namespace kcd2mp
 				    .disconnected =
 				        [&](bool retry, std::string reason)
 				        {
-					        KCD2MP_JOIN_TRACE(
+					        KCD2Online_JOIN_TRACE(
 					            "join.transport.disconnected",
 					            std::format(
 					                "retry={} attempt={} reason=\"{}\"",
@@ -1059,14 +1071,14 @@ namespace kcd2mp
 				    .message =
 				        [&](std::span<const std::byte> bytes)
 				        {
-					        KCD2MP_JOIN_TRACE(
+					        KCD2Online_JOIN_TRACE(
 					            "join.network.receive.begin",
 					            std::format("bytes={}", bytes.size()));
 					        std::string error;
 					        const auto envelope = decode(bytes, &error);
 					        if (!envelope)
 					        {
-						        KCD2MP_JOIN_TRACE(
+						        KCD2Online_JOIN_TRACE(
 						            "join.network.decode.failed",
 						            error);
 						        set_state(
@@ -1079,7 +1091,7 @@ namespace kcd2mp
 						        }
 						        return;
 					        }
-					        KCD2MP_JOIN_TRACE(
+					        KCD2Online_JOIN_TRACE(
 					            "join.network.receive.decoded",
 					            std::format(
 					                "message={}",
@@ -1099,7 +1111,7 @@ namespace kcd2mp
 						            "server sent {} while client was {}",
 						            message_kind,
 						            state_name(receive_state));
-						        KCD2MP_JOIN_TRACE(
+						        KCD2Online_JOIN_TRACE(
 						            "join.protocol.phase-violation",
 						            violation);
 						        set_state(client_state::closing, violation);
@@ -1136,7 +1148,7 @@ namespace kcd2mp
 							                .profile_snapshot_interval_seconds();
 							        m_resume_token = accepted.resume_token();
 						        }
-						        KCD2MP_JOIN_TRACE(
+						        KCD2Online_JOIN_TRACE(
 						            "join.handshake.server-accepted",
 						            std::format(
 						                "player_id={} server=\"{}\" level=\"{}\" "
@@ -1165,7 +1177,7 @@ namespace kcd2mp
 								            "invalid runtime capability negotiation");
 							        return;
 						        }
-						        KCD2MP_JOIN_TRACE(
+						        KCD2Online_JOIN_TRACE(
 						            "join.handshake.server-challenge",
 						            std::format(
 						                "server_id=\"{}\" required=0x{:X} negotiated=0x{:X}",
@@ -1188,7 +1200,7 @@ namespace kcd2mp
 						        if (!options.claim_code.empty())
 						        {
 							        message->set_claim_code(options.claim_code);
-							        KCD2MP_JOIN_TRACE(
+							        KCD2Online_JOIN_TRACE(
 							            "join.handshake.auth.method",
 							            "claim-code");
 						        }
@@ -1196,14 +1208,14 @@ namespace kcd2mp
 						                     m_identities.token_for(server_id))
 						        {
 							        message->set_identity_token(*token);
-							        KCD2MP_JOIN_TRACE(
+							        KCD2Online_JOIN_TRACE(
 							            "join.handshake.auth.method",
 							            "stored-identity-token");
 						        }
 						        else
 						        {
 							        message->set_enroll(true);
-							        KCD2MP_JOIN_TRACE(
+							        KCD2Online_JOIN_TRACE(
 							            "join.handshake.auth.method",
 							            "enrollment");
 						        }
@@ -1224,7 +1236,7 @@ namespace kcd2mp
 					        {
 						        const auto &bootstrap =
 						            envelope->server_bootstrap();
-						        KCD2MP_JOIN_TRACE(
+						        KCD2Online_JOIN_TRACE(
 						            "join.handshake.server-bootstrap",
 						            std::format(
 						                "server_id=\"{}\" session_id=\"{}\" "
@@ -1266,7 +1278,7 @@ namespace kcd2mp
 					        }
 					        else if (envelope->has_server_rejected())
 					        {
-						        KCD2MP_JOIN_TRACE("join.handshake.server-rejected", envelope->server_rejected().message());
+						        KCD2Online_JOIN_TRACE("join.handshake.server-rejected", envelope->server_rejected().message());
 						        set_state(client_state::disconnected, envelope->server_rejected().message());
 						        if (transport)
 						        {
@@ -1276,7 +1288,7 @@ namespace kcd2mp
 					        else if (envelope->has_server_shutdown())
 					        {
 						        const auto reason = envelope->server_shutdown().reason();
-						        KCD2MP_JOIN_TRACE("join.server.shutdown", reason);
+						        KCD2Online_JOIN_TRACE("join.server.shutdown", reason);
 						        set_state(client_state::disconnected, reason);
 						        if (transport)
 						        {
@@ -1286,7 +1298,7 @@ namespace kcd2mp
 					        else if (envelope->has_world_snapshot() && !first_world_snapshot_seen)
 					        {
 						        first_world_snapshot_seen = true;
-						        KCD2MP_JOIN_TRACE("join.snapshot.first-received",
+						        KCD2Online_JOIN_TRACE("join.snapshot.first-received",
 						                          std::format("players={} server_time_ms={}",
 						                                      envelope->world_snapshot().players_size(),
 						                                      envelope->world_snapshot().server_time_ms()));
@@ -1311,10 +1323,12 @@ namespace kcd2mp
 						        return;
 					        }
 
-					        const bool reliable = !envelope->has_world_snapshot() && !envelope->has_server_npc_snapshot();
+					        const bool reliable = !envelope->has_world_snapshot()
+					            && !envelope->has_server_npc_snapshot()
+					            && !envelope->has_server_npc_motion();
 					        if (!m_game_commands.push(std::move(*envelope), reliable) && reliable)
 					        {
-						        KCD2MP_JOIN_TRACE("join.game-queue.push.failed", std::format("message={} reliable=true", message_kind));
+						        KCD2Online_JOIN_TRACE("join.game-queue.push.failed", std::format("message={} reliable=true", message_kind));
 						        set_state(client_state::disconnected, "game-thread queue overflow");
 						        if (transport)
 						        {
@@ -1324,7 +1338,7 @@ namespace kcd2mp
 					        }
 					        else
 					        {
-						        KCD2MP_JOIN_TRACE(
+						        KCD2Online_JOIN_TRACE(
 						            "join.game-queue.push.ok",
 						            std::format(
 						                "message={} reliable={}",
@@ -1332,7 +1346,7 @@ namespace kcd2mp
 						                reliable));
 					        }
 				        }});
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.transport.create.ok",
 				    "client transport callbacks installed");
 			};
@@ -1355,14 +1369,14 @@ namespace kcd2mp
 							    options = std::move(typed.options);
 							    reconnect_attempt = 0;
 							    first_world_snapshot_seen = false;
-							    KCD2MP_JOIN_TRACE(
+							    KCD2Online_JOIN_TRACE(
 							        "join.transport.connect.begin",
 							        std::format(
 							            "target=\"{}\"",
 							            options.address));
 							    create_transport();
 							    transport->connect(options.address);
-							    KCD2MP_JOIN_TRACE(
+							    KCD2Online_JOIN_TRACE(
 							        "join.transport.connect.started",
 							        std::format(
 							            "target=\"{}\"",
@@ -1471,10 +1485,10 @@ namespace kcd2mp
 							        reliability::reliable);
 						    }
 						    else if constexpr (
-						        std::is_same_v<type, npc_update_command>)
+						        std::is_same_v<type, npc_update_batch_command>)
 						    {
 							    protocol::Envelope envelope;
-							    *envelope.mutable_client_npc_update() =
+							    *envelope.mutable_client_npc_update_batch() =
 							        std::move(typed.message);
 							    (void)send_envelope(
 							        envelope,
@@ -1536,7 +1550,7 @@ namespace kcd2mp
 				    && reconnect_at != std::chrono::steady_clock::time_point{}
 				    && std::chrono::steady_clock::now() >= reconnect_at)
 				{
-					KCD2MP_JOIN_TRACE(
+					KCD2Online_JOIN_TRACE(
 					    "join.transport.reconnect.begin",
 					    std::format(
 					        "target=\"{}\" attempt={}",
@@ -1549,7 +1563,7 @@ namespace kcd2mp
 					}
 					create_transport();
 					transport->connect(options.address);
-					KCD2MP_JOIN_TRACE(
+					KCD2Online_JOIN_TRACE(
 					    "join.transport.reconnect.started",
 					    std::format(
 					        "target=\"{}\"",
@@ -1589,12 +1603,12 @@ namespace kcd2mp
 			}
 			if (transport)
 			{
-				transport->disconnect("KCD2MP client shutting down");
+				transport->disconnect("KCD2Online client shutting down");
 			}
 		}
 		catch (const std::exception &exception)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.network-loop.exception",
 			    std::format(
 			        "type=std::exception what=\"{}\"",
@@ -1603,7 +1617,7 @@ namespace kcd2mp
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.network-loop.exception",
 			    "type=unknown");
 			set_state(
@@ -1640,7 +1654,7 @@ namespace kcd2mp
 			    "invalid client state transition from {} to {}",
 			    state_name(previous),
 			    state_name(state));
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.state.transition-invalid",
 			    violation);
 			if (previous != client_state::closing
@@ -1686,6 +1700,7 @@ namespace kcd2mp
 			m_deferred_world_items.clear();
 			m_npcs.clear();
 			m_npc_by_guid.clear();
+			m_npc_motion_revisions.clear();
 			m_last_npc_sampled = {};
 			m_last_npc_discovery_sent = {};
 			m_environment_revision = 0;
@@ -1703,7 +1718,7 @@ namespace kcd2mp
 		m_chat_connected.store(
 		    state == client_state::connected,
 		    std::memory_order_release);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.state.transition",
 		    std::format(
 		        "from={} to={} error=\"{}\"",
@@ -1880,6 +1895,7 @@ namespace kcd2mp
 	{
 		protocol::ClientNpcDiscovery discovery;
 		std::vector<protocol::ClientNpcUpdate> updates;
+		std::vector<std::pair<protocol::NpcState, bool>> states_to_apply;
 		bool discovery_due{};
 		{
 			std::scoped_lock lock(m_state_mutex);
@@ -1914,7 +1930,12 @@ namespace kcd2mp
 				    || state->second.authority_player_id()
 				        != m_status.local_player_id
 				    || state->second.lease_id() == 0)
+				{
+					if (state != m_npcs.end())
+						states_to_apply.emplace_back(state->second, false);
 					continue;
+				}
+				states_to_apply.emplace_back(state->second, true);
 				protocol::ClientNpcUpdate update;
 				update.set_npc_id(state->second.npc_id());
 				update.set_generation(state->second.generation());
@@ -1938,22 +1959,45 @@ namespace kcd2mp
 				*chunk.add_observations() = discovery.observations(offset + index);
 			queue_network(npc_discovery_command{std::move(chunk)});
 		}
+		constexpr std::size_t npc_update_batch_budget = 48 * 1024;
+		protocol::ClientNpcUpdateBatch batch;
 		for (auto &update : updates)
-			queue_network(npc_update_command{std::move(update)});
+		{
+			const auto projected = batch.ByteSizeLong()
+			    + update.ByteSizeLong() + 16;
+			if (batch.updates_size() != 0
+			    && (batch.updates_size()
+			            >= static_cast<int>(max_npcs_per_message)
+			        || projected > npc_update_batch_budget))
+			{
+				queue_network(npc_update_batch_command{std::move(batch)});
+				batch.Clear();
+			}
+			*batch.add_updates() = std::move(update);
+		}
+		if (batch.updates_size() != 0)
+			queue_network(npc_update_batch_command{std::move(batch)});
+
+		// Enter can arrive before KCD2 streams the authored Entity. Retrying the
+		// latest canonical state when that local GUID is observed binds the native
+		// Actor without asking the server to resend full snapshots or spawning a
+		// second Actor.
+		for (const auto &[state, authority] : states_to_apply)
+			(void)m_runtime.apply_npc_state(state, authority);
 	}
 
 	void multiplayer_client::handle_game_envelope(
 	    const protocol::Envelope &envelope,
 	    std::chrono::steady_clock::time_point now)
 	{
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.game-envelope.begin",
 		    std::format("message={}", envelope_name(envelope)));
 		std::unique_lock lock(m_state_mutex);
 		if (m_status.state == client_state::disconnected
 		    || m_status.state == client_state::closing)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.game-envelope.discarded",
 			    std::format(
 			        "message={} state={}",
@@ -1978,7 +2022,7 @@ namespace kcd2mp
 			{
 				accept_snapshot_player(player, now);
 			}
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.game-envelope.server-accepted.applied",
 			    std::format(
 			        "players={}",
@@ -2000,7 +2044,7 @@ namespace kcd2mp
 		else if (envelope.has_server_bootstrap())
 		{
 			const auto &bootstrap = envelope.server_bootstrap();
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.bootstrap.begin",
 			    std::format(
 			        "session_id=\"{}\" level=\"{}\" mode={} profile={} "
@@ -2045,7 +2089,7 @@ namespace kcd2mp
 			const auto bootstrap_copy = bootstrap;
 			lock.unlock();
 			const auto result = m_runtime.begin_sandbox(bootstrap_copy);
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    result.started
 			        ? "join.sandbox.bootstrap.started"
 			        : "join.sandbox.bootstrap.failed",
@@ -2082,6 +2126,7 @@ namespace kcd2mp
 			m_deferred_world_items.clear();
 			m_npcs.clear();
 			m_npc_by_guid.clear();
+			m_npc_motion_revisions.clear();
 			for (const auto &object : bootstrap.world_objects())
 				m_world_objects.emplace(object.entity_guid(), object);
 			for (const auto &item : bootstrap.world_items())
@@ -2132,7 +2177,7 @@ namespace kcd2mp
 				    m_weather_revision,
 				    state.weather_revision());
 			}
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.snapshot.apply.begin",
 			    std::format(
 			        "players={} server_time_ms={}",
@@ -2142,7 +2187,7 @@ namespace kcd2mp
 			{
 				accept_snapshot_player(player, now);
 			}
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.snapshot.apply.complete",
 			    std::format(
 			        "tracked_remote_players={}",
@@ -2662,6 +2707,8 @@ namespace kcd2mp
 				return;
 			m_npcs.insert_or_assign(state.npc_id(), state);
 			m_npc_by_guid.insert_or_assign(state.authored_guid(), state.npc_id());
+			m_npc_motion_revisions.insert_or_assign(
+			    state.npc_id(), state.revision());
 			const bool authority =
 			    state.authority_player_id() == m_status.local_player_id;
 			lock.unlock();
@@ -2678,6 +2725,7 @@ namespace kcd2mp
 			    || current->second.generation() != message.generation())
 				return;
 			m_npc_by_guid.erase(current->second.authored_guid());
+			m_npc_motion_revisions.erase(message.npc_id());
 			m_npcs.erase(current);
 			lock.unlock();
 			m_runtime.remove_npc_state(
@@ -2719,6 +2767,8 @@ namespace kcd2mp
 					*merged.mutable_gameplay()->mutable_inventory() =
 					    current->second.gameplay().inventory();
 				m_npcs.insert_or_assign(merged.npc_id(), merged);
+				m_npc_motion_revisions.insert_or_assign(
+				    merged.npc_id(), merged.revision());
 				m_npc_by_guid.insert_or_assign(
 				    merged.authored_guid(), merged.npc_id());
 				const bool authority =
@@ -2727,6 +2777,57 @@ namespace kcd2mp
 				(void)m_runtime.apply_npc_state(merged, authority);
 				lock.lock();
 			}
+		}
+		else if (envelope.has_server_npc_motion())
+		{
+			for (const auto &motion : envelope.server_npc_motion().npcs())
+			{
+				const auto current = m_npcs.find(motion.npc_id());
+				if (current == m_npcs.end()
+				    || current->second.generation() != motion.generation())
+					continue;
+				auto &motion_revision = m_npc_motion_revisions[motion.npc_id()];
+				if (motion.revision() <= motion_revision)
+					continue;
+
+				*current->second.mutable_transform() = motion.transform();
+				current->second.set_revision(std::max(
+				    current->second.revision(), motion.revision()));
+				motion_revision = motion.revision();
+				const auto state = current->second;
+				const bool authority =
+				    state.authority_player_id() == m_status.local_player_id;
+				lock.unlock();
+				(void)m_runtime.apply_npc_state(state, authority);
+				lock.lock();
+			}
+		}
+		else if (envelope.has_server_npc_gameplay_update())
+		{
+			const auto &message = envelope.server_npc_gameplay_update();
+			const auto current = m_npcs.find(message.npc_id());
+			if (current == m_npcs.end()
+			    || current->second.generation() != message.generation()
+			    || (current->second.has_gameplay()
+			        && message.gameplay().revision()
+			            <= current->second.gameplay().revision()))
+				return;
+
+			auto gameplay = message.gameplay();
+			if (!gameplay.has_inventory()
+			    && current->second.has_gameplay()
+			    && current->second.gameplay().has_inventory())
+				*gameplay.mutable_inventory() =
+				    current->second.gameplay().inventory();
+			*current->second.mutable_gameplay() = std::move(gameplay);
+			current->second.set_revision(std::max(
+			    current->second.revision(), message.state_revision()));
+			const auto state = current->second;
+			const bool authority =
+			    state.authority_player_id() == m_status.local_player_id;
+			lock.unlock();
+			(void)m_runtime.apply_npc_state(state, authority);
+			lock.lock();
 		}
 		else if (envelope.has_server_entity_control())
 		{
@@ -2757,6 +2858,7 @@ namespace kcd2mp
 				removed.emplace_back(
 				    iterator->second.npc_id(), iterator->second.generation());
 				m_npc_by_guid.erase(iterator->second.authored_guid());
+				m_npc_motion_revisions.erase(iterator->second.npc_id());
 				iterator = m_npcs.erase(iterator);
 			}
 			std::vector<protocol::NpcState> remaining;

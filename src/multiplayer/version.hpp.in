@@ -3,13 +3,13 @@
 #include <cstdint>
 #include <string_view>
 
-namespace kcd2mp
+namespace kcd2o
 {
-	inline constexpr std::string_view kcd2mp_version = "@PROJECT_VERSION@";
-	inline constexpr std::uint32_t kcd2mp_version_major =
+	inline constexpr std::string_view kcd2o_version = "@PROJECT_VERSION@";
+	inline constexpr std::uint32_t kcd2o_version_major =
 	    @PROJECT_VERSION_MAJOR@U;
-	inline constexpr std::uint32_t kcd2mp_version_minor =
+	inline constexpr std::uint32_t kcd2o_version_minor =
 	    @PROJECT_VERSION_MINOR@U;
-	inline constexpr std::uint32_t kcd2mp_version_patch =
+	inline constexpr std::uint32_t kcd2o_version_patch =
 	    @PROJECT_VERSION_PATCH@U;
 }

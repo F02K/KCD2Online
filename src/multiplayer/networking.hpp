@@ -4,11 +4,12 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 
-namespace kcd2mp::net
+namespace kcd2o::net
 {
 	constexpr int client_goodbye_reason = 1001;
 	constexpr int server_rejected_reason = 1002;
@@ -48,7 +49,12 @@ namespace kcd2mp::net
 		    connection_id connection,
 		    std::span<const std::byte> bytes,
 		    reliability delivery,
-		    std::string *error = nullptr);
+		    traffic_lane lane,
+		    std::string *error = nullptr,
+		    bool *congested = nullptr);
+		[[nodiscard]] std::optional<std::size_t> pending_send_bytes(
+		    connection_id connection,
+		    traffic_lane lane) const;
 		void close(
 		    connection_id connection,
 		    int reason,
@@ -82,6 +88,7 @@ namespace kcd2mp::net
 		[[nodiscard]] bool send(
 		    std::span<const std::byte> bytes,
 		    reliability delivery,
+		    traffic_lane lane,
 		    std::string *error = nullptr);
 		void disconnect(std::string_view message = "client disconnected");
 		void abort_connection(std::string_view message);

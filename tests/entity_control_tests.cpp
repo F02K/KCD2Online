@@ -14,27 +14,27 @@ namespace
 		bool eligible{true};
 	};
 
-	class fake_backend final : public kcd2mp::entity_control_backend
+	class fake_backend final : public kcd2o::entity_control_backend
 	{
 	public:
 		bool should_disable(
-		    kcd2mp::controlled_entity entity) const override
+		    kcd2o::controlled_entity entity) const override
 		{
 			return static_cast<fake_entity *>(entity)->eligible;
 		}
 
-		bool is_active(kcd2mp::controlled_entity entity) const override
+		bool is_active(kcd2o::controlled_entity entity) const override
 		{
 			return static_cast<fake_entity *>(entity)->active;
 		}
 
-		bool is_hidden(kcd2mp::controlled_entity entity) const override
+		bool is_hidden(kcd2o::controlled_entity entity) const override
 		{
 			return static_cast<fake_entity *>(entity)->hidden;
 		}
 
 		bool set_active(
-		    kcd2mp::controlled_entity entity,
+		    kcd2o::controlled_entity entity,
 		    bool active) override
 		{
 			auto &value = *static_cast<fake_entity *>(entity);
@@ -47,7 +47,7 @@ namespace
 		}
 
 		bool set_hidden(
-		    kcd2mp::controlled_entity entity,
+		    kcd2o::controlled_entity entity,
 		    bool hidden) override
 		{
 			auto &value = *static_cast<fake_entity *>(entity);
@@ -63,7 +63,7 @@ namespace
 
 int main()
 {
-	using namespace kcd2mp;
+	using namespace kcd2o;
 	fake_backend backend;
 	entity_controller controller(backend);
 	fake_entity local_player{true, false};

@@ -1,7 +1,7 @@
 [server]
 bind_address = "0.0.0.0"
 port = 27020
-name = "KCD2MP Server"
+name = "KCD2Online Server"
 password = ""
 max_players = 8
 # 2 = trosecko, 3 = kutnohorsko, 4 = klaster
@@ -24,11 +24,10 @@ world_directory = "world"
 starter_profile = "starter_profile.toml"
 
 [property]
-# Optional KCD2 installation directory. On the first start of a world the
-# server scans Data/Levels/<configured level>/level.pak and writes a reusable
-# property_catalog.pb. Leave empty on a dedicated host and copy that generated
-# file into its world_directory instead.
-game_root = ""
+# Directory produced by KCD2OnlineGameDataGenerator.exe. On the first start of a
+# world, the server imports property_catalog_<level_id>.pb and keeps a copy in
+# world_directory. Relative paths are resolved next to this configuration file.
+game_data = "game_data"
 
 [environment]
 # Server-authoritative normal day cycle. The default ratio is 15 game seconds

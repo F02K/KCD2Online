@@ -14,7 +14,7 @@ MINIMUM_PYTHON = (3, 9)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VENV_DIR = PROJECT_ROOT / ".venv-build"
 REQUIREMENTS = Path(__file__).with_name("requirements.txt")
-MARKER = VENV_DIR / ".kcd2mp-requirements.json"
+MARKER = VENV_DIR / ".kcd2o-requirements.json"
 
 
 def venv_python() -> Path:

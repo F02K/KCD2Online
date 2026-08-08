@@ -390,8 +390,8 @@ namespace big
 
 	static void __fastcall hook_C_SkipTimeCutscene_Play(void *cutscene)
 	{
-		const auto status = kcd2mp::kcse::ui_client().status();
-		if (status.state == kcd2mp::client_state::connected)
+		const auto status = kcd2o::kcse::ui_client().status();
+		if (status.state == kcd2o::client_state::connected)
 		{
 			LOG(INFO) << "Blocked vanilla skip time while multiplayer is connected.";
 			return;
@@ -402,8 +402,8 @@ namespace big
 
 	static char __fastcall hook_C_FastTravel_StartTravel(void *fast_travel)
 	{
-		if (kcd2mp::kcse::ui_client().status().state
-		    == kcd2mp::client_state::connected)
+		if (kcd2o::kcse::ui_client().status().state
+		    == kcd2o::client_state::connected)
 			return 0;
 		return big::g_hooking
 		    ->get_original<hook_C_FastTravel_StartTravel>()(fast_travel);
@@ -2580,7 +2580,7 @@ namespace big
 		}
 
 		{
-			g_hook_log_write_enabled = big::config::general().bind("Logging", "Output Vanilla Game Log", false, "Output to the KCD2MP log the vanilla game log kcd.log");
+			g_hook_log_write_enabled = big::config::general().bind("Logging", "Output Vanilla Game Log", false, "Output to the KCD2Online log the vanilla game log kcd.log");
 
 			const auto ptr = kcd2_address::resolved("CLog_LogV");
 			if (!ptr)

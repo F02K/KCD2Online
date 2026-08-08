@@ -11,7 +11,7 @@
 
 namespace
 {
-	class fake_backend final : public kcd2mp::remote_avatar_backend
+	class fake_backend final : public kcd2o::remote_avatar_backend
 	{
 	public:
 		bool available() const override
@@ -24,16 +24,16 @@ namespace
 			return "avatar backend unavailable";
 		}
 
-		std::optional<kcd2mp::remote_avatar_handle> spawn(
-		    const kcd2mp::remote_avatar_snapshot &player) override
+		std::optional<kcd2o::remote_avatar_handle> spawn(
+		    const kcd2o::remote_avatar_snapshot &player) override
 		{
 			++spawn_attempts;
 			if ((!desired_spawns_succeed
 			        && player.avatar.archetype_id()
-			            != kcd2mp::npc::default_soul_id)
+			            != kcd2o::npc::default_soul_id)
 			    || (!fallback_spawns_succeed
 			        && player.avatar.archetype_id()
-			            == kcd2mp::npc::default_soul_id))
+			            == kcd2o::npc::default_soul_id))
 			{
 				return std::nullopt;
 			}
@@ -43,24 +43,24 @@ namespace
 			return handle;
 		}
 
-		kcd2mp::remote_avatar_backend_status status(
-		    kcd2mp::remote_avatar_handle avatar) const override
+		kcd2o::remote_avatar_backend_status status(
+		    kcd2o::remote_avatar_handle avatar) const override
 		{
 			const auto found = states.find(avatar);
 			return found == states.end()
-			    ? kcd2mp::remote_avatar_backend_status{
-			          kcd2mp::remote_avatar_state::failed,
+			    ? kcd2o::remote_avatar_backend_status{
+			          kcd2o::remote_avatar_state::failed,
 			          "avatar is missing"}
-			    : kcd2mp::remote_avatar_backend_status{
+			    : kcd2o::remote_avatar_backend_status{
 			          found->second,
-			          found->second == kcd2mp::remote_avatar_state::failed
+			          found->second == kcd2o::remote_avatar_state::failed
 			              ? "injected failure"
 			              : ""};
 		}
 
 		bool update(
-		    kcd2mp::remote_avatar_handle avatar,
-		    const kcd2mp::remote_avatar_snapshot &player,
+		    kcd2o::remote_avatar_handle avatar,
+		    const kcd2o::remote_avatar_snapshot &player,
 		    bool appearance_changed) override
 		{
 			players[avatar] = player;
@@ -69,7 +69,7 @@ namespace
 			return updates_succeed;
 		}
 
-		void remove(kcd2mp::remote_avatar_handle avatar) override
+		void remove(kcd2o::remote_avatar_handle avatar) override
 		{
 			players.erase(avatar);
 			states.erase(avatar);
@@ -80,28 +80,28 @@ namespace
 		bool desired_spawns_succeed{true};
 		bool fallback_spawns_succeed{true};
 		bool updates_succeed{true};
-		kcd2mp::remote_avatar_state spawned_state{
-		    kcd2mp::remote_avatar_state::ready};
-		kcd2mp::remote_avatar_handle next_handle{1};
+		kcd2o::remote_avatar_state spawned_state{
+		    kcd2o::remote_avatar_state::ready};
+		kcd2o::remote_avatar_handle next_handle{1};
 		std::size_t removed{};
 		std::size_t spawn_attempts{};
 		std::size_t appearance_updates{};
 		std::unordered_map<
-		    kcd2mp::remote_avatar_handle,
-		    kcd2mp::remote_avatar_snapshot>
+		    kcd2o::remote_avatar_handle,
+		    kcd2o::remote_avatar_snapshot>
 		    players;
 		std::unordered_map<
-		    kcd2mp::remote_avatar_handle,
-		    kcd2mp::remote_avatar_state>
+		    kcd2o::remote_avatar_handle,
+		    kcd2o::remote_avatar_state>
 		    states;
 	};
 
-	kcd2mp::remote_avatar_snapshot player(
-	    kcd2mp::player_id id,
+	kcd2o::remote_avatar_snapshot player(
+	    kcd2o::player_id id,
 	    float x,
-	    kcd2mp::protocol::MovementMode mode)
+	    kcd2o::protocol::MovementMode mode)
 	{
-		kcd2mp::remote_avatar_snapshot result;
+		kcd2o::remote_avatar_snapshot result;
 		result.id = id;
 		result.display_name = "Remote";
 		result.connected = true;
@@ -120,7 +120,7 @@ namespace
 
 int main()
 {
-	using namespace kcd2mp;
+	using namespace kcd2o;
 	using namespace std::chrono_literals;
 	assert(is_valid_remote_avatar_transition(
 	    remote_avatar_state::pending,

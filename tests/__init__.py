@@ -1,1 +1,1 @@
-"""KCD2MP tests."""
+"""KCD2Online tests."""

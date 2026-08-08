@@ -4,7 +4,7 @@
 
 int main()
 {
-	using namespace kcd2mp;
+	using namespace kcd2o;
 	protocol::AvatarDescriptor authoritative;
 	authoritative.set_archetype_id("763db0bb-4469-497d-bdc9-712b3df91b5a");
 	authoritative.set_revision(7);

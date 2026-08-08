@@ -155,7 +155,7 @@ int wmain(int argc, wchar_t **argv)
 	}
 	if (input.empty())
 	{
-		std::cerr << "Usage: KCD2MPSignatureAudit <WHGame.dll> [--json]\n";
+		std::cerr << "Usage: KCD2OnlineSignatureAudit <WHGame.dll> [--json]\n";
 		return 2;
 	}
 

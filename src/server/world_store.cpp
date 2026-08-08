@@ -21,7 +21,7 @@
 #include <Windows.h>
 #include <bcrypt.h>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	namespace
 	{

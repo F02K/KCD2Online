@@ -67,7 +67,7 @@ def render(project_root: Path) -> str:
 #include <cstdint>
 #include <string_view>
 
-namespace kcd2mp
+namespace kcd2o
 {{
     struct address_library_identity
     {{

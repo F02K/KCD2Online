@@ -6,7 +6,7 @@
 #include <ranges>
 #include <unordered_set>
 
-namespace kcd2mp::property
+namespace kcd2o::property
 {
 	namespace
 	{

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	enum class client_state : std::uint32_t
 	{

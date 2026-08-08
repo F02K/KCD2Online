@@ -1,3 +1,4 @@
+#include "property/catalog.hpp"
 #include "server/server_core.hpp"
 
 #include <Windows.h>
@@ -27,8 +28,8 @@
 namespace
 {
 	using namespace std::chrono_literals;
-	using namespace kcd2mp;
-	using namespace kcd2mp::server;
+	using namespace kcd2o;
+	using namespace kcd2o::server;
 
 	struct temporary_world
 	{
@@ -36,7 +37,7 @@ namespace
 		{
 			static std::uint32_t next_id{};
 			path = std::filesystem::temp_directory_path()
-			    / ("kcd2mp-server-tests-"
+			    / ("kcd2o-server-tests-"
 			        + std::to_string(GetCurrentProcessId()) + "-"
 			        + std::to_string(GetTickCount64()) + "-"
 			        + std::to_string(++next_id));
@@ -73,7 +74,7 @@ namespace
 	{
 		protocol::Envelope envelope;
 		auto *message = envelope.mutable_client_hello();
-		message->set_version(kcd2mp_version);
+		message->set_version(kcd2o_version);
 		message->set_whgame_timestamp(supported_whgame_timestamp);
 		message->set_whgame_image_size(supported_whgame_image_size);
 		message->set_display_name(std::move(name));
@@ -232,6 +233,25 @@ namespace
 			});
 	}
 
+	bool has_system_chat(
+	    const std::vector<outbound_message> &messages,
+	    connection_id connection,
+	    std::string_view text)
+	{
+		return std::ranges::any_of(
+		    messages,
+		    [&](const outbound_message &message)
+		    {
+			    return message.connection == connection
+			        && message.delivery == reliability::reliable
+			        && message.envelope.has_chat_broadcast()
+			        && message.envelope.chat_broadcast().player_id() == 0
+			        && message.envelope.chat_broadcast().display_name()
+			            == "Server"
+			        && message.envelope.chat_broadcast().text() == text;
+		    });
+	}
+
 	std::string connect_new_player(
 	    server_core &core,
 	    connection_id connection,
@@ -240,6 +260,7 @@ namespace
 	    protocol::PlayerProfile *enrolled_profile = nullptr,
 	    std::string name = "Henry")
 	{
+		const auto expected_name = name;
 		core.on_transport_connected(connection, now);
 		core.on_message(connection, hello(std::move(name)), now);
 		auto outbound = core.take_outbound();
@@ -265,6 +286,23 @@ namespace
 		    connection,
 		    core.human_npcs_disabled(),
 		    core.animal_npcs_disabled()));
+		const auto other_players = core.players().size() - 1;
+		assert(std::ranges::count_if(
+		    outbound,
+		    [&](const outbound_message &message)
+		    {
+			    return message.connection != connection
+			        && message.envelope.has_chat_broadcast()
+			        && message.envelope.chat_broadcast().player_id() == 0
+			        && message.envelope.chat_broadcast().display_name()
+			            == "Server"
+			        && message.envelope.chat_broadcast().text()
+			            == expected_name + " joined the server.";
+		    }) == other_players);
+		assert(!has_system_chat(
+		    outbound,
+		    connection,
+		    expected_name + " joined the server."));
 		return token;
 	}
 }
@@ -288,15 +326,15 @@ int main()
 		    }
 		    std::_Exit(1);
 	    });
-	using namespace kcd2mp;
-	using namespace kcd2mp::server;
+	using namespace kcd2o;
+	using namespace kcd2o::server;
 	const auto start = clock::now();
 
 	temporary_world parsed_config_world;
 	{
 		const auto path = parsed_config_world.path / "server.toml";
 		std::filesystem::copy_file(
-		    std::filesystem::path(KCD2MP_SOURCE_DIR) / "starter_profile.toml",
+		    std::filesystem::path(KCD2Online_SOURCE_DIR) / "starter_profile.toml",
 		    parsed_config_world.path / "starter_profile.toml");
 		std::ofstream output(path);
 		output
@@ -304,6 +342,8 @@ int main()
 		       "level_id = \"sandbox\"\n"
 		       "world_directory = \"world\"\n"
 		       "disable_non_player_entities = true\n"
+		       "[property]\n"
+		       "game_data = \"generated-game-data\"\n"
 		       "[environment]\n"
 		       "initial_time_of_day_hours = 21.5\n"
 		       "time_scale = 30.0\n"
@@ -317,12 +357,50 @@ int main()
 		assert(parsed.disable_animal_npcs);
 		assert(parsed.world_directory
 		    == parsed_config_world.path / "world");
+		assert(parsed.property_game_data
+		    == parsed_config_world.path / "generated-game-data");
 		assert(parsed.initial_time_of_day_hours == 21.5);
 		assert(parsed.time_scale == 30.0F);
 		assert(parsed.weather_id == 8);
 		assert(parsed.weather_transition_seconds == 12);
 		assert(parsed.sleeping_players_required == 3);
 		assert(parsed.sleep_wake_hour == 7.25);
+	}
+
+	temporary_world generated_property_world;
+	{
+		const auto game_data = generated_property_world.path / "game_data";
+		std::filesystem::create_directories(game_data);
+		protocol::PropertyCatalog generated;
+		generated.set_schema(property::catalog_schema);
+		generated.set_level_id("sandbox");
+		generated.set_content_fingerprint("generated-fixture");
+		auto *definition = generated.add_properties();
+		definition->set_property_id("sandbox:fixture");
+		definition->set_level_id("sandbox");
+		definition->set_anchor_guid("00000001-0000-0000");
+		definition->set_inferred_name("Generated fixture");
+		definition->set_source_path("fixture/generated_home");
+		definition->set_discovery_confidence(1.0F);
+		definition->set_marker_entity_guid(1);
+		definition->mutable_marker_position()->set_x(1.0F);
+		definition->mutable_marker_position()->set_y(2.0F);
+		definition->mutable_marker_position()->set_z(3.0F);
+		{
+			std::ofstream output(
+			    game_data / "property_catalog_sandbox.pb",
+			    std::ios::binary | std::ios::trunc);
+			assert(output && generated.SerializeToOstream(&output));
+		}
+
+		auto config = config_for(generated_property_world.path / "world");
+		config.property_game_data = game_data;
+		server_core core(config);
+		assert(core.property_catalog().properties_size() == 1);
+		assert(core.property_catalog().properties(0).property_id()
+		    == "sandbox:fixture");
+		assert(std::filesystem::is_regular_file(
+		    config.world_directory / "property_catalog.pb"));
 	}
 
 	temporary_world environment_world;
@@ -426,6 +504,14 @@ int main()
 			        && message.envelope.server_sleep_state().required_players() == 2
 			        && message.envelope.server_sleep_state().time_skipped();
 		    }) == 2);
+		assert(has_system_chat(
+		    outbound,
+		    94,
+		    "Time advanced because enough players went to sleep."));
+		assert(has_system_chat(
+		    outbound,
+		    95,
+		    "Time advanced because enough players went to sleep."));
 
 		protocol::Envelope respawn;
 		respawn.mutable_client_respawn_request();
@@ -435,7 +521,9 @@ int main()
 		protocol::Envelope death;
 		death.mutable_client_death();
 		core.on_message(94, death, start + 23ms);
-		assert(core.take_outbound().empty());
+		outbound = core.take_outbound();
+		assert(has_system_chat(outbound, 94, "Henry died."));
+		assert(has_system_chat(outbound, 95, "Henry died."));
 		core.on_message(94, respawn, start + 24ms);
 		outbound = core.take_outbound();
 		assert(std::ranges::count_if(
@@ -451,9 +539,95 @@ int main()
 			        && message.envelope.server_respawn().spawn().position().z()
 			            == 30.0F;
 		    }) == 1);
+		assert(has_system_chat(outbound, 94, "Henry respawned."));
+		assert(has_system_chat(outbound, 95, "Henry respawned."));
 		core.on_message(94, respawn, start + 25ms);
 		assert(core.take_outbound().empty());
 	}
+
+	temporary_world lifecycle_chat_world;
+	{
+		server_core core(config_for(lifecycle_chat_world.path));
+		(void)connect_new_player(core, 96, start, 1, nullptr, "Henry");
+		const auto hans_token =
+		    connect_new_player(core, 97, start + 10ms, 2, nullptr, "Hans");
+
+		core.on_transport_disconnected(
+		    97,
+		    true,
+		    "connection interrupted",
+		    start + 20ms);
+		auto outbound = core.take_outbound();
+		assert(has_system_chat(
+		    outbound,
+		    96,
+		    "Hans lost connection; waiting for reconnection."));
+		assert(std::ranges::none_of(
+		    outbound,
+		    [](const outbound_message &message)
+		    { return message.envelope.has_player_left(); }));
+
+		core.on_transport_connected(98, start + 21ms);
+		core.on_message(98, hello("Hans"), start + 21ms);
+		(void)core.take_outbound();
+		core.on_message(
+		    98,
+		    authenticate(hans_token),
+		    start + 22ms);
+		const auto bootstrap = find_bootstrap(core.take_outbound(), 98);
+		core.on_message(98, ready(bootstrap), start + 23ms);
+		outbound = core.take_outbound();
+		assert(has_accepted(outbound, 98, 2));
+		assert(has_system_chat(outbound, 96, "Hans reconnected."));
+		assert(!has_system_chat(outbound, 98, "Hans reconnected."));
+
+		core.on_transport_disconnected(
+		    98,
+		    false,
+		    "client disconnected",
+		    start + 24ms);
+		outbound = core.take_outbound();
+		assert(has_system_chat(outbound, 96, "Hans left the server."));
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &message)
+		    {
+			    return message.connection == 96
+			        && message.envelope.has_player_left()
+			        && message.envelope.player_left().player_id() == 2;
+		    }));
+
+		(void)connect_new_player(
+		    core,
+		    99,
+		    start + 25ms,
+		    3,
+		    nullptr,
+		    "Bob");
+		core.kick(3, "server rule", start + 30ms);
+		outbound = core.take_outbound();
+		assert(has_system_chat(
+		    outbound,
+		    96,
+		    "Bob was kicked from the server."));
+
+		core.shutdown("maintenance");
+		outbound = core.take_outbound();
+		assert(has_system_chat(
+		    outbound,
+		    96,
+		    "Server is shutting down."));
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &message)
+		    {
+			    return message.connection == 96
+			        && message.envelope.has_server_shutdown()
+			        && message.envelope.server_shutdown().reason()
+			            == "maintenance";
+		    }));
+	}
+
 	{
 		const auto path = parsed_config_world.path / "split-server.toml";
 		std::ofstream output(path);
@@ -1591,10 +1765,25 @@ int main()
 		    == protocol::BOOTSTRAP_MODE_INITIALIZE);
 
 		core.tick(start + 31s);
-		const auto outbound = core.take_outbound();
-		assert(has_rejection(
-		    outbound,
+		assert(core.take_outbound().empty());
+		assert(core.pending_connection_count() == 1);
+
+		core.tick(start + 30min);
+		assert(core.take_outbound().empty());
+		assert(core.pending_connection_count() == 1);
+
+		core.on_transport_disconnected(
 		    41,
+		    false,
+		    "loader disconnected",
+		    start + 30min + 1ms);
+		assert(core.pending_connection_count() == 0);
+
+		core.on_transport_connected(42, start + 30min + 2ms);
+		core.tick(start + 30min + 12s);
+		assert(has_rejection(
+		    core.take_outbound(),
+		    42,
 		    protocol::REJECT_REASON_BOOTSTRAP_FAILED));
 	}
 

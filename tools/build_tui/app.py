@@ -1,4 +1,4 @@
-"""Textual user interface for building and deploying KCD2MP."""
+"""Textual user interface for building and deploying KCD2Online."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ LocationResolver = Callable[[], Optional[GameLocation]]
 
 
 class BuildApp(App[None]):
-    TITLE = "KCD2MP Build Tool"
+    TITLE = "KCD2Online Build Tool"
     SUB_TITLE = "Build and deploy without leaving the terminal"
 
     CSS = """
@@ -272,7 +272,7 @@ class BuildApp(App[None]):
         log.clear()
         log.border_title = "{} build output".format(profile.label)
         log.write(
-            "=== KCD2MP {} build started{} ===".format(
+            "=== KCD2Online {} build started{} ===".format(
                 profile.label, " (deploy requested)" if deploy else ""
             )
         )
@@ -297,7 +297,7 @@ class BuildApp(App[None]):
         log = self.query_one("#log", RichLog)
         log.clear()
         log.border_title = "Signature audit output"
-        log.write("=== KCD2MP signature audit started ===")
+        log.write("=== KCD2Online signature audit started ===")
         self._set_busy(True)
         self._set_status("Auditing installed WHGame.dll... Live output is shown below.")
         self._execute_audit(profile, game_root)
@@ -374,7 +374,7 @@ class BuildApp(App[None]):
                 assert game_root is not None
                 destination = deploy_artifacts(result, game_root)
                 write_log(
-                    "Deployed d3d12, dinput8/KCSE, and the KCD2MP KCSE bridge to "
+                    "Deployed d3d12, dinput8/KCSE, and the KCD2Online KCSE bridge to "
                     "{}".format(destination)
                 )
                 message = "{} build deployed successfully.".format(profile.label)

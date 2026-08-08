@@ -1,7 +1,7 @@
 #pragma once
 
-#include "kcd2mp.pb.h"
-#include "generated/kcd2mp_version.hpp"
+#include "kcd2o.pb.h"
+#include "generated/kcd2o_version.hpp"
 #include "multiplayer/environment.hpp"
 #include "multiplayer/runtime_capabilities.hpp"
 #include "multiplayer/address_library_manifest.generated.hpp"
@@ -17,7 +17,7 @@
 
 #include "npc/catalog.hpp"
 
-namespace kcd2mp
+namespace kcd2o
 {
 	constexpr std::uint32_t supported_whgame_timestamp = 0x6A350E20;
 	constexpr std::uint64_t supported_whgame_image_size = 0x5B2D000;
@@ -103,6 +103,19 @@ namespace kcd2mp
 		reliable
 	};
 
+	// Transport lanes are independent outbound ordering domains. Keep ordered
+	// state changes together; only self-contained, revisioned realtime data and
+	// chat are allowed to bypass that stream.
+	enum class traffic_lane : std::uint16_t
+	{
+		player_realtime = 0,
+		ordered_state = 1,
+		npc_realtime = 2,
+		interactive = 3
+	};
+
+	constexpr std::size_t traffic_lane_count = 4;
+
 	struct encoded_message
 	{
 		std::vector<std::byte> bytes;
@@ -116,6 +129,8 @@ namespace kcd2mp
 	[[nodiscard]] std::optional<protocol::Envelope> decode(
 	    std::span<const std::byte> bytes,
 	    std::string *error = nullptr);
+	[[nodiscard]] traffic_lane lane_for(
+	    const protocol::Envelope &envelope) noexcept;
 	[[nodiscard]] bool valid_utf8_with_codepoint_count(
 	    std::string_view value,
 	    std::size_t minimum,

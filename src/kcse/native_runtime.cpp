@@ -1,5 +1,6 @@
 #include "kcse/native_runtime.hpp"
 #include "kcse/join_trace.hpp"
+#include "kcse/player_respawn_guard.hpp"
 #include "multiplayer/profile_reconciler.hpp"
 #include "multiplayer/world_catalog.hpp"
 
@@ -19,8 +20,10 @@
 #include <playermodule/C_MinigameManager.h>
 #include <playermodule/C_PlayerModule.h>
 #include <playermodule/I_Minigame.h>
+#include <rpgmodule/C_Soul.h>
 #include <Offsets/vtables/ICVar.h>
 #include <Offsets/vtables/IConsole.h>
+#include <Offsets/vtables/ISystem.h>
 #include <Offsets/RTTI.h>
 #include <xgenaimodule/C_AIObjectManager.h>
 #include <xgenaimodule/I_AIPuppet.h>
@@ -35,7 +38,7 @@
 #include <numbers>
 #include <string_view>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	namespace
 	{
@@ -47,6 +50,35 @@ namespace kcd2mp::kcse
 		    | 0x01000000 // VF_CHEAT_ALWAYS_CHECK
 		    | 0x02000000 // VF_CHEAT_NOCHECK
 		    | 0x40000000; // VF_SYSSPEC_OVERWRITE
+
+		// KCD2's CSystem state sequence ends in LEVEL_LOAD_COMPLETE (12) and
+		// RUNNING (13). Player/Actor objects become visible several seconds before
+		// RUNNING while character and object-layer jobs are still active, so they
+		// are not a sufficient level-readiness signal on their own.
+		constexpr std::uint32_t system_global_state_running = 13;
+
+		bool read_system_global_state(std::uint32_t &state) noexcept
+		{
+			auto *environment = SSystemGlobalEnvironment::GetInstance();
+			if (!environment || !environment->pSystem)
+				return false;
+#ifdef _WIN32
+			__try
+			{
+#endif
+				// KCD2 ISystem slot 202 is the verified GetSystemGlobalState
+				// getter (mov eax,[rcx+0x2BAC]; ret) on release_1_5 build 15693.
+				state = environment->pSystem->_vf202();
+				return true;
+#ifdef _WIN32
+			}
+			__except (KCD2Online_JOIN_SEH_FILTER(
+			    "join.world.GetSystemGlobalState.seh"))
+			{
+				return false;
+			}
+#endif
+		}
 
 		bool in_whgame_text(const void *address) noexcept
 		{
@@ -92,7 +124,7 @@ namespace kcd2mp::kcse
 			{
 				return find_main_menu();
 			}
-			__except (KCD2MP_JOIN_SEH_FILTER(
+			__except (KCD2Online_JOIN_SEH_FILTER(
 			    "join.world.FindMainMenu.seh"))
 			{
 				return nullptr;
@@ -146,7 +178,7 @@ namespace kcd2mp::kcse
 			{
 				return hide_game_over();
 			}
-			__except (KCD2MP_JOIN_SEH_FILTER(
+			__except (KCD2Online_JOIN_SEH_FILTER(
 			    "join.respawn.HideGameOver.seh"))
 			{
 				return false;
@@ -194,7 +226,7 @@ namespace kcd2mp::kcse
 			{
 				return start_debug_new_game(save_load, level_name);
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER("join.world.StartNewGame.seh"))
+			__except(KCD2Online_JOIN_SEH_FILTER("join.world.StartNewGame.seh"))
 			{
 				return false;
 			}
@@ -229,7 +261,7 @@ namespace kcd2mp::kcse
 			{
 				return open_main_menu();
 			}
-			__except (KCD2MP_JOIN_SEH_FILTER(
+			__except (KCD2Online_JOIN_SEH_FILTER(
 			    "join.sandbox.OpenMainMenu.seh"))
 			{
 				return false;
@@ -300,7 +332,7 @@ namespace kcd2mp::kcse
 				return environment->pScriptSystem->ExecuteBuffer(
 				    script.data(),
 				    script.size(),
-				    "KCD2MP multiplayer rule",
+				    "KCD2Online multiplayer rule",
 				    nullptr);
 #ifdef _WIN32
 			}
@@ -309,6 +341,79 @@ namespace kcd2mp::kcse
 				return false;
 			}
 #endif
+		}
+
+		void clear_script_global(const char *name) noexcept
+		{
+			auto *environment = SSystemGlobalEnvironment::GetInstance();
+			if (!environment || !environment->pScriptSystem || !name || !*name)
+				return;
+#ifdef _WIN32
+			__try
+			{
+#endif
+				environment->pScriptSystem->SetGlobalToNull(name);
+#ifdef _WIN32
+			}
+			__except(EXCEPTION_EXECUTE_HANDLER)
+			{
+			}
+#endif
+		}
+
+		bool take_script_global_bool(const char *name, bool &result) noexcept
+		{
+			auto *environment = SSystemGlobalEnvironment::GetInstance();
+			if (!environment || !environment->pScriptSystem || !name || !*name)
+				return false;
+#ifdef _WIN32
+			__try
+			{
+#endif
+				ScriptAnyValue value;
+				const auto found = environment->pScriptSystem->GetGlobalAny(
+				    name,
+				    value);
+				const auto copied = found && value.CopyTo(result);
+				environment->pScriptSystem->SetGlobalToNull(name);
+				return copied;
+#ifdef _WIN32
+			}
+			__except(EXCEPTION_EXECUTE_HANDLER)
+			{
+				return false;
+			}
+#endif
+		}
+
+		player_respawn_identity capture_player_respawn_identity(
+		    const native_player_view &player) noexcept
+		{
+			player_respawn_identity result;
+			result.entity = reinterpret_cast<std::uintptr_t>(player.entity);
+			result.actor = reinterpret_cast<std::uintptr_t>(player.actor);
+			if (!player.entity || !player.actor || !player.actor->m_pSoul)
+				return result;
+#ifdef _WIN32
+			__try
+			{
+#endif
+				result.entity_id = player.entity->GetId();
+				auto *soul = player.actor->m_pSoul;
+				result.soul = reinterpret_cast<std::uintptr_t>(soul);
+				result.soul_guid_high = soul->m_guid.hipart;
+				result.soul_guid_low = soul->m_guid.lopart;
+				result.shared_soul_guid_high = soul->m_sharedSoulGuid.hipart;
+				result.shared_soul_guid_low = soul->m_sharedSoulGuid.lopart;
+#ifdef _WIN32
+			}
+			__except (KCD2Online_JOIN_SEH_FILTER(
+			    "join.respawn.CapturePlayerIdentity.seh"))
+			{
+				return {};
+			}
+#endif
+			return result;
 		}
 
 		std::optional<std::uint64_t> read_home_marker_wuid() noexcept
@@ -322,14 +427,14 @@ namespace kcd2mp::kcse
 			{
 #endif
 				const auto read = environment->pScriptSystem->GetGlobalAny(
-				    "KCD2MP_HomeMarkerWUID", value);
+				    "KCD2Online_HomeMarkerWUID", value);
 				environment->pScriptSystem->SetGlobalToNull(
-				    "KCD2MP_HomeMarkerWUID");
+				    "KCD2Online_HomeMarkerWUID");
 				if (read && value.type == ANY_THANDLE && value.nHandle != 0)
 					return static_cast<std::uint64_t>(value.nHandle);
 #ifdef _WIN32
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER("home-marker.read-wuid.seh"))
+			__except(KCD2Online_JOIN_SEH_FILTER("home-marker.read-wuid.seh"))
 			{
 				return std::nullopt;
 			}
@@ -361,7 +466,7 @@ namespace kcd2mp::kcse
 				    found->second);
 #ifdef _WIN32
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER("home-marker.resolve-linkable.seh"))
+			__except(KCD2Online_JOIN_SEH_FILTER("home-marker.resolve-linkable.seh"))
 			{
 				return nullptr;
 			}
@@ -380,10 +485,10 @@ namespace kcd2mp::kcse
 			// O(all AI objects), that raced object streaming and could dereference a
 			// half-destroyed situation-area object when the player approached home.
 			const auto query = std::format(
-			    "KCD2MP_HomeMarkerWUID=nil; do local e=System.GetEntity({}); "
+			    "KCD2Online_HomeMarkerWUID=nil; do local e=System.GetEntity({}); "
 			    "if e and XGenAIModule and XGenAIModule.GetMyWUID then "
 			    "local ok,w=pcall(XGenAIModule.GetMyWUID,e); "
-			    "if ok then KCD2MP_HomeMarkerWUID=w end end end",
+			    "if ok then KCD2Online_HomeMarkerWUID=w end end end",
 			    entity_id);
 			if (!execute_script(query))
 				return nullptr;
@@ -437,7 +542,7 @@ namespace kcd2mp::kcse
 			{
 				return apply_home_marker_native(marker, result);
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER("home-marker.apply.seh"))
+			__except(KCD2Online_JOIN_SEH_FILTER("home-marker.apply.seh"))
 			{
 				return false;
 			}
@@ -591,7 +696,7 @@ namespace kcd2mp::kcse
 				    "CVar '{}' override raised an SEH exception or has an "
 				    "incompatible vtable",
 				    name);
-				KCD2MP_JOIN_TRACE("join.environment.cvar.failed", error);
+				KCD2Online_JOIN_TRACE("join.environment.cvar.failed", error);
 				return false;
 			}
 			const auto actual = static_cast<double>(actual_float);
@@ -608,10 +713,10 @@ namespace kcd2mp::kcse
 				    actual,
 				    static_cast<unsigned int>(original_flags),
 				    static_cast<unsigned int>(overridden_flags));
-				KCD2MP_JOIN_TRACE("join.environment.cvar.failed", error);
+				KCD2Online_JOIN_TRACE("join.environment.cvar.failed", error);
 				return false;
 			}
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.environment.cvar.applied",
 			    std::format(
 			        "name=\"{}\" requested={} actual={} flags=0x{:08X} "
@@ -784,7 +889,7 @@ namespace kcd2mp::kcse
 
 	bool native_runtime::on_frame()
 	{
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.kcse.frame.begin",
 		    std::format(
 		        "epoch={} invalidated={} data_loaded={}",
@@ -809,7 +914,7 @@ namespace kcd2mp::kcse
 		advance_native_world_start();
 		finish_native_unload_if_complete();
 		open_main_menu_if_pending();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.kcse.frame.complete",
 		    std::format(
 		        "epoch_changed={} unload_transition={}",
@@ -835,7 +940,7 @@ namespace kcd2mp::kcse
 		m_native_activity_kind =
 		    protocol::PLAYER_ACTIVITY_KIND_BLACKSMITHING;
 		m_activity_end_pending = false;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "activity.blacksmithing.started",
 		    std::format(
 		        "station_entity_id={} station_guid={}",
@@ -915,7 +1020,7 @@ namespace kcd2mp::kcse
 		auto *session = find_local_minigame(m_native_activity_kind);
 		if (session && !session->IsFinished())
 			return;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "activity.local.finished",
 		    std::format(
 		        "kind={}",
@@ -978,7 +1083,7 @@ namespace kcd2mp::kcse
 
 	bool native_runtime::prepare_multiplayer()
 	{
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.prepare.precheck",
 		    std::format(
 		        "data_loaded={} frame_seen={} can_start_join={}",
@@ -990,7 +1095,7 @@ namespace kcd2mp::kcse
 			std::scoped_lock lock(m_cache_mutex);
 			m_diagnostic =
 			    "KCSE has not reached a safe game-thread frame yet.";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.runtime.prepare.rejected",
 			    m_diagnostic);
 			return false;
@@ -1002,7 +1107,7 @@ namespace kcd2mp::kcse
 			    ? "Initializing native multiplayer runtime capabilities."
 			    : "Connecting before world creation; awaiting server bootstrap.";
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.prepare.requested",
 		    std::format(
 		        "epoch={}",
@@ -1037,7 +1142,6 @@ namespace kcd2mp::kcse
 		m_world_start_level_id.clear();
 		m_world_start_level_name.clear();
 		m_world_start_requires_lifecycle = false;
-		m_world_start_deadline = {};
 		m_world_start_stage = world_start_stage::idle;
 		if (!m_sandbox_active && !m_unload_pending)
 		{
@@ -1082,15 +1186,12 @@ namespace kcd2mp::kcse
 			m_world_start_level_id = std::string(target->id);
 			m_world_start_level_name = std::string(target->name);
 			m_world_start_requires_lifecycle = false;
-			m_world_start_deadline = std::chrono::steady_clock::now()
-			    + std::chrono::seconds(
-			        std::clamp(bootstrap.timeout_seconds(), 30U, 600U));
 			m_world_start_stage = world_start_stage::probing_runtime;
 			m_sandbox_progress = {};
 			m_sandbox_progress.phase = sandbox_phase::loading;
 			m_diagnostic =
 			    "Loaded target world is waiting for native capability validation.";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.world.loaded-probe",
 			    std::format(
 			        "target_level={} missing=0x{:X}",
@@ -1111,7 +1212,7 @@ namespace kcd2mp::kcse
 	sandbox_start_result native_runtime::activate_loaded_sandbox(
 	    const protocol::ServerBootstrap &bootstrap)
 	{
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.native.begin",
 		    std::format(
 		        "session_id=\"{}\" requested_level=\"{}\" mode={} "
@@ -1132,7 +1233,7 @@ namespace kcd2mp::kcse
 		std::unique_lock lock(m_cache_mutex);
 		if (!m_local_transform)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.native.rejected",
 			    "local transform is nil");
 			return {false, "Native player is not ready."};
@@ -1140,7 +1241,7 @@ namespace kcd2mp::kcse
 		const auto requested_level = canonical_level_id(bootstrap.level_id());
 		if (requested_level.empty() || requested_level != m_level_id)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.native.rejected",
 			    std::format(
 			        "level mismatch requested=\"{}\" current=\"{}\"",
@@ -1151,7 +1252,7 @@ namespace kcd2mp::kcse
 		if ((m_capabilities & runtime_capability_profile_apply) == 0
 		    || !bootstrap.has_profile())
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.native.rejected",
 			    std::format(
 			        "profile_apply_capability={} bootstrap_profile={}",
@@ -1167,7 +1268,7 @@ namespace kcd2mp::kcse
 		    select_sandbox_spawn(bootstrap, m_local_transform);
 		if (!selected_spawn.transform)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.spawn-selection.failed",
 			    std::format(
 			        "mode={} profile_transform_valid={} "
@@ -1185,7 +1286,7 @@ namespace kcd2mp::kcse
 		}
 		const auto &spawn = *selected_spawn.transform;
 		const auto spawn_source = to_string(selected_spawn.source);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.spawn-selection.ok",
 		    std::format(
 		        "source={} position=({:.6f},{:.6f},{:.6f}) "
@@ -1200,7 +1301,7 @@ namespace kcd2mp::kcse
 		        spawn.rotation().w()));
 		if (!is_finite_transform(spawn))
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.spawn-selection.invalid",
 			    std::format("source={}", spawn_source));
 			return {
@@ -1213,7 +1314,7 @@ namespace kcd2mp::kcse
 		*target.mutable_last_transform() = spawn;
 		if (!is_valid_profile(target))
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.target-profile.invalid",
 			    std::format(
 			        "source={} player_id={} revision={} level=\"{}\" "
@@ -1234,7 +1335,7 @@ namespace kcd2mp::kcse
 			    "Authoritative target profile is invalid after spawn "
 			    "selection."};
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.target-profile.valid",
 		    std::format(
 		        "player_id={} revision={} source={}",
@@ -1245,7 +1346,7 @@ namespace kcd2mp::kcse
 		auto *framework = CCryAction::GetInstance();
 		if (!framework)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.native.rejected",
 			    "CCryAction=nil");
 			return {false, "CCryAction is unavailable."};
@@ -1259,12 +1360,12 @@ namespace kcd2mp::kcse
 			const auto environment_error = m_diagnostic.empty()
 			    ? std::string{"Native server environment bootstrap failed."}
 			    : m_diagnostic;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.environment.failed",
 			    environment_error);
 			return {false, environment_error};
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.environment.ok",
 		    std::format(
 		        "time_of_day={} time_scale={} weather_id={} "
@@ -1273,7 +1374,7 @@ namespace kcd2mp::kcse
 		        bootstrap.environment().time_scale(),
 		        bootstrap.environment().weather_id(),
 		        bootstrap.environment().weather_transition_ms()));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.save-load-lock.begin",
 		    std::format(
 		        "framework={}",
@@ -1283,7 +1384,7 @@ namespace kcd2mp::kcse
 		m_save_load_locked = true;
 		m_profiles.set_wire_identity(target);
 		const auto applied = reconcile_profile(m_profiles, target);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    applied.success
 		        ? "join.sandbox.profile-apply.ok"
 		        : "join.sandbox.profile-apply.failed",
@@ -1351,7 +1452,7 @@ namespace kcd2mp::kcse
 		m_sandbox_active = true;
 		const auto map_reveal_dispatched =
 		    execute_console_command("player_revealFow");
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    map_reveal_dispatched
 		        ? "join.sandbox.map-reveal.ok"
 		        : "join.sandbox.map-reveal.failed",
@@ -1367,10 +1468,9 @@ namespace kcd2mp::kcse
 		m_world_start_level_id.clear();
 		m_world_start_level_name.clear();
 		m_world_start_requires_lifecycle = false;
-		m_world_start_deadline = {};
 		m_world_start_stage = world_start_stage::idle;
 		m_expected_epoch_transition.store(false, std::memory_order_release);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.native.ready",
 		    std::format(
 		        "spawn=({:.6f},{:.6f},{:.6f})",
@@ -1405,9 +1505,6 @@ namespace kcd2mp::kcse
 			m_world_start_level_id = std::string(target->id);
 			m_world_start_level_name = std::string(target->name);
 			m_world_start_requires_lifecycle = true;
-			const auto timeout = std::chrono::seconds(
-			    std::clamp(bootstrap.timeout_seconds(), 30U, 600U));
-			m_world_start_deadline = std::chrono::steady_clock::now() + timeout;
 			m_sandbox_progress = {};
 			m_sandbox_progress.phase = sandbox_phase::loading;
 			m_world_start_stage = world_start_stage::invoking_new_game;
@@ -1417,7 +1514,7 @@ namespace kcd2mp::kcse
 		m_expected_epoch_transition.store(true, std::memory_order_release);
 		m_world_lifecycle_seen.store(false, std::memory_order_release);
 		m_world_pre_data_seen.store(false, std::memory_order_release);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.world.new-game.invoke",
 		    std::format(
 		        "level_id={} level_name={} menu={} save_load={} rel_id=141236",
@@ -1445,7 +1542,6 @@ namespace kcd2mp::kcse
 		world_start_stage stage{};
 		bool requires_lifecycle{};
 		std::string target_id;
-		std::chrono::steady_clock::time_point deadline;
 		{
 			std::scoped_lock lock(m_cache_mutex);
 			if (!m_world_start_bootstrap)
@@ -1454,18 +1550,10 @@ namespace kcd2mp::kcse
 			stage = m_world_start_stage;
 			requires_lifecycle = m_world_start_requires_lifecycle;
 			target_id = m_world_start_level_id;
-			deadline = m_world_start_deadline;
 		}
 		if (stage == world_start_stage::failed
 		    || stage == world_start_stage::activating)
 			return;
-		if (std::chrono::steady_clock::now() >= deadline)
-		{
-			fail_native_world_start(
-			    "Native world start timed out before player readiness.");
-			return;
-		}
-
 		if (requires_lifecycle
 		    && !m_world_lifecycle_seen.load(std::memory_order_acquire))
 		{
@@ -1486,6 +1574,7 @@ namespace kcd2mp::kcse
 		std::string current_level;
 		bool player_ready{};
 		bool transition_safe{};
+		bool level_load_complete{};
 		bool probe_failed{};
 		std::string probe_error;
 		{
@@ -1494,6 +1583,7 @@ namespace kcd2mp::kcse
 			current_level = m_level_id;
 			player_ready = m_local_transform.has_value();
 			transition_safe = m_transition_safe;
+			level_load_complete = m_level_load_complete;
 			probe_failed = m_probe_failed.load(std::memory_order_acquire);
 			probe_error = m_probe_error;
 		}
@@ -1503,6 +1593,13 @@ namespace kcd2mp::kcse
 			    world_start_stage::waiting_for_level,
 			    "DataLoaded fired; waiting for wh_sys_BaseLevelId="
 			        + target_id + ".");
+			return;
+		}
+		if (!level_load_complete)
+		{
+			set_world_start_stage(
+			    world_start_stage::waiting_for_level,
+			    "Target level is present; waiting for the engine to reach RUNNING after LEVEL_LOAD_COMPLETE.");
 			return;
 		}
 		if (!player_ready || !transition_safe)
@@ -1554,7 +1651,7 @@ namespace kcd2mp::kcse
 			changed = true;
 		}
 		if (changed)
-			KCD2MP_JOIN_TRACE("join.world.stage", diagnostic);
+			KCD2Online_JOIN_TRACE("join.world.stage", diagnostic);
 	}
 
 	void native_runtime::fail_native_world_start(std::string error)
@@ -1567,7 +1664,7 @@ namespace kcd2mp::kcse
 			m_diagnostic = error;
 		}
 		m_expected_epoch_transition.store(false, std::memory_order_release);
-		KCD2MP_JOIN_TRACE("join.world.failed", error);
+		KCD2Online_JOIN_TRACE("join.world.failed", error);
 	}
 
 	sandbox_poll_result native_runtime::poll_sandbox()
@@ -1624,7 +1721,6 @@ namespace kcd2mp::kcse
 			m_world_start_level_id.clear();
 			m_world_start_level_name.clear();
 			m_world_start_requires_lifecycle = false;
-			m_world_start_deadline = {};
 			m_world_start_stage = world_start_stage::idle;
 		}
 		if (open_menu_only)
@@ -1632,14 +1728,6 @@ namespace kcd2mp::kcse
 			cancel_multiplayer_preparation();
 			return;
 		}
-		m_expected_epoch_transition.store(false, std::memory_order_release);
-		(void)execute_script(
-		    "if player and player.EnableFastTravel then "
-		    "player:EnableFastTravel(true) end");
-		m_remote_avatars.clear();
-		m_remote_backend.clear();
-		m_entities.restore_world();
-		m_profiles.reset();
 		if (should_unload)
 			begin_native_unload(
 			    error.empty()
@@ -1761,7 +1849,7 @@ namespace kcd2mp::kcse
 		{
 			std::scoped_lock lock(m_cache_mutex);
 			m_diagnostic = "Native environment synchronization received an invalid state.";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.environment.apply.failed",
 			    m_diagnostic);
 			return false;
@@ -1780,7 +1868,7 @@ namespace kcd2mp::kcse
 		{
 			std::scoped_lock lock(m_cache_mutex);
 			m_diagnostic = "Native environment synchronization failed: " + error;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.environment.apply.failed",
 			    m_diagnostic);
 			return false;
@@ -1796,13 +1884,13 @@ namespace kcd2mp::kcse
 				std::scoped_lock lock(m_cache_mutex);
 				m_diagnostic =
 				    "Native environment synchronization could not apply weather.";
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.environment.apply.failed",
 				    m_diagnostic);
 				return false;
 			}
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.environment.apply.ok",
 		    std::format(
 		        "revision={} weather_revision={} apply_weather={}",
@@ -1850,7 +1938,7 @@ namespace kcd2mp::kcse
 		m_home_filter_was_visible = result.filter_was_visible;
 		m_native_home_map = result.map;
 		m_native_home_mark = std::move(result.mark);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "property.home-marker.applied",
 		    std::format(
 		        "property_id=\"{}\" entity_guid={} entity_id={} name=\"{}\"",
@@ -1879,7 +1967,7 @@ namespace kcd2mp::kcse
 			}
 #ifdef _WIN32
 		}
-		__except(KCD2MP_JOIN_SEH_FILTER("home-marker.remove.seh"))
+		__except(KCD2Online_JOIN_SEH_FILTER("home-marker.remove.seh"))
 		{
 		}
 #endif
@@ -1920,29 +2008,129 @@ namespace kcd2mp::kcse
 	{
 		if (!is_finite_transform(spawn))
 			return false;
-		KCD2MP_JOIN_TRACE(
+		auto fail_respawn = [this](std::string error)
+		{
+			KCD2Online_JOIN_TRACE("join.respawn.native.failed", error);
+			std::scoped_lock lock(m_cache_mutex);
+			m_diagnostic = std::move(error);
+			return false;
+		};
+
+		const auto before_player = m_entities.player();
+		const auto before_identity =
+		    capture_player_respawn_identity(before_player);
+		if (!before_identity.complete())
+		{
+			return fail_respawn(
+			    "Native respawn requires an existing client Entity, Actor, and Soul.");
+		}
+		auto *framework = CCryAction::GetInstance();
+		if (!framework || !before_player.actor->IsPlayer()
+		    || framework->GetClientEntity() != before_player.entity
+		    || framework->GetClientActor() != before_player.actor)
+		{
+			return fail_respawn(
+			    "Native respawn rejected an inconsistent local-player ownership graph.");
+		}
+		KCD2Online_JOIN_TRACE(
 		    "join.respawn.native.begin",
 		    std::format(
-		        "spawn=({:.3f},{:.3f},{:.3f})",
+		        "entity_id={} entity={} actor={} soul={} health={:.3f} "
+		        "dead={} spawn=({:.3f},{:.3f},{:.3f})",
+		        before_identity.entity_id,
+		        reinterpret_cast<void *>(before_identity.entity),
+		        reinterpret_cast<void *>(before_identity.actor),
+		        reinterpret_cast<void *>(before_identity.soul),
+		        before_player.actor->GetHealth(),
+		        before_player.actor->IsDead(),
 		        spawn.position().x(),
 		        spawn.position().y(),
 		        spawn.position().z()));
-		if (!execute_script(
-		        "if player and player.actor then "
-		        "player.actor:Revive(false); "
-		        "player.actor:SetHealth(player.actor:GetMaxHealth()) end"))
+
+		// A death can interrupt a native minigame or another player-module-owned
+		// activity. Release our local handle before reviving the same C_Player;
+		// creating a replacement actor would orphan those global module links.
+		cancel_local_activity();
+		constexpr auto revive_result = "KCD2Online_RespawnRevived";
+		clear_script_global(revive_result);
+		const auto revive_dispatched = execute_script(
+		    "KCD2Online_RespawnRevived=false; "
+		    "if player and player.actor then "
+		    "local actor=player.actor; "
+		    "actor:Revive(false); "
+		    "local maximum=actor:GetMaxHealth(); "
+		    "if maximum and maximum>0 then actor:SetHealth(maximum) end; "
+		    "KCD2Online_RespawnRevived=(actor:GetHealth()>0 "
+		    "and not actor:IsDead() and not actor:IsUnconscious()); end");
+		bool revived{};
+		if (!revive_dispatched
+		    || !take_script_global_bool(revive_result, revived) || !revived)
 		{
-			std::scoped_lock lock(m_cache_mutex);
-			m_diagnostic = "Native player revive script failed.";
-			return false;
+			return fail_respawn(
+			    "Native C_Player revive did not reach a living, conscious state.");
 		}
-		const auto corrected = apply_local_correction(spawn);
+
+		const auto revived_player = m_entities.player();
+		const auto revived_identity =
+		    capture_player_respawn_identity(revived_player);
+		const auto revive_identity_result = validate_player_respawn_identity(
+		    before_identity,
+		    revived_identity);
+		if (revive_identity_result != player_respawn_identity_result::stable)
+		{
+			return fail_respawn(std::format(
+			    "Native revive violated player identity: {}.",
+			    to_string(revive_identity_result)));
+		}
+		if (!apply_local_correction(spawn))
+			return false;
+
+		// SetWorldTM rotates the Entity, but the local first-person view has its
+		// own actor state. Mirror Vanilla's initial-spawn PlayerSetViewAngles step
+		// so the camera and body start with the same authoritative yaw.
+		constexpr auto settled_result = "KCD2Online_RespawnSettled";
+		clear_script_global(settled_result);
+		const auto view_dispatched = execute_script(
+		    "KCD2Online_RespawnSettled=false; "
+		    "if player and player.actor then "
+		    "local angles={x=0,y=0,z=0}; player:GetAngles(angles); "
+		    "angles.x=0; angles.y=0; "
+		    "player.actor:PlayerSetViewAngles(angles); "
+		    "KCD2Online_RespawnSettled=(player.actor:GetHealth()>0 "
+		    "and not player.actor:IsDead() "
+		    "and not player.actor:IsUnconscious()); end");
+		bool settled{};
+		if (!view_dispatched
+		    || !take_script_global_bool(settled_result, settled) || !settled)
+		{
+			return fail_respawn(
+			    "Native player did not remain alive and conscious after spawn correction.");
+		}
+
+		const auto final_player = m_entities.player();
+		const auto final_identity =
+		    capture_player_respawn_identity(final_player);
+		const auto final_identity_result = validate_player_respawn_identity(
+		    before_identity,
+		    final_identity);
+		if (final_identity_result != player_respawn_identity_result::stable)
+		{
+			return fail_respawn(std::format(
+			    "Native respawn violated player identity after correction: {}.",
+			    to_string(final_identity_result)));
+		}
+
 		const auto game_over_hidden = guarded_hide_game_over();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.respawn.native.complete",
 		    std::format(
-		        "corrected={} game_over_hidden={}",
-		        corrected,
+		        "entity_id={} actor={} soul={} health={:.3f} "
+		        "identity={} game_over_hidden={}",
+		        final_identity.entity_id,
+		        reinterpret_cast<void *>(final_identity.actor),
+		        reinterpret_cast<void *>(final_identity.soul),
+		        final_player.actor->GetHealth(),
+		        to_string(final_identity_result),
 		        game_over_hidden));
 		if (!game_over_hidden)
 		{
@@ -1950,7 +2138,7 @@ namespace kcd2mp::kcse
 			m_diagnostic =
 			    "Native player revived, but the game-over fader could not be hidden.";
 		}
-		return corrected;
+		return true;
 	}
 
 	bool native_runtime::local_player_dead() const
@@ -1961,34 +2149,15 @@ namespace kcd2mp::kcse
 
 	bool native_runtime::local_player_laying() const
 	{
-		auto *environment = SSystemGlobalEnvironment::GetInstance();
-		if (!environment || !environment->pScriptSystem)
-			return false;
 		constexpr std::string_view query =
-		    "KCD2MP_PlayerLaying = player and player.IsLaying "
+		    "KCD2Online_PlayerLaying = player and player.IsLaying "
 		    "and player:IsLaying() or false";
+		clear_script_global("KCD2Online_PlayerLaying");
 		if (!execute_script(query))
 			return false;
 		bool result{};
-		ScriptAnyValue value;
-#ifdef _WIN32
-		__try
-		{
-#endif
-			if (environment->pScriptSystem->GetGlobalAny(
-			    "KCD2MP_PlayerLaying",
-			    value))
-				(void)value.CopyTo(result);
-			environment->pScriptSystem->SetGlobalToNull(
-			    "KCD2MP_PlayerLaying");
-#ifdef _WIN32
-		}
-		__except(EXCEPTION_EXECUTE_HANDLER)
-		{
-			return false;
-		}
-#endif
-		return result;
+		return take_script_global_bool("KCD2Online_PlayerLaying", result)
+		    && result;
 	}
 
 	void native_runtime::show_multiplayer_notice(
@@ -2032,11 +2201,11 @@ namespace kcd2mp::kcse
 
 	remote_avatar_sync_result native_runtime::sync_remote_players(std::span<const remote_avatar_snapshot> players)
 	{
-		KCD2MP_JOIN_TRACE("join.remote-sync.begin", std::format("players={} epoch={}", players.size(), m_epoch.load(std::memory_order_acquire)));
+		KCD2Online_JOIN_TRACE("join.remote-sync.begin", std::format("players={} epoch={}", players.size(), m_epoch.load(std::memory_order_acquire)));
 		m_remote_backend.set_epoch(
 		    m_epoch.load(std::memory_order_acquire));
 		auto result = m_remote_avatars.sync(players);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    result.success ? "join.remote-sync.complete"
 		                   : "join.remote-sync.failed",
 		    std::format(
@@ -2101,7 +2270,7 @@ namespace kcd2mp::kcse
 			m_sandbox_progress.phase = sandbox_phase::loading;
 			m_diagnostic =
 			    "Expected native world transition invalidated the old runtime epoch.";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.world.epoch.expected",
 			    std::format(
 			        "new_epoch={} target_level={}",
@@ -2121,6 +2290,11 @@ namespace kcd2mp::kcse
 		std::string sampled_animation_fragment;
 		bool transition_safe = false;
 		std::string transition_blocker;
+		std::uint32_t system_global_state{};
+		const auto system_state_available =
+		    read_system_global_state(system_global_state);
+		const auto level_load_complete = system_state_available
+		    && system_global_state == system_global_state_running;
 
 		auto *framework = CCryAction::GetInstance();
 		const auto native_player = m_entities.player();
@@ -2130,7 +2304,15 @@ namespace kcd2mp::kcse
 		auto *context_actor = native_player.actor;
 		auto *context = wh::game::S_GameContext::GetInstance();
 		auto *player_module = context ? context->m_pPlayerModule : nullptr;
-		if (player_module)
+		if (!level_load_complete)
+		{
+			transition_blocker = system_state_available
+			    ? std::format(
+			          "Native level loading is still active (system state {}).",
+			          system_global_state)
+			    : "Native level-loading state is not available yet.";
+		}
+		else if (player_module)
 		{
 			transition_safe = true;
 			if (player_module->m_pFastTravel
@@ -2163,16 +2345,21 @@ namespace kcd2mp::kcse
 		}
 		if (environment_runtime_available())
 			capabilities |= runtime_capability_environment;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.cached-state.precheck",
 		    std::format(
 		        "multiplayer_requested={} framework={} entity={} "
-		        "framework_actor={} context_actor={}",
+		        "framework_actor={} context_actor={} system_state={} "
+		        "level_load_complete={}",
 		        multiplayer_requested,
 		        static_cast<void *>(framework),
 		        static_cast<void *>(entity),
 		        static_cast<void *>(framework_actor),
-		        static_cast<void *>(context_actor)));
+		        static_cast<void *>(context_actor),
+		        system_state_available
+		            ? std::to_string(system_global_state)
+		            : "unavailable",
+		        level_load_complete));
 		if (entity && framework_actor && context_actor)
 		{
 			capabilities |= runtime_capability_local_player;
@@ -2196,7 +2383,7 @@ namespace kcd2mp::kcse
 		std::string profile_error;
 		bool profile_ready{};
 		bool avatar_ready{};
-		if (multiplayer_requested
+		if (multiplayer_requested && level_load_complete
 		    && (capabilities & runtime_capability_local_player) != 0)
 		{
 			if (m_probe_complete)
@@ -2214,7 +2401,7 @@ namespace kcd2mp::kcse
 				avatar_ready = m_remote_backend.available();
 			}
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.capability-components",
 		    std::format(
 		        "transform_ready={} profile_ready={} avatar_ready={} "
@@ -2228,7 +2415,7 @@ namespace kcd2mp::kcse
 		        m_probe_complete,
 		        m_probe_failed.load(std::memory_order_acquire),
 		        m_preparation_frames));
-		if (multiplayer_requested
+		if (multiplayer_requested && level_load_complete
 		    && (capabilities & runtime_capability_local_player) != 0
 		    && !m_preparation_active)
 		{
@@ -2240,7 +2427,8 @@ namespace kcd2mp::kcse
 			m_preparation_frames = 0;
 			m_preparation_active = true;
 		}
-		if (multiplayer_requested && transform && profile_ready && avatar_ready
+		if (multiplayer_requested && level_load_complete && transform
+		    && profile_ready && avatar_ready
 		    && !m_probe_complete && !m_probe_failed)
 		{
 			if (!m_probe_transform_verified)
@@ -2255,7 +2443,7 @@ namespace kcd2mp::kcse
 					m_probe_error =
 					    "active identical SetWorldTM probe failed: "
 					    + probe_error;
-					KCD2MP_JOIN_TRACE(
+					KCD2Online_JOIN_TRACE(
 					    "join.runtime.probe.identical-transform.failed",
 					    m_probe_error);
 				}
@@ -2263,7 +2451,7 @@ namespace kcd2mp::kcse
 				{
 					m_probe_transform_verified = true;
 					m_transform_sequence = 0;
-					KCD2MP_JOIN_TRACE(
+					KCD2Online_JOIN_TRACE(
 					    "join.runtime.probe.identical-transform.ok",
 					    "SetWorldTM write/readback verified");
 				}
@@ -2278,7 +2466,7 @@ namespace kcd2mp::kcse
 				case native_remote_avatar_backend::active_probe_result::
 				    succeeded:
 					m_probe_complete = true;
-					KCD2MP_JOIN_TRACE(
+					KCD2Online_JOIN_TRACE(
 					    "join.runtime.probe.remote-avatar.ok",
 					    "Actor/Soul/Inventory/Equipment probe succeeded");
 					break;
@@ -2289,7 +2477,7 @@ namespace kcd2mp::kcse
 					    "active native Actor/Soul/Inventory/Equipment "
 					    "probe failed: "
 					    + probe_error;
-					KCD2MP_JOIN_TRACE(
+					KCD2Online_JOIN_TRACE(
 					    "join.runtime.probe.remote-avatar.failed",
 					    m_probe_error);
 					break;
@@ -2341,7 +2529,7 @@ namespace kcd2mp::kcse
 		}
 
 		auto *environment = SSystemGlobalEnvironment::GetInstance();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.runtime.entity-system.state",
 		    std::format(
 		        "environment={} entity_system={} console={} local_entity={}",
@@ -2453,7 +2641,8 @@ namespace kcd2mp::kcse
 		m_capabilities       = capabilities;
 		m_transition_safe    = transition_safe;
 		m_transition_blocker = std::move(transition_blocker);
-		KCD2MP_JOIN_TRACE("join.runtime.capabilities.updated",
+		m_level_load_complete = level_load_complete;
+		KCD2Online_JOIN_TRACE("join.runtime.capabilities.updated",
 		                  std::format("capabilities=0x{:X} required=0x{:X} missing=0x{:X} "
 		                              "level=\"{}\"",
 		                              capabilities,
@@ -2514,7 +2703,7 @@ namespace kcd2mp::kcse
 	void native_runtime::begin_native_unload(std::string_view reason)
 	{
 		auto *framework = CCryAction::GetInstance();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.unload.begin",
 		    std::format(
 		        "reason=\"{}\" framework={} game_context={}",
@@ -2526,23 +2715,96 @@ namespace kcd2mp::kcse
 		{
 			std::scoped_lock lock(m_cache_mutex);
 			m_unload_pending = true;
+			m_unload_teardown_started = false;
+			m_unload_command_queued = false;
+			m_unload_deferred_logged = false;
 			m_sandbox_active = true;
 			m_sandbox_progress.phase = sandbox_phase::unloading;
 			m_sandbox_progress.error = std::string(reason);
 		}
+		m_multiplayer_requested.store(false, std::memory_order_release);
+		m_expected_epoch_transition.store(false, std::memory_order_release);
+		queue_native_unload_if_safe();
+		finish_native_unload_if_complete();
+	}
+
+	void native_runtime::queue_native_unload_if_safe()
+	{
+		bool teardown_started{};
+		bool command_queued{};
+		bool level_load_complete{};
+		{
+			std::scoped_lock lock(m_cache_mutex);
+			if (!m_unload_pending)
+				return;
+			teardown_started = m_unload_teardown_started;
+			command_queued = m_unload_command_queued;
+			level_load_complete = m_level_load_complete;
+		}
+		if (native_world_unloaded())
+			return;
+		if (command_queued)
+			return;
+		if (!level_load_complete)
+		{
+			bool should_log{};
+			{
+				std::scoped_lock lock(m_cache_mutex);
+				if (!m_unload_deferred_logged)
+				{
+					m_unload_deferred_logged = true;
+					should_log = true;
+				}
+			}
+			if (should_log)
+			{
+				KCD2Online_JOIN_TRACE(
+				    "join.sandbox.unload.deferred",
+				    "Native unload is waiting for the engine to reach RUNNING after LEVEL_LOAD_COMPLETE.");
+			}
+			return;
+		}
+
+		if (!teardown_started)
+		{
+			{
+				std::scoped_lock lock(m_cache_mutex);
+				if (m_unload_teardown_started)
+					teardown_started = true;
+				else
+					m_unload_teardown_started = true;
+			}
+			if (!teardown_started)
+			{
+				(void)execute_script(
+				    "if player and player.EnableFastTravel then "
+				    "player:EnableFastTravel(true) end");
+				m_remote_avatars.clear();
+				m_remote_backend.clear();
+				m_entities.restore_world();
+				m_profiles.reset();
+			}
+		}
+
+		auto *framework = CCryAction::GetInstance();
 		if (framework && framework->m_pGameContext)
 		{
 			// EndGameContext is unsafe from KCSE's PostUpdate callback. Queue the
 			// engine's map-unload command so CryEngine performs the transition in
 			// its deferred console-command phase on the following frame.
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.unload.command.begin",
 			    std::format(
 			        "framework={} game_context={}",
 			        static_cast<void *>(framework),
 			        static_cast<void *>(framework->m_pGameContext)));
 			const auto queued = execute_console_command("unload", true);
-			KCD2MP_JOIN_TRACE(
+			if (queued)
+			{
+				std::scoped_lock lock(m_cache_mutex);
+				m_unload_command_queued = true;
+			}
+			KCD2Online_JOIN_TRACE(
 			    queued
 			        ? "join.sandbox.unload.command.queued"
 			        : "join.sandbox.unload.command.failed",
@@ -2552,11 +2814,10 @@ namespace kcd2mp::kcse
 		}
 		else
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.sandbox.unload.command.skipped",
 			    "framework or game context is nil");
 		}
-		finish_native_unload_if_complete();
 	}
 
 	bool native_runtime::native_world_unloaded() const
@@ -2574,17 +2835,21 @@ namespace kcd2mp::kcse
 			if (!m_unload_pending)
 				return;
 		}
+		queue_native_unload_if_safe();
 		if (!native_world_unloaded())
 			return;
 		restore_save_load();
 		{
 			std::scoped_lock lock(m_cache_mutex);
 			m_unload_pending = false;
+			m_unload_teardown_started = false;
+			m_unload_command_queued = false;
+			m_unload_deferred_logged = false;
 			m_sandbox_active = false;
 			m_sandbox_progress = {};
 			m_main_menu_pending = true;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.unload.complete",
 		    "Native world is unloaded; returning to the main menu.");
 	}
@@ -2607,7 +2872,7 @@ namespace kcd2mp::kcse
 			std::scoped_lock lock(m_cache_mutex);
 			m_main_menu_pending = false;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.sandbox.main-menu.opened",
 		    "Native root main menu is open.");
 	}

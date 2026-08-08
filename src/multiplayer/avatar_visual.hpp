@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	[[nodiscard]] inline bool avatar_weapon_should_draw(
 	    const protocol::AvatarDescriptor &avatar) noexcept
@@ -141,4 +141,4 @@ namespace kcd2mp
 		canonicalize_avatar_visual(result);
 		return result;
 	}
-} // namespace kcd2mp
+} // namespace kcd2o

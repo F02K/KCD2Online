@@ -451,13 +451,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         property_catalog_tool = (
             options.property_catalog_tool
-            or _bundled_tool("KCD2MPPropertyCatalog.exe")
+            or _bundled_tool("KCD2OnlinePropertyCatalog.exe")
         )
         if property_catalog_tool is None:
-            raise GameDataError("KCD2MPPropertyCatalog.exe is not bundled or specified")
+            raise GameDataError("KCD2OnlinePropertyCatalog.exe is not bundled or specified")
         signature_audit_tool = (
             options.signature_audit_tool
-            or _bundled_tool("KCD2MPSignatureAudit.exe")
+            or _bundled_tool("KCD2OnlineSignatureAudit.exe")
         )
         if signature_audit_tool is not None:
             print("Auditing the installed WHGame.dll...", flush=True)

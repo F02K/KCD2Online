@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace kcd2mp::property
+namespace kcd2o::property
 {
 	inline constexpr std::uint32_t ledger_schema = 1;
 

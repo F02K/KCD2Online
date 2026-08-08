@@ -1,15 +1,15 @@
-# KCD2MP 0.1 multiplayer status
+# KCD2Online 0.1 multiplayer status
 
 ## Implemented foundation
 
 The Version 0.1 foundation is implemented as four CMake targets:
 
-- `KCD2MPProtocol`: Protobuf envelope, shared types, UTF-8 and 64 KiB limits.
-- `KCD2MPNetworking`: GameNetworkingSockets 1.5.1 Direct-IP transport.
-- `KCD2MPServerCore`: transport-independent authoritative session logic.
-- `KCD2MPServer`: standalone Windows-x64 console server.
+- `KCD2OnlineProtocol`: Protobuf envelope, shared types, UTF-8 and 64 KiB limits.
+- `KCD2OnlineNetworking`: GameNetworkingSockets 1.5.1 Direct-IP transport.
+- `KCD2OnlineServerCore`: transport-independent authoritative session logic.
+- `KCD2OnlineServer`: standalone Windows-x64 console server.
 
-The existing `KCD2MP` DLL contains the matching client, a dedicated network thread, bounded
+The existing `KCD2Online` DLL contains the matching client, a dedicated network thread, bounded
 game-thread command queue, reconnect scheduling, snapshot interpolation/extrapolation, local
 movement correction, ImGui page, and game-console commands.
 
@@ -19,14 +19,14 @@ at 30 Hz and publishes snapshots at 20 Hz by default.
 
 ## Server operation
 
-Copy `server.toml.example` next to `KCD2MPServer.exe` as `server.toml`. The only required value
+Copy `server.toml.example` next to `KCD2OnlineServer.exe` as `server.toml`. The only required value
 without a useful default is `server.level_id`; it must equal the level ID shown by the client.
 
 ```toml
 [server]
 bind_address = "0.0.0.0"
 port = 27020
-name = "KCD2MP Server"
+name = "KCD2Online Server"
 password = ""
 max_players = 8
 level_id = "3"
@@ -47,7 +47,7 @@ save selection with a server-authoritative respawn at the world spawn.
 Start the server:
 
 ```powershell
-.\KCD2MPServer.exe .\server.toml
+.\KCD2OnlineServer.exe .\server.toml
 ```
 
 The port is UDP. LAN clients connect to the host's LAN IPv4 address; internet hosts must allow the
@@ -75,7 +75,7 @@ runtime-epoch changes and waits for `DataLoaded`, the target `wh_sys_BaseLevelId
 and the native capability probe before applying authoritative state. Production level IDs are
 `2` (`trosecko`), `3` (`kutnohorsko`), and `4` (`klaster`).
 
-Use the **KCD2MP Multiplayer** ImGui page for address, name, optional password, status, player
+Use the **KCD2Online Multiplayer** ImGui page for address, name, optional password, status, player
 list, diagnostics, and global chat. Address and name are persisted. Password and resume token are
 not logged; the password input is cleared after connecting.
 
@@ -129,7 +129,7 @@ the empty stub at RVA `0x003B6E80` (`ret 0`). `cheat_spawn` does not exist in `W
 provided by the script/cheat layer. Consequently, those command paths do not expose stable native
 spawn and animation functions that can be typed and audited.
 
-KCD2MP deliberately does not substitute a text command, Lua call, cloned brush, or debug marker.
+KCD2Online deliberately does not substitute a text command, Lua call, cloned brush, or debug marker.
 The remaining gate is to identify and validate a native retail path that can:
 
 1. create a fixed male human as a non-local entity;
@@ -143,7 +143,7 @@ spawned.
 ## Build and verification
 
 `build.bat` bootstraps the pinned vcpkg commit under `.cache`, builds the DLL, server, audit tool,
-and all KCD2MP tests with the `x64-windows-static` triplet.
+and all KCD2Online tests with the `x64-windows-static` triplet.
 
 Manual CMake configuration:
 
@@ -154,7 +154,7 @@ cmake -S . -B out\build\debug -G "Visual Studio 18 2026" -A x64 `
   -D VCPKG_OVERLAY_PORTS="$pwd\cmake_scripts\vcpkg\ports" `
   -D BUILD_TESTING=ON -D FINAL=NO
 cmake --build out\build\debug --config Debug --parallel
-ctest --test-dir out\build\debug -C Debug -R "^KCD2MP" --output-on-failure
+ctest --test-dir out\build\debug -C Debug -R "^KCD2Online" --output-on-failure
 ```
 
 Automated coverage includes PE/signature resolution, engine paths, Protobuf round trips and

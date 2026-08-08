@@ -44,8 +44,8 @@ jobs:
       - name: Build and test
         shell: pwsh
         run: |
-          cmake --build build-${{ matrix.config }} --target KCD2MPRuntime KCD2MPServer KCD2MPSignatureAudit KCD2MPTests
-          ctest --test-dir build-${{ matrix.config }} -C ${{ matrix.config }} -R "^KCD2MP" --output-on-failure
+          cmake --build build-${{ matrix.config }} --target KCD2OnlineRuntime KCD2OnlineServer KCD2OnlineSignatureAudit KCD2OnlineTests
+          ctest --test-dir build-${{ matrix.config }} -C ${{ matrix.config }} -R "^KCD2Online" --output-on-failure
 
   build_nightly:
     needs: validate
@@ -76,8 +76,8 @@ jobs:
       - name: Build 64bit release DLL
         shell: pwsh
         run: |
-          cmake --build ./build --config RelWithDebInfo --target KCD2MPRuntime KCD2MPServer KCD2MPSignatureAudit KCD2MPPropertyCatalog KCD2MPTests --
-          ctest --test-dir ./build -C RelWithDebInfo -R "^KCD2MP" --output-on-failure
+          cmake --build ./build --config RelWithDebInfo --target KCD2OnlineRuntime KCD2OnlineServer KCD2OnlineSignatureAudit KCD2OnlinePropertyCatalog KCD2OnlineTests --
+          ctest --test-dir ./build -C RelWithDebInfo -R "^KCD2Online" --output-on-failure
 
       - name: Package release outputs
         shell: pwsh
@@ -88,7 +88,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kcd2mp-release
+          name: kcd2o-release
           path: out/package/release
       - name: Generate Build Info
         id: var
@@ -147,14 +147,14 @@ jobs:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
-          name: kcd2mp-release
+          name: kcd2o-release
           path: package
 
       - name: Echo build sha256
         id: build_sha
         shell: bash
         run: |
-          sha256sum package/client/KCD2MP-Client-v*.zip package/server/KCD2MP-Server-v*.zip > sha256.checksum
+          sha256sum package/client/KCD2Online-Client-v*.zip package/server/KCD2Online-Server-v*.zip > sha256.checksum
           echo "build_sha=$(cat sha256.checksum)" >> $GITHUB_OUTPUT
           cat sha256.checksum
 
@@ -181,6 +181,6 @@ jobs:
             ${{ needs.build_nightly.outputs.full_sha }}
             ```
           files: |
-            package/client/KCD2MP-Client-v*.zip
-            package/server/KCD2MP-Server-v*.zip
+            package/client/KCD2Online-Client-v*.zip
+            package/server/KCD2Online-Server-v*.zip
             package/SHA256SUMS.txt

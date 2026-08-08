@@ -3,7 +3,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	inline constexpr std::uint64_t remote_soul_settle_frames = 3;
 	inline constexpr auto remote_soul_settle_time =

@@ -1,4 +1,4 @@
-"""Create KCD2MP client, server, test, and release-ZIP packages."""
+"""Create KCD2Online client, server, test, and release-ZIP packages."""
 
 from __future__ import annotations
 
@@ -65,10 +65,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     profile = BUILD_PROFILES[
         "debug" if options.config.lower() == "debug" else "release"
     ]
-    server_path = _artifact(build_dir, options.config, "KCD2MPServer.exe")
-    audit_path = _artifact(build_dir, options.config, "KCD2MPSignatureAudit.exe")
+    server_path = _artifact(build_dir, options.config, "KCD2OnlineServer.exe")
+    audit_path = _artifact(build_dir, options.config, "KCD2OnlineSignatureAudit.exe")
     property_catalog_path = _artifact(
-        build_dir, options.config, "KCD2MPPropertyCatalog.exe"
+        build_dir, options.config, "KCD2OnlinePropertyCatalog.exe"
     )
     generator_path = server_path.parent / GAME_DATA_GENERATOR_EXECUTABLE
     generator_command = [
@@ -101,10 +101,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         kcse_loader_path=_artifact(build_dir, options.config, "dinput8.dll"),
         kcse_loader_pdb_path=_artifact(build_dir, options.config, "dinput8.pdb"),
         kcse_client_path=_artifact(
-            build_dir, options.config, "KCD2MPKCSEClient.dll"
+            build_dir, options.config, "KCD2OnlineKCSEClient.dll"
         ),
         kcse_client_pdb_path=_artifact(
-            build_dir, options.config, "KCD2MPKCSEClient.pdb"
+            build_dir, options.config, "KCD2OnlineKCSEClient.pdb"
         ),
         address_library_paths=_address_libraries(build_dir, options.config),
         game_data_generator_path=generator_path,

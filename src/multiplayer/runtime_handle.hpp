@@ -4,7 +4,7 @@
 #include <optional>
 #include <vector>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	struct runtime_handle
 	{

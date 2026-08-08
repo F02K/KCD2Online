@@ -4,8 +4,8 @@
 
 int main()
 {
-	using namespace kcd2mp::kcse;
-	using namespace kcd2mp::protocol;
+	using namespace kcd2o::kcse;
+	using namespace kcd2o::protocol;
 
 	assert(classify_world_object(world_inventory_source::accessor, false)
 	    == WORLD_OBJECT_KIND_CONTAINER);

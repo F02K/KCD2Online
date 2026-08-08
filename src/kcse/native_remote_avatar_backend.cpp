@@ -30,7 +30,7 @@
 #include <limits>
 #include <ranges>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	namespace
 	{
@@ -161,7 +161,7 @@ namespace kcd2mp::kcse
 				    ? locomotion_request_result::applied
 				    : locomotion_request_result::rejected;
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER(
+			__except(KCD2Online_JOIN_SEH_FILTER(
 			    "join.remote-animation.locomotion.seh"))
 			{
 				return locomotion_request_result::faulted;
@@ -191,7 +191,7 @@ namespace kcd2mp::kcse
 				    ? weapon_action_result::applied
 				    : weapon_action_result::rejected;
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER(
+			__except(KCD2Online_JOIN_SEH_FILTER(
 			    "join.remote-animation.weapon-action.seh"))
 			{
 				return weapon_action_result::faulted;
@@ -215,11 +215,11 @@ namespace kcd2mp::kcse
 				return environment->pScriptSystem->ExecuteBuffer(
 				    script.data(),
 				    script.size(),
-				    "KCD2MP remote player activity",
+				    "KCD2Online remote player activity",
 				    nullptr);
 #ifdef _WIN32
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER(
+			__except(KCD2Online_JOIN_SEH_FILTER(
 			    "remote-player-script.seh"))
 			{
 				return false;
@@ -326,7 +326,7 @@ namespace kcd2mp::kcse
 				return true;
 #ifdef _WIN32
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER(
+			__except(KCD2Online_JOIN_SEH_FILTER(
 			    "remote-player-semantics-readiness.seh"))
 			{
 				return false;
@@ -346,15 +346,15 @@ namespace kcd2mp::kcse
 				ScriptAnyValue value;
 				int result{};
 				const bool read = environment->pScriptSystem->GetGlobalAny(
-				    "KCD2MP_RemoteAvatarPolicyResult", value);
+				    "KCD2Online_RemoteAvatarPolicyResult", value);
 				if (read)
 					(void)value.CopyTo(result);
 				environment->pScriptSystem->SetGlobalToNull(
-				    "KCD2MP_RemoteAvatarPolicyResult");
+				    "KCD2Online_RemoteAvatarPolicyResult");
 				return read ? std::optional<int>{result} : std::nullopt;
 #ifdef _WIN32
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER(
+			__except(KCD2Online_JOIN_SEH_FILTER(
 			    "remote-player-semantics-result.seh"))
 			{
 				return std::nullopt;
@@ -381,7 +381,7 @@ namespace kcd2mp::kcse
 				    scale,
 				    remote_actor_creation_flags);
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER(
+			__except(KCD2Online_JOIN_SEH_FILTER(
 			    "join.remote-spawn.CreateActor.seh"))
 			{
 				return nullptr;
@@ -497,7 +497,7 @@ namespace kcd2mp::kcse
 				    "active probe found no native equipment definition";
 				return active_probe_result::failed;
 			}
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.native-probe.equipment-selected",
 			    std::format(
 			        "definition_id={} equipped_slot={} weapon_class={}",
@@ -508,7 +508,7 @@ namespace kcd2mp::kcse
 			m_probe_snapshot = {};
 			m_probe_snapshot.id =
 			    std::numeric_limits<std::uint64_t>::max();
-			m_probe_snapshot.display_name = "KCD2MP native ABI probe";
+			m_probe_snapshot.display_name = "KCD2Online native ABI probe";
 			m_probe_snapshot.connected = true;
 			m_probe_snapshot.has_transform = true;
 			m_probe_snapshot.transform = origin;
@@ -612,7 +612,7 @@ namespace kcd2mp::kcse
 	{
 		auto *context = wh::game::S_GameContext::GetInstance();
 		auto *environment = SSystemGlobalEnvironment::GetInstance();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-backend.precheck",
 		    std::format(
 		        "game_context={} actor_system={} environment={} "
@@ -633,7 +633,7 @@ namespace kcd2mp::kcse
 		{
 			m_diagnostic =
 			    "native ActorSystem, EntitySystem, or SoulList is unavailable";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-backend.unavailable",
 			    m_diagnostic);
 			return false;
@@ -645,13 +645,13 @@ namespace kcd2mp::kcse
 			    || !npc::initialize_runtime_equipment_catalog(error))
 			{
 				m_diagnostic = std::move(error);
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.remote-backend.catalog-failed",
 				    m_diagnostic);
 				return false;
 			}
 			m_catalogs_ready = true;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-backend.catalog-ready",
 			    "native NPC and equipment catalogs initialized and cached");
 		}
@@ -676,7 +676,7 @@ namespace kcd2mp::kcse
 		    {
 			    return pair.second.player == player.id;
 		    });
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.request",
 		    std::format(
 		        "player_id={} display_name=\"{}\" existing_puppets={} "
@@ -689,7 +689,7 @@ namespace kcd2mp::kcse
 		        player.avatar.archetype_id()));
 		if (existing != 0)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-spawn.duplicate-detected",
 			    std::format(
 			        "player_id={} existing_puppets={} "
@@ -699,7 +699,7 @@ namespace kcd2mp::kcse
 		}
 		if (!available())
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-spawn.rejected",
 			    m_diagnostic);
 			return std::nullopt;
@@ -707,7 +707,7 @@ namespace kcd2mp::kcse
 		if (!player.has_transform)
 		{
 			m_diagnostic = "remote avatar has no transform";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-spawn.rejected",
 			    m_diagnostic);
 			return std::nullopt;
@@ -715,7 +715,7 @@ namespace kcd2mp::kcse
 		if (!player.has_avatar)
 		{
 			m_diagnostic = "remote avatar has no avatar descriptor";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-spawn.rejected",
 			    m_diagnostic);
 			return std::nullopt;
@@ -725,7 +725,7 @@ namespace kcd2mp::kcse
 		{
 			m_diagnostic =
 			    "remote avatar references an unknown native Soul";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-spawn.rejected",
 			    std::format(
 			        "soul=\"{}\" error=\"{}\"",
@@ -739,11 +739,11 @@ namespace kcd2mp::kcse
 		const Vec3 scale(1.0F, 1.0F, 1.0F);
 		const auto handle = m_next_handle++;
 		const auto name = std::format(
-		    "KCD2MP_Remote_{}_{}_{}",
+		    "KCD2Online_Remote_{}_{}_{}",
 		    m_epoch,
 		    player.id,
 		    handle);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.engine-call.begin",
 		    std::format(
 		        "api=IActorSystem::CreateActor channel=0 name=\"{}\" "
@@ -779,21 +779,21 @@ namespace kcd2mp::kcse
 			    &rotation,
 			    &scale);
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    actor_interface
 		        ? "join.remote-spawn.engine-call.returned"
 		        : "join.remote-spawn.engine-call.nil",
 		    std::format(
 		        "api=IActorSystem::CreateActor actor={}",
 		        static_cast<void *>(actor_interface)));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.GetEntity.begin",
 		    std::format(
 		        "actor={}",
 		        static_cast<void *>(actor_interface)));
 		auto *entity =
 		    actor_interface ? actor_interface->GetEntity() : nullptr;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    entity ? "join.remote-spawn.entity.resolved"
 		           : "join.remote-spawn.entity.nil",
 		    std::format(
@@ -803,20 +803,20 @@ namespace kcd2mp::kcse
 		if (!actor_interface || !entity)
 		{
 			m_diagnostic = "IActorSystem::CreateActor(NPC) failed";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-spawn.failed",
 			    m_diagnostic);
 			return std::nullopt;
 		}
 
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.GetId.begin",
 		    std::format("entity={}", static_cast<void *>(entity)));
 		const auto id = entity->GetId();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.GetId.returned",
 		    std::format("entity_id={}", id));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.entity.configure.begin",
 		    std::format(
 		        "player_id={} handle={} entity_id={} entity={}",
@@ -824,38 +824,38 @@ namespace kcd2mp::kcse
 		        handle,
 		        id,
 		        static_cast<void *>(entity)));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.register-player-entity.begin",
 		    std::format("entity_id={}", id));
 		m_entities.register_player_entity(id, player.id);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.register-player-entity.returned",
 		    std::format("entity_id={}", id));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.GetFlags.begin",
 		    std::format("entity_id={}", id));
 		auto flags = entity->GetFlags();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.GetFlags.returned",
 		    std::format("entity_id={} flags=0x{:08X}", id, flags));
 		flags &= ~(entity_flag_has_ai | entity_flag_trigger_areas
 		    | entity_flag_no_proximity);
 		flags |= remote_actor_creation_flags | entity_flag_calc_physics;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.SetFlags.begin",
 		    std::format("entity_id={} flags=0x{:08X}", id, flags));
 		entity->SetFlags(flags);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.SetFlags.returned",
 		    std::format("entity_id={}", id));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.SetAIObjectID.begin",
 		    std::format("entity_id={} ai_object_id=0", id));
 		entity->SetAIObjectID(0);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.SetAIObjectID.returned",
 		    std::format("entity_id={}", id));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.EnablePhysics.begin",
 		    std::format(
 		        "entity_id={} entity={} enabled=false "
@@ -864,27 +864,27 @@ namespace kcd2mp::kcse
 		        static_cast<void *>(entity)));
 		const auto physics_result =
 		    reinterpret_cast<CEntity *>(entity)->EnablePhysics(false);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.EnablePhysics.returned",
 		    std::format(
 		        "entity_id={} result={}",
 		        id,
 		        physics_result));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.Hide.begin",
 		    std::format("entity_id={} hidden=true", id));
 		entity->Hide(true);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.Hide.returned",
 		    std::format("entity_id={}", id));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.Activate.begin",
 		    std::format("entity_id={} active=false", id));
 		entity->Activate(false);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.Activate.returned",
 		    std::format("entity_id={}", id));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.entity.configure.complete",
 		    std::format(
 		        "entity_id={} flags=0x{:08X} client_only=true "
@@ -902,7 +902,7 @@ namespace kcd2mp::kcse
 		        .epoch = m_epoch,
 		        .shared_soul_guid = player.avatar.archetype_id()});
 		(void)iterator;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    inserted ? "join.remote-spawn.success"
 		             : "join.remote-spawn.handle-collision",
 		    std::format(
@@ -955,7 +955,7 @@ namespace kcd2mp::kcse
 	    remote_avatar_handle avatar) const
 	{
 		auto *value = const_cast<entry *>(find(avatar));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-status.begin",
 		    std::format(
 		        "handle={} entry={} epoch={} current_epoch={}",
@@ -978,7 +978,7 @@ namespace kcd2mp::kcse
 
 		auto *entity = resolve_entity(value->entity_id);
 		auto *actor = resolve_actor(value->entity_id);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-status.pointer-state",
 		    std::format(
 		        "player_id={} entity_id={} entity={} actor={}",
@@ -1002,7 +1002,7 @@ namespace kcd2mp::kcse
 			    remote_avatar_state::waiting_for_human,
 			    "waiting for native Human animation/damage controllers"};
 		auto *soul = actor->m_pSoul;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    soul ? "join.remote-status.soul.ready"
 		         : "join.remote-status.soul.pending",
 		    std::format(
@@ -1018,7 +1018,7 @@ namespace kcd2mp::kcse
 		{
 			CryGUID guid{};
 			auto *souls = wh::rpgmodule::C_SoulList::GetInstance();
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-status.ApplySharedSoul.begin",
 			    std::format(
 			        "player_id={} entity_id={} soul={} soul_list={} "
@@ -1045,7 +1045,7 @@ namespace kcd2mp::kcse
 			value->shared_soul_applied_frame = m_frame_sequence;
 			value->shared_soul_applied_at =
 			    std::chrono::steady_clock::now();
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-status.ApplySharedSoul.returned",
 			    std::format(
 			        "player_id={} entity_id={} result=true",
@@ -1062,7 +1062,7 @@ namespace kcd2mp::kcse
 		    value->shared_soul_applied_at);
 		if (!settled.ready)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-status.soul-settling",
 			    std::format(
 			        "player_id={} entity_id={} elapsed_frames={} "
@@ -1080,7 +1080,7 @@ namespace kcd2mp::kcse
 		auto *inventory = soul->m_inventorySoul.GetInventory();
 		auto *equipment =
 		    soul->m_inventorySoul.GetEquipmentManager();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-status.inventory-state",
 		    std::format(
 		        "player_id={} entity_id={} inventory={} equipment_manager={}",
@@ -1113,7 +1113,7 @@ namespace kcd2mp::kcse
 		auto *value = find(avatar);
 		if (!value || value->epoch != m_epoch || value->failed)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-update.rejected",
 			    std::format(
 			        "handle={} entry={} epoch={} current_epoch={} failed={}",
@@ -1169,7 +1169,7 @@ namespace kcd2mp::kcse
 			const auto result = apply_multiplayer_semantics(*value, error);
 			if (result == multiplayer_semantics_result::failed)
 			{
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.remote-multiplayer-semantics.retry",
 				    std::format(
 				        "player_id={} entity_id={} error=\"{}\"",
@@ -1190,7 +1190,7 @@ namespace kcd2mp::kcse
 		if (!value->first_transform_logged)
 		{
 			value->first_transform_logged = true;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-update.first-transform",
 			    std::format(
 			        "player_id={} handle={} entity_id={} "
@@ -1261,7 +1261,7 @@ namespace kcd2mp::kcse
 		{
 			value->failed = true;
 			value->failure = std::move(error);
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-update.failed",
 			    std::format(
 			        "player_id={} handle={} entity_id={} error=\"{}\"",
@@ -1318,7 +1318,7 @@ namespace kcd2mp::kcse
 		{
 			value->failed = true;
 			value->failure = std::move(error);
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-presentation.failed",
 			    std::format(
 			        "player_id={} handle={} entity_id={} error=\"{}\"",
@@ -1375,7 +1375,7 @@ namespace kcd2mp::kcse
 			return false;
 		}
 
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-presentation.begin",
 		    std::format(
 		        "player_id={} entity_id={} physics=true hidden=false active=true",
@@ -1390,7 +1390,7 @@ namespace kcd2mp::kcse
 		entity->Hide(false);
 		avatar.presented = true;
 		avatar.motion_applied = false;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-presentation.complete",
 		    std::format(
 		        "player_id={} entity_id={}",
@@ -1428,7 +1428,7 @@ namespace kcd2mp::kcse
 		native_name->assign(player.display_name.c_str());
 		avatar.display_name = player.display_name;
 		avatar.display_name_applied = true;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-display-name.applied",
 		    std::format(
 		        "player_id={} entity_id={} display_name=\"{}\"",
@@ -1451,7 +1451,7 @@ namespace kcd2mp::kcse
 			return multiplayer_semantics_result::deferred;
 		}
 		const auto script = std::format(
-		    "KCD2MP_RemoteAvatarPolicyResult=0 "
+		    "KCD2Online_RemoteAvatarPolicyResult=0 "
 		    "local ok,code=pcall(function() "
 		    "local e=System.GetEntity({}) "
 		    "if not e then return 2 end "
@@ -1468,13 +1468,13 @@ namespace kcd2mp::kcse
 		    "'switch_disabledHitBehavioralReaction',"
 		    "'crime_disableReport'}} "
 		    "for _,context in ipairs(disabled) do "
-		    "Contexts.SetPersistentOption(e,context,'KCD2MPRemotePlayer') end "
+		    "Contexts.SetPersistentOption(e,context,'KCD2OnlineRemotePlayer') end "
 		    "e.soul:RestrictDialog(true) "
 		    "if e.human.InterruptDialogs then e.human:InterruptDialogs() end "
 		    "for _,context in ipairs(disabled) do "
 		    "if not e.soul:HasScriptContext(context) then return 5 end end "
 		    "return 1 end) "
-		    "KCD2MP_RemoteAvatarPolicyResult=ok and code or -1",
+		    "KCD2Online_RemoteAvatarPolicyResult=ok and code or -1",
 		    avatar.entity_id);
 		if (!execute_remote_script(script))
 		{
@@ -1495,7 +1495,7 @@ namespace kcd2mp::kcse
 		}
 		avatar.multiplayer_semantics_applied = true;
 		avatar.next_multiplayer_semantics_attempt = {};
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-multiplayer-semantics.applied",
 		    std::format(
 		        "player_id={} entity_id={} "
@@ -1660,7 +1660,7 @@ namespace kcd2mp::kcse
 		auto *inventory =
 		    soul ? soul->m_inventorySoul.GetInventory() : nullptr;
 		auto *database = wh::entitymodule::C_ItemDatabase::GetInstance();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-appearance.precheck",
 		    std::format(
 		        "player_id={} entity_id={} actor={} soul={} inventory={} "
@@ -1708,7 +1708,7 @@ namespace kcd2mp::kcse
 			if (!avatar.first_weapon_action_logged)
 			{
 				avatar.first_weapon_action_logged = true;
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.remote-animation.first-weapon-action",
 				    std::format(
 				        "player_id={} entity_id={} requested_drawn={} "
@@ -1720,7 +1720,7 @@ namespace kcd2mp::kcse
 				        static_cast<int>(appearance.weapon_class()),
 				        static_cast<int>(appearance.active_weapon_set())));
 			}
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-animation.weapon-action.begin",
 			    std::format(
 			        "player_id={} entity_id={} requested_drawn={}",
@@ -1735,7 +1735,7 @@ namespace kcd2mp::kcse
 				// rejected or faulting native controller must not destroy the
 				// remote avatar and unload the local multiplayer world.
 				m_native_weapon_actions_enabled = false;
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.remote-animation.weapon-action.disabled",
 				    std::format(
 				        "player_id={} entity_id={} requested_drawn={} reason={}",
@@ -1747,7 +1747,7 @@ namespace kcd2mp::kcse
 				            : "rejected"));
 				return true;
 			}
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-animation.weapon-action.returned",
 			    std::format(
 			        "player_id={} entity_id={} result=true",
@@ -1784,7 +1784,7 @@ namespace kcd2mp::kcse
 		if (!avatar.first_motion_logged)
 		{
 			avatar.first_motion_logged = true;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-animation.first-locomotion",
 			    std::format(
 			        "player_id={} entity_id={} actor={} controller={} "
@@ -1869,7 +1869,7 @@ namespace kcd2mp::kcse
 				// so disable this ABI path for the process instead of failing the
 				// remote avatar and unloading the multiplayer world.
 				m_native_locomotion_enabled = false;
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.remote-animation.locomotion-disabled",
 				    std::format(
 				        "player_id={} entity_id={} speed={} reason={}",
@@ -1917,7 +1917,7 @@ namespace kcd2mp::kcse
 		if (!execute_remote_script(script))
 		{
 			m_native_animation_actions_enabled = false;
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.remote-animation.mannequin-disabled",
 			    std::format(
 			        "player_id={} entity_id={} sequence={} fragment=\"{}\"",
@@ -1927,7 +1927,7 @@ namespace kcd2mp::kcse
 			        animation.fragment()));
 			return;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.remote-animation.mannequin-applied",
 		    std::format(
 		        "player_id={} entity_id={} sequence={} active={} fragment=\"{}\" api=C_ScriptBindHuman::{}",

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "kcd2mp.pb.h"
+#include "kcd2o.pb.h"
 #include "multiplayer/client_state.hpp"
 
-namespace kcd2mp
+namespace kcd2o
 {
 	[[nodiscard]] constexpr bool is_server_message_allowed(
 	    client_state state,
@@ -72,6 +72,8 @@ namespace kcd2mp
 			case payload_case::kServerNpcLeave:
 			case payload_case::kServerNpcAuthority:
 			case payload_case::kServerNpcSnapshot:
+			case payload_case::kServerNpcMotion:
+			case payload_case::kServerNpcGameplayUpdate:
 				return true;
 			default:
 				return false;
@@ -94,4 +96,4 @@ namespace kcd2mp
 		default:                             return true;
 		}
 	}
-} // namespace kcd2mp
+} // namespace kcd2o

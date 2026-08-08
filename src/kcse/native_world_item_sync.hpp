@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kcd2mp.pb.h"
+#include "kcd2o.pb.h"
 
 #include <cstdint>
 #include <deque>
@@ -14,7 +14,7 @@ namespace wh::entitymodule
 	class C_Item;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	class native_world_item_sync
 	{

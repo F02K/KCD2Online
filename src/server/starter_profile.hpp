@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	struct starter_inventory_item
 	{

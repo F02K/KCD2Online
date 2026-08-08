@@ -9,7 +9,7 @@ namespace wh::entitymodule
 	class C_Item;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	// Shared native-inventory primitives. Higher-level profile and remote-avatar
 	// transactions build on this module instead of duplicating item lookup.

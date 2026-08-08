@@ -6,7 +6,7 @@
 
 #include <ranges>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	wh::entitymodule::C_Item *find_inventory_item(
 	    wh::entitymodule::C_Inventory &inventory,

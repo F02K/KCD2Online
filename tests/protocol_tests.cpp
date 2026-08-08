@@ -12,9 +12,9 @@
 
 namespace
 {
-	kcd2mp::protocol::EnvironmentState environment()
+	kcd2o::protocol::EnvironmentState environment()
 	{
-		kcd2mp::protocol::EnvironmentState state;
+		kcd2o::protocol::EnvironmentState state;
 		state.set_revision(1);
 		state.set_time_of_day_hours(8.0);
 		state.set_time_scale(15.0F);
@@ -25,12 +25,12 @@ namespace
 		return state;
 	}
 
-	kcd2mp::protocol::TransformState transform(
+	kcd2o::protocol::TransformState transform(
 	    float x,
 	    float speed,
 	    std::uint64_t sequence)
 	{
-		kcd2mp::protocol::TransformState value;
+		kcd2o::protocol::TransformState value;
 		value.mutable_position()->set_x(x);
 		value.mutable_position()->set_y(2.0F);
 		value.mutable_position()->set_z(3.0F);
@@ -44,8 +44,8 @@ namespace
 
 int main()
 {
-	using kcd2mp::canonical_level_id;
-	using kcd2mp::find_native_world_level;
+	using kcd2o::canonical_level_id;
+	using kcd2o::find_native_world_level;
 	assert(find_native_world_level("2")->name == "trosecko");
 	assert(find_native_world_level("kutnohorsko")->id == "3");
 	assert(find_native_world_level("4")->production);
@@ -54,7 +54,7 @@ int main()
 	assert(canonical_level_id("klaster") == "4");
 	assert(canonical_level_id("custom_level") == "custom_level");
 
-	using namespace kcd2mp;
+	using namespace kcd2o;
 
 	assert(is_valid_display_name("Henry"));
 	assert(is_valid_display_name("Jindřich"));
@@ -64,9 +64,24 @@ int main()
 	assert(is_valid_chat("Hello, Kuttenberg!"));
 	assert(!is_valid_chat(""));
 
+	protocol::Envelope lane_message;
+	lane_message.mutable_chat_send()->set_text("hello");
+	assert(lane_for(lane_message) == traffic_lane::interactive);
+	lane_message.Clear();
+	lane_message.mutable_client_transform();
+	assert(lane_for(lane_message) == traffic_lane::player_realtime);
+	lane_message.Clear();
+	lane_message.mutable_client_npc_update_batch();
+	assert(lane_for(lane_message) == traffic_lane::npc_realtime);
+	lane_message.Clear();
+	lane_message.mutable_client_profile_update();
+	assert(lane_for(lane_message) == traffic_lane::ordered_state);
+	lane_message.Clear();
+	assert(lane_for(lane_message) == traffic_lane::ordered_state);
+
 	protocol::Envelope envelope;
 	auto *hello = envelope.mutable_client_hello();
-	hello->set_version(kcd2mp_version);
+	hello->set_version(kcd2o_version);
 	hello->set_whgame_timestamp(supported_whgame_timestamp);
 	hello->set_whgame_image_size(supported_whgame_image_size);
 	hello->set_display_name("Henry");
@@ -90,7 +105,7 @@ int main()
 	const auto decoded = decode(encoded->bytes, &error);
 	assert(decoded);
 	assert(decoded->client_hello().display_name() == "Henry");
-	assert(decoded->client_hello().version() == "0.1.1");
+	assert(decoded->client_hello().version() == "0.1.2");
 	auto incompatible = envelope;
 	incompatible.mutable_client_hello()->set_version("0.0.8");
 	assert(encode(incompatible, reliability::reliable, &error));
@@ -158,6 +173,14 @@ int main()
 	assert(encode(npc_update, reliability::unreliable, &error));
 	npc_update_message->set_lease_id(0);
 	assert(!encode(npc_update, reliability::unreliable, &error));
+	npc_update_message->set_lease_id(7);
+	protocol::Envelope npc_update_batch;
+	*npc_update_batch.mutable_client_npc_update_batch()->add_updates() =
+	    *npc_update_message;
+	assert(encode(npc_update_batch, reliability::unreliable, &error));
+	*npc_update_batch.mutable_client_npc_update_batch()->add_updates() =
+	    *npc_update_message;
+	assert(!encode(npc_update_batch, reliability::unreliable, &error));
 
 	protocol::Envelope npc_enter;
 	auto *npc_state = npc_enter.mutable_server_npc_enter()->mutable_state();
@@ -170,6 +193,27 @@ int main()
 	npc_state->set_authority_player_id(3);
 	npc_state->set_lease_id(7);
 	assert(encode(npc_enter, reliability::reliable, &error));
+	protocol::Envelope npc_motion;
+	auto *motion = npc_motion.mutable_server_npc_motion();
+	motion->set_server_tick(1);
+	auto *motion_state = motion->add_npcs();
+	motion_state->set_npc_id(npc_state->npc_id());
+	motion_state->set_generation(npc_state->generation());
+	motion_state->set_revision(2);
+	*motion_state->mutable_transform() = transform(5.5F, 0.0F, 1);
+	assert(encode(npc_motion, reliability::unreliable, &error));
+
+	protocol::Envelope npc_gameplay;
+	auto *gameplay = npc_gameplay.mutable_server_npc_gameplay_update();
+	gameplay->set_npc_id(npc_state->npc_id());
+	gameplay->set_generation(npc_state->generation());
+	gameplay->set_state_revision(2);
+	gameplay->mutable_gameplay()->set_revision(1);
+	gameplay->mutable_gameplay()->set_health(100.0F);
+	gameplay->mutable_gameplay()->set_max_health(100.0F);
+	gameplay->mutable_gameplay()->set_behavior(
+	    protocol::NPC_BEHAVIOR_IDLE);
+	assert(encode(npc_gameplay, reliability::reliable, &error));
 	npc_state->set_kind(protocol::NPC_KIND_UNSPECIFIED);
 	assert(!encode(npc_enter, reliability::reliable, &error));
 
@@ -532,7 +576,7 @@ int main()
 	    valid_environment;
 	assert(!encode(environment_update, reliability::reliable, &error));
 
-	assert(kcd2mp_version == "0.1.1");
+	assert(kcd2o_version == "0.1.2");
 	auto unknown_address_library = *runtime;
 	unknown_address_library.set_address_library_sha256(std::string(64, '0'));
 	assert(is_valid_address_library_identity(unknown_address_library));

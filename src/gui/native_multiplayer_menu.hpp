@@ -4,7 +4,7 @@
 
 namespace big::native_multiplayer_menu
 {
-#ifdef KCD2MP_NATIVE_MULTIPLAYER_MENU
+#ifdef KCD2Online_NATIVE_MULTIPLAYER_MENU
 	void before_show_page(void *menu) noexcept;
 	void update() noexcept;
 	[[nodiscard]] bool on_window_message(

@@ -1,6 +1,6 @@
 # Changelog
 
-KCD2MP uses a single semantic project version for client, server, build
+KCD2Online uses a single semantic project version for client, server, build
 artifacts, and network compatibility. The format is `MAJOR.MINOR.PATCH`.
 
 Because the project is still a prototype, any component may contain breaking
@@ -8,8 +8,16 @@ changes. Client and server versions must match exactly.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-09
+
 ### Added
 
+- Added server-authored chat notices for player joins, leaves, reconnects,
+  disconnect timeouts, kicks, deaths, respawns, shared sleep time skips, and
+  server shutdowns.
+- Added an ownership-preserving native player-respawn transaction with
+  Entity, Actor, Soul, and Shared-Soul identity validation, authoritative spawn
+  correction, and matching first-person view alignment.
 - Added sequenced, non-combat Mannequin fragment replication for jumps,
   gestures, and interaction one-shots through KCD2's native `PlayAnim` path.
 - Added continuous locomotion intent (local velocity, acceleration, facing,
@@ -17,6 +25,24 @@ changes. Client and server versions must match exactly.
 
 ### Changed
 
+- Renamed the project and all distributed artifacts to `KCD2Online`; build
+  targets, install paths, executables, archives, and the C++ and Protobuf
+  namespace prefix now use the new `KCD2Online`/`kcd2o` names.
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.2`.
+- Split connection traffic across weighted GameNetworkingSockets lanes for
+  ordered state, player realtime, NPC realtime, and strictly prioritized chat;
+  congested unreliable queues now drop stale realtime updates instead of
+  delaying newer state.
+- Batched client NPC reports and split server NPC delivery into budgeted,
+  unreliable motion keyframes and independently revisioned reliable gameplay
+  updates, avoiding full-state and inventory retransmission on every tick.
+- Restricted replicated NPC identity to catalog-backed authored NPCs. Runtime
+  Entity GUIDs are process-local and no longer create canonical server NPCs or
+  authorize clients to spawn missing native Actors.
+- Dedicated servers now import generated `property_catalog_<level_id>.pb`
+  files from `[property].game_data`; the obsolete `[property].game_root`
+  setting is rejected and the server no longer scans a local KCD2 install.
 - Remote transforms now use damped corrections with a teleport threshold while
   KCD2's native movement controller owns locomotion blending.
 - Remote equipment reconciliation now retains unchanged native item instances
@@ -25,6 +51,12 @@ changes. Client and server versions must match exactly.
 
 ### Fixed
 
+- Waited for KCD2's native `LEVEL_LOAD_COMPLETE`/`RUNNING` state instead of a
+  fixed bootstrap deadline, and deferred disconnect cleanup until loading is
+  safe, preventing slow joins and mid-load unloads from failing prematurely.
+- Retried adoption when an authored NPC streams in after its server enter
+  message, while leaving unknown runtime NPCs pending instead of spawning
+  duplicates from client-local GUIDs.
 - Derived local player velocity from consecutive native transforms so remote
   avatars enter walk/run locomotion instead of remaining idle.
 - Applied interpolated remote transforms at presentation cadence and reduced
@@ -33,6 +65,8 @@ changes. Client and server versions must match exactly.
 - Moved the in-game chat onto a presentation-rate ImGui frame, separated its
   state from world/NPC synchronization, and prioritized its unbatched reliable
   packets so UI and delivery no longer wait for engine refreshes.
+- Added the respawn-guard test executable to the aggregate `KCD2OnlineTests`
+  target so the build tool always creates it before invoking CTest.
 
 ## [0.1.1] - 2026-08-06
 
@@ -109,7 +143,7 @@ changes. Client and server versions must match exactly.
 ### Changed
 
 - Replaced the separate numeric protocol and client versions with the single
-  KCD2MP version `0.0.9`.
+  KCD2Online version `0.0.9`.
 - Made the CMake project version the source for the generated handshake version.
 - Aligned Windows resource metadata and nightly artifacts with `0.0.9`.
 - Reworked project documentation to state prototype status and current limits.
@@ -135,5 +169,5 @@ The pre-0.0.9 foundation introduced:
 - synchronized doors and inventory-backed containers; and
 - shared time-of-day and weather.
 
-Starting with `0.0.9`, all changes are recorded only against the unified KCD2MP
+Starting with `0.0.9`, all changes are recorded only against the unified KCD2Online
 project version.

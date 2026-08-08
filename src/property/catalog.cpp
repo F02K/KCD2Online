@@ -20,7 +20,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace kcd2mp::property
+namespace kcd2o::property
 {
 	namespace
 	{

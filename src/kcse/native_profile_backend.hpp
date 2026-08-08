@@ -23,7 +23,7 @@ namespace wh::playermodule
 	class C_OutfitManager;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	class native_profile_backend final : public profile_backend
 	{

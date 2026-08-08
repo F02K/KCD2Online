@@ -26,17 +26,17 @@ namespace big::native_multiplayer_menu
 		constexpr std::uint8_t custom_death_page = 0xFD;
 
 		constexpr std::string_view multiplayer_button =
-		    "KCD2MP.Multiplayer";
-		constexpr std::string_view address_button = "KCD2MP.Address";
-		constexpr std::string_view name_button = "KCD2MP.Name";
-		constexpr std::string_view password_button = "KCD2MP.Password";
-		constexpr std::string_view connect_button = "KCD2MP.Connect";
-		constexpr std::string_view disconnect_button = "KCD2MP.Disconnect";
+		    "KCD2Online.Multiplayer";
+		constexpr std::string_view address_button = "KCD2Online.Address";
+		constexpr std::string_view name_button = "KCD2Online.Name";
+		constexpr std::string_view password_button = "KCD2Online.Password";
+		constexpr std::string_view connect_button = "KCD2Online.Connect";
+		constexpr std::string_view disconnect_button = "KCD2Online.Disconnect";
 		constexpr std::string_view cancel_pending_button =
-		    "KCD2MP.CancelPending";
-		constexpr std::string_view status_button = "KCD2MP.Status";
-		constexpr std::string_view back_button = "KCD2MP.Back";
-		constexpr std::string_view respawn_button = "KCD2MP.Respawn";
+		    "KCD2Online.CancelPending";
+		constexpr std::string_view status_button = "KCD2Online.Status";
+		constexpr std::string_view back_button = "KCD2Online.Back";
+		constexpr std::string_view respawn_button = "KCD2Online.Respawn";
 
 		enum class edit_field
 		{
@@ -197,15 +197,15 @@ namespace big::native_multiplayer_menu
 			return value;
 		}
 
-		std::string client_state_text(const kcd2mp::client_status &status)
+		std::string client_state_text(const kcd2o::client_status &status)
 		{
-			using kcd2mp::client_state;
+			using kcd2o::client_state;
 			if (!status.error.empty())
 				return "Connection failed: " + status.error;
 			switch (status.state)
 			{
 			case client_state::disconnected:
-				return kcd2mp::kcse::ui_client().can_start_join()
+				return kcd2o::kcse::ui_client().can_start_join()
 				    ? ingame_ui::localized("menu.status.ready")
 				    : ingame_ui::localized("menu.status.kcse_preparing");
 			case client_state::runtime_preflight:
@@ -238,7 +238,7 @@ namespace big::native_multiplayer_menu
 
 		std::string &edited_value(state &value)
 		{
-			auto &settings = kcd2mp::ui_settings();
+			auto &settings = kcd2o::ui_settings();
 			switch (value.editing)
 			{
 			case edit_field::address: return settings.address;
@@ -251,7 +251,7 @@ namespace big::native_multiplayer_menu
 
 		void persist_edit(edit_field field)
 		{
-			auto &settings = kcd2mp::ui_settings();
+			auto &settings = kcd2o::ui_settings();
 			if (field == edit_field::address)
 				settings.persist_address();
 			else if (field == edit_field::name)
@@ -281,16 +281,16 @@ namespace big::native_multiplayer_menu
 			if (!api.available())
 				return;
 
-			const auto status = kcd2mp::kcse::ui_client().status();
+			const auto status = kcd2o::kcse::ui_client().status();
 			ingame_ui::page page;
 			page.id = custom_multiplayer_page;
 			page.title = status.error.empty()
 			    ? ingame_ui::localized("menu.multiplayer.title")
 			    : "Multiplayer connection failed";
 
-			auto &settings = kcd2mp::ui_settings();
+			auto &settings = kcd2o::ui_settings();
 			const bool settings_locked = pending_join
-			    || status.state != kcd2mp::client_state::disconnected;
+			    || status.state != kcd2o::client_state::disconnected;
 			const auto edit_prefix =
 			    ingame_ui::localized("menu.field.edit_prefix") + " ";
 			page.add_button(
@@ -327,7 +327,7 @@ namespace big::native_multiplayer_menu
 				    std::string(cancel_pending_button),
 				    ingame_ui::localized("menu.action.cancel_pending"));
 			}
-			else if (status.state == kcd2mp::client_state::disconnected)
+			else if (status.state == kcd2o::client_state::disconnected)
 			{
 				page.add_button(
 				    std::string(connect_button),
@@ -378,7 +378,7 @@ namespace big::native_multiplayer_menu
 			case edit_field::none:
 				page.selected_button = pending_join
 				    ? cancel_pending_button
-				    : status.state == kcd2mp::client_state::disconnected
+				    : status.state == kcd2o::client_state::disconnected
 				    ? address_button
 				    : disconnect_button;
 				break;
@@ -410,7 +410,7 @@ namespace big::native_multiplayer_menu
 			if (!api.available())
 				return;
 
-			const auto status = kcd2mp::kcse::ui_client().status();
+			const auto status = kcd2o::kcse::ui_client().status();
 			ingame_ui::page page;
 			page.id = custom_death_page;
 			page.visible_rows = 3;
@@ -479,10 +479,10 @@ namespace big::native_multiplayer_menu
 		void connect_or_defer()
 		{
 			auto &value = menu_state();
-			kcd2mp::client_options options;
+			kcd2o::client_options options;
 			{
 				std::scoped_lock lock(value.mutex);
-				auto &settings = kcd2mp::ui_settings();
+				auto &settings = kcd2o::ui_settings();
 				settings.persist_address();
 				settings.persist_display_name();
 				options.address = settings.address;
@@ -498,9 +498,9 @@ namespace big::native_multiplayer_menu
 				return;
 			}
 
-			if (kcd2mp::kcse::ui_client().can_start_join())
+			if (kcd2o::kcse::ui_client().can_start_join())
 			{
-				const auto started = kcd2mp::kcse::ui_client().connect(options);
+				const auto started = kcd2o::kcse::ui_client().connect(options);
 				std::scoped_lock lock(value.mutex);
 				if (started)
 				{
@@ -547,7 +547,7 @@ namespace big::native_multiplayer_menu
 			}
 			else if (button == disconnect_button)
 			{
-				kcd2mp::kcse::ui_client().disconnect();
+				kcd2o::kcse::ui_client().disconnect();
 				auto &value = menu_state();
 				std::scoped_lock lock(value.mutex);
 				value.password.clear();
@@ -569,7 +569,7 @@ namespace big::native_multiplayer_menu
 			}
 			else if (button == respawn_button)
 			{
-				if (kcd2mp::kcse::ui_client().request_respawn())
+				if (kcd2o::kcse::ui_client().request_respawn())
 					show_death_page(true);
 			}
 		}
@@ -651,11 +651,11 @@ namespace big::native_multiplayer_menu
 				value.editing = edit_field::none;
 			}
 			if (attach_listener)
-				element->AddEventListener(&value.event_listener, "KCD2MP");
+				element->AddEventListener(&value.event_listener, "KCD2Online");
 
-			const auto status = kcd2mp::kcse::ui_client().status();
+			const auto status = kcd2o::kcse::ui_client().status();
 			if (api.mode() == 4
-			    && status.state == kcd2mp::client_state::connected
+			    && status.state == kcd2o::client_state::connected
 			    && status.dead)
 			{
 				show_death_page(false);
@@ -672,7 +672,7 @@ namespace big::native_multiplayer_menu
 			}
 			const auto label = pending
 			    ? ingame_ui::localized("menu.root.pending")
-			    : status.state == kcd2mp::client_state::connected
+			    : status.state == kcd2o::client_state::connected
 			    ? ingame_ui::localized("menu.root.connected")
 			    : ingame_ui::localized("menu.root.multiplayer");
 			(void)api.append_button(
@@ -682,7 +682,7 @@ namespace big::native_multiplayer_menu
 		}
 		catch (...)
 		{
-			OutputDebugStringA("KCD2MP native menu injection failed.\n");
+			OutputDebugStringA("KCD2Online native menu injection failed.\n");
 		}
 	}
 
@@ -691,11 +691,11 @@ namespace big::native_multiplayer_menu
 		try
 		{
 			auto &value = menu_state();
-			const auto current_status = kcd2mp::kcse::ui_client().status();
+			const auto current_status = kcd2o::kcse::ui_client().status();
 			bool present_error{};
 			{
 				std::scoped_lock lock(value.mutex);
-				if (current_status.state == kcd2mp::client_state::disconnected
+				if (current_status.state == kcd2o::client_state::disconnected
 				    && !current_status.error.empty()
 				    && current_status.error != value.presented_error
 				    && value.menu)
@@ -734,8 +734,8 @@ namespace big::native_multiplayer_menu
 			}
 			if (death_page_open)
 			{
-				const auto status = kcd2mp::kcse::ui_client().status();
-				if (status.state != kcd2mp::client_state::connected
+				const auto status = kcd2o::kcse::ui_client().status();
+				if (status.state != kcd2o::client_state::connected
 				    || (!status.dead && !status.respawn_pending))
 				{
 					close_menu();
@@ -748,19 +748,19 @@ namespace big::native_multiplayer_menu
 				std::scoped_lock lock(value.mutex);
 				pending = value.pending_join;
 			}
-			if (pending && kcd2mp::kcse::ui_client().can_start_join())
+			if (pending && kcd2o::kcse::ui_client().can_start_join())
 			{
-				kcd2mp::client_options options;
+				kcd2o::client_options options;
 				{
 					std::scoped_lock lock(value.mutex);
-					auto &settings = kcd2mp::ui_settings();
+					auto &settings = kcd2o::ui_settings();
 					options.address = settings.address;
 					options.display_name = settings.display_name;
 					options.password = value.password;
 					value.pending_join = false;
 				}
 				const auto started =
-				    kcd2mp::kcse::ui_client().connect(options);
+				    kcd2o::kcse::ui_client().connect(options);
 				{
 					std::scoped_lock lock(value.mutex);
 					if (started)
@@ -791,7 +791,7 @@ namespace big::native_multiplayer_menu
 			if (poll_status)
 			{
 				const auto status_text = client_state_text(
-				    kcd2mp::kcse::ui_client().status());
+				    kcd2o::kcse::ui_client().status());
 				std::scoped_lock lock(value.mutex);
 				if (value.page_open && value.editing == edit_field::none
 				    && status_text != value.last_status_text)
@@ -808,7 +808,7 @@ namespace big::native_multiplayer_menu
 		}
 		catch (...)
 		{
-			OutputDebugStringA("KCD2MP native menu update failed.\n");
+			OutputDebugStringA("KCD2Online native menu update failed.\n");
 		}
 	}
 
@@ -826,8 +826,8 @@ namespace big::native_multiplayer_menu
 
 			auto &text = edited_value(value);
 			const auto limit = value.editing == edit_field::password
-			    ? kcd2mp::kcse::text_capacity - 1
-			    : kcd2mp::kcse::short_text_capacity - 1;
+			    ? kcd2o::kcse::text_capacity - 1
+			    : kcd2o::kcse::short_text_capacity - 1;
 			if (message == WM_KEYDOWN && wparam == VK_ESCAPE)
 			{
 				text = value.edit_original;

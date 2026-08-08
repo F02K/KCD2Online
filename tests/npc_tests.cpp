@@ -8,7 +8,7 @@
 namespace
 {
 	using namespace std::chrono_literals;
-	using namespace kcd2mp::npc;
+	using namespace kcd2o::npc;
 
 	class fake_backend final : public backend
 	{
@@ -87,7 +87,7 @@ namespace
 
 int main()
 {
-	using namespace kcd2mp::npc;
+	using namespace kcd2o::npc;
 	const auto start = manager::clock::now();
 	fake_backend backend;
 	manager npcs(backend, 2, 10s);
@@ -161,7 +161,7 @@ int main()
 	xgen_request.archetype_id             = "763db0bb-4469-497d-bdc9-712b3df91b5a";
 	xgen_request.world_transform.position = {1.0F, 2.0F, 3.0F};
 	const auto parameters                 = make_xgen_spawn_parameters(xgen_request, 42);
-	assert(parameters.name == "KCD2MP_Remote_42");
+	assert(parameters.name == "KCD2Online_Remote_42");
 	assert(parameters.class_name == "NPC");
 	assert(parameters.shared_soul_guid == xgen_request.archetype_id);
 	assert(parameters.position == xgen_request.world_transform.position);

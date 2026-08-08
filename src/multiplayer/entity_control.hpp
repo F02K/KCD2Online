@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	using controlled_entity = void *;
 

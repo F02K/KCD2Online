@@ -20,8 +20,8 @@
 
 namespace
 {
-	kcd2mp::kcse::native_runtime *g_runtime{};
-	kcd2mp::multiplayer_client *g_client{};
+	kcd2o::kcse::native_runtime *g_runtime{};
+	kcd2o::multiplayer_client *g_client{};
 	KCSE::ITaskInterface *g_tasks{};
 	using frame_clock = std::chrono::steady_clock;
 	frame_clock::time_point g_next_remote_sync{};
@@ -82,7 +82,7 @@ namespace
 		return static_cast<std::uint32_t>(std::min<std::size_t>(count, std::numeric_limits<std::uint32_t>::max()));
 	}
 
-	bool remote_sync_due(frame_clock::time_point now, const kcd2mp::client_update_rates &rates)
+	bool remote_sync_due(frame_clock::time_point now, const kcd2o::client_update_rates &rates)
 	{
 		// Snapshots arrive at the server cadence, but the interpolated transform
 		// changes every rendered frame. Apply it at up to 60 Hz so a 20 Hz
@@ -123,16 +123,16 @@ namespace
 	    std::chrono::nanoseconds game_tick_time,
 	    std::chrono::nanoseconds remote_sync_time,
 	    bool sync_ran,
-	    const kcd2mp::client_status &status,
-	    const kcd2mp::client_update_rates &rates,
+	    const kcd2o::client_status &status,
+	    const kcd2o::client_update_rates &rates,
 	    bool sandbox_active)
 	{
-		if (!kcd2mp::kcse::join_trace::diagnostics_enabled())
+		if (!kcd2o::kcse::join_trace::diagnostics_enabled())
 		{
 			g_performance = {};
 			return;
 		}
-		if (status.state != kcd2mp::client_state::connected || !sandbox_active)
+		if (status.state != kcd2o::client_state::connected || !sandbox_active)
 		{
 			g_performance = {};
 			return;
@@ -164,7 +164,7 @@ namespace
 		    std::chrono::duration<double>(elapsed).count();
 		const auto frame_count = static_cast<double>(g_performance.frames);
 		const auto sync_count = static_cast<double>(g_performance.sync_runs);
-		kcd2mp::kcse::join_trace::write_diagnostic(
+		kcd2o::kcse::join_trace::write_diagnostic(
 		    "performance.remote-sync",
 		    std::format(
 		        "fps={:.1f} frames={} server_tick_rate={} "
@@ -197,7 +197,7 @@ namespace
 		std::chrono::nanoseconds game_tick_time{};
 		std::chrono::nanoseconds remote_sync_time{};
 		bool sync_ran = false;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.kcse-post-update.enter",
 		    std::format(
 		        "runtime={} client={} task_interface={}",
@@ -206,37 +206,37 @@ namespace
 		        static_cast<void *>(g_tasks)));
 		if (!g_runtime || !g_client || !g_tasks)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.kcse-post-update.skipped",
 			    "runtime, client, or task interface is nil");
 			return;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.kcse-post-update.runtime-frame.begin",
 		    "calling native_runtime::on_frame");
 		if (g_runtime->on_frame())
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.kcse-post-update.epoch-changed",
 			    "notifying multiplayer client");
 			g_client->runtime_epoch_changed();
 		}
 
 		auto client_status = g_client->status();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.kcse-post-update.client-state",
 		    std::format(
 		        "state={} sandbox_active={} game_queue={}",
 		        static_cast<int>(client_status.state),
 		        g_runtime->sandbox_active(),
 		        client_status.game_queue_size));
-		if (client_status.state != kcd2mp::client_state::disconnected)
+		if (client_status.state != kcd2o::client_state::disconnected)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.kcse-post-update.game-tick.begin",
 			    "draining network envelopes on KCSE PostUpdate thread");
 			const auto now = std::chrono::steady_clock::now();
-			std::optional<kcd2mp::protocol::AvatarDescriptor> avatar_visual;
+			std::optional<kcd2o::protocol::AvatarDescriptor> avatar_visual;
 			if (g_client->reserve_local_avatar_sample(now))
 				avatar_visual = g_runtime->local_avatar_visual();
 			const auto game_tick_started = frame_clock::now();
@@ -247,7 +247,7 @@ namespace
 			    now);
 			game_tick_time = frame_clock::now() - game_tick_started;
 			client_status = g_client->status();
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.kcse-post-update.game-tick.complete",
 			    std::format(
 			        "state={} game_queue={}",
@@ -256,7 +256,7 @@ namespace
 		}
 
 		const bool sandbox_active = g_runtime->sandbox_active();
-		if (client_status.state == kcd2mp::client_state::connected
+		if (client_status.state == kcd2o::client_state::connected
 		    && sandbox_active)
 		{
 			if (const auto activity =
@@ -292,7 +292,7 @@ namespace
 		}
 		const auto update_rates = g_client->update_rates();
 		const auto remote_sync_now = frame_clock::now();
-		if (client_status.state == kcd2mp::client_state::connected
+		if (client_status.state == kcd2o::client_state::connected
 		    && sandbox_active
 		    && remote_sync_due(remote_sync_now, update_rates))
 		{
@@ -300,10 +300,10 @@ namespace
 			const auto remote_sync_started = frame_clock::now();
 			const auto players = g_client->remote_players();
 			g_last_remote_player_count = players.size();
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.kcse-post-update.remote-sync.prepare",
 			    std::format("remote_players={}", players.size()));
-			std::vector<kcd2mp::remote_avatar_snapshot> snapshots;
+			std::vector<kcd2o::remote_avatar_snapshot> snapshots;
 			snapshots.reserve(players.size());
 			for (const auto &player : players)
 			{
@@ -324,7 +324,7 @@ namespace
 			remote_sync_time = frame_clock::now() - remote_sync_started;
 			if (!synchronized.success)
 			{
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.kcse-post-update.remote-sync.failed",
 				    synchronized.error);
 				g_client->fail(
@@ -332,13 +332,13 @@ namespace
 				    + synchronized.error);
 			}
 		}
-		else if (client_status.state != kcd2mp::client_state::connected
+		else if (client_status.state != kcd2o::client_state::connected
 		    || !sandbox_active)
 		{
 			reset_remote_sync_schedule();
 		}
 
-		if (client_status.state == kcd2mp::client_state::connected)
+		if (client_status.state == kcd2o::client_state::connected)
 		{
 			if (const auto correction = g_client->take_local_correction())
 			{
@@ -350,8 +350,8 @@ namespace
 				}
 			}
 		}
-		if (client_status.state == kcd2mp::client_state::closing
-		    || client_status.state == kcd2mp::client_state::disconnected)
+		if (client_status.state == kcd2o::client_state::closing
+		    || client_status.state == kcd2o::client_state::disconnected)
 		{
 			if (g_runtime->sandbox_active() || !client_status.error.empty())
 				g_runtime->end_sandbox(client_status.error);
@@ -369,7 +369,7 @@ namespace
 		    update_rates,
 		    sandbox_active);
 		queue_frame();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.kcse-post-update.complete",
 		    "next KCSE PostUpdate task queued");
 	}
@@ -382,7 +382,7 @@ namespace
 		}
 		catch (const std::exception &exception)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.kcse-post-update.exception",
 			    std::format(
 			        "type=std::exception what=\"{}\"",
@@ -395,7 +395,7 @@ namespace
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.kcse-post-update.exception",
 			    "type=unknown");
 			if (g_client)
@@ -410,20 +410,20 @@ namespace
 		if (g_client)
 			g_client->fail(
 			    "SEH exception on KCSE PostUpdate thread; see "
-			    "KCD2MP-join.log");
+			    "KCD2Online-join.log");
 		queue_frame();
 	}
 
 	void run_frame()
 	{
-		kcd2mp::kcse::join_trace::set_thread_role(
-		    kcd2mp::kcse::join_trace::thread_role::kcse_post_update);
+		kcd2o::kcse::join_trace::set_thread_role(
+		    kcd2o::kcse::join_trace::thread_role::kcse_post_update);
 #ifdef _WIN32
 		__try
 		{
 			run_frame_with_cpp_exceptions();
 		}
-		__except(KCD2MP_JOIN_SEH_FILTER(
+		__except(KCD2Online_JOIN_SEH_FILTER(
 		    "join.kcse-post-update.seh"))
 		{
 			recover_from_frame_seh();
@@ -442,7 +442,7 @@ namespace
 
 	void on_kcse_message(KCSE::Message *message)
 	{
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.kcse.lifecycle",
 		    std::format(
 		        "message={} sender=\"{}\" data_length={}",
@@ -454,12 +454,12 @@ namespace
 	}
 
 	std::uint32_t __cdecl abi_get_runtime_status(
-	    kcd2mp::kcse::runtime_status *result) noexcept
+	    kcd2o::kcse::runtime_status *result) noexcept
 	{
 		try
 		{
 			if (!result
-			    || result->struct_size != sizeof(kcd2mp::kcse::runtime_status)
+			    || result->struct_size != sizeof(kcd2o::kcse::runtime_status)
 			    || !g_runtime)
 				return 0;
 			const auto descriptor = g_runtime->descriptor();
@@ -478,7 +478,7 @@ namespace
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-get-runtime-status.exception",
 			    "type=unknown");
 			return 0;
@@ -486,15 +486,15 @@ namespace
 	}
 
 	std::uint32_t __cdecl abi_connect(
-	    const kcd2mp::kcse::connect_request *request) noexcept
+	    const kcd2o::kcse::connect_request *request) noexcept
 	{
-		kcd2mp::kcse::join_trace::set_thread_role(
-		    kcd2mp::kcse::join_trace::thread_role::abi);
+		kcd2o::kcse::join_trace::set_thread_role(
+		    kcd2o::kcse::join_trace::thread_role::abi);
 		try
 		{
 			if (!request
 			    || request->struct_size
-			        != sizeof(kcd2mp::kcse::connect_request)
+			        != sizeof(kcd2o::kcse::connect_request)
 			    || !valid_text(request->address)
 			    || !valid_text(request->display_name)
 			    || !valid_text(request->password)
@@ -502,11 +502,11 @@ namespace
 			    || !valid_text(request->claim_code) || !g_client)
 			{
 				const auto trace_id =
-				    kcd2mp::kcse::join_trace::begin_join(
+				    kcd2o::kcse::join_trace::begin_join(
 				        request && valid_text(request->address)
 				            ? std::string_view(request->address)
 				            : std::string_view("<invalid-request>"));
-				KCD2MP_JOIN_TRACE(
+				KCD2Online_JOIN_TRACE(
 				    "join.abi-connect.rejected",
 				    std::format(
 				        "trace={} request={} struct_size={} expected_size={} "
@@ -514,13 +514,13 @@ namespace
 				        trace_id,
 				        static_cast<const void *>(request),
 				        request ? request->struct_size : 0,
-				        sizeof(kcd2mp::kcse::connect_request),
+				        sizeof(kcd2o::kcse::connect_request),
 				        static_cast<void *>(g_client)));
-				kcd2mp::kcse::join_trace::finish_join(
+				kcd2o::kcse::join_trace::finish_join(
 				    "ABI connect request validation failed");
 				return 0;
 			}
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-connect.accepted",
 			    std::format(
 			        "request={} target=\"{}\" display_name_length={}",
@@ -528,8 +528,8 @@ namespace
 			        request->address,
 			        strnlen_s(
 			            request->display_name,
-			            kcd2mp::kcse::text_capacity)));
-			kcd2mp::client_options options;
+			            kcd2o::kcse::text_capacity)));
+			kcd2o::client_options options;
 			options.address = request->address;
 			options.display_name = request->display_name;
 			options.password = request->password;
@@ -539,20 +539,20 @@ namespace
 		}
 		catch (const std::exception &exception)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-connect.exception",
 			    std::format(
 			        "type=std::exception what=\"{}\"",
 			        exception.what()));
-			kcd2mp::kcse::join_trace::finish_join(exception.what());
+			kcd2o::kcse::join_trace::finish_join(exception.what());
 			return 0;
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-connect.exception",
 			    "type=unknown");
-			kcd2mp::kcse::join_trace::finish_join(
+			kcd2o::kcse::join_trace::finish_join(
 			    "unknown ABI connect exception");
 			return 0;
 		}
@@ -567,7 +567,7 @@ namespace
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-disconnect.exception",
 			    "type=unknown");
 		}
@@ -579,14 +579,14 @@ namespace
 		{
 			if (!text || !g_client)
 				return 0;
-			const auto length = strnlen_s(text, kcd2mp::kcse::text_capacity);
-			if (length == 0 || length == kcd2mp::kcse::text_capacity)
+			const auto length = strnlen_s(text, kcd2o::kcse::text_capacity);
+			if (length == 0 || length == kcd2o::kcse::text_capacity)
 				return 0;
 			return g_client->send_chat(std::string(text, length)) ? 1U : 0U;
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-send-chat.exception",
 			    "type=unknown");
 			return 0;
@@ -602,9 +602,9 @@ namespace
 				return 0;
 			const auto length = strnlen_s(
 			    archetype_id,
-			    kcd2mp::kcse::short_text_capacity);
+			    kcd2o::kcse::short_text_capacity);
 			if (length == 0
-			    || length == kcd2mp::kcse::short_text_capacity)
+			    || length == kcd2o::kcse::short_text_capacity)
 				return 0;
 			return g_client->select_avatar(
 			           std::string(archetype_id, length))
@@ -613,7 +613,7 @@ namespace
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-select-avatar.exception",
 			    "type=unknown");
 			return 0;
@@ -662,13 +662,13 @@ namespace
 	}
 
 	std::uint32_t __cdecl abi_get_status(
-	    kcd2mp::kcse::client_status_view *result) noexcept
+	    kcd2o::kcse::client_status_view *result) noexcept
 	{
 		try
 		{
 			if (!result
 			    || result->struct_size
-			        != sizeof(kcd2mp::kcse::client_status_view)
+			        != sizeof(kcd2o::kcse::client_status_view)
 			    || !g_client)
 				return 0;
 			const auto status = g_client->status();
@@ -698,7 +698,7 @@ namespace
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-get-status.exception",
 			    "type=unknown");
 			return 0;
@@ -706,7 +706,7 @@ namespace
 	}
 
 	std::uint32_t __cdecl abi_copy_players(
-	    kcd2mp::kcse::remote_player_view *output,
+	    kcd2o::kcse::remote_player_view *output,
 	    std::uint32_t capacity) noexcept
 	{
 		try
@@ -735,7 +735,7 @@ namespace
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-copy-players.exception",
 			    "type=unknown");
 			return 0;
@@ -743,7 +743,7 @@ namespace
 	}
 
 	std::uint32_t __cdecl abi_copy_chat(
-	    kcd2mp::kcse::chat_entry_view *output,
+	    kcd2o::kcse::chat_entry_view *output,
 	    std::uint32_t capacity) noexcept
 	{
 		try
@@ -770,7 +770,7 @@ namespace
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-copy-chat.exception",
 			    "type=unknown");
 			return 0;
@@ -778,7 +778,7 @@ namespace
 	}
 
 	std::uint32_t __cdecl abi_copy_avatar_archetypes(
-	    kcd2mp::kcse::fixed_string *output,
+	    kcd2o::kcse::fixed_string *output,
 	    std::uint32_t capacity) noexcept
 	{
 		try
@@ -804,7 +804,7 @@ namespace
 		}
 		catch (...)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.abi-copy-avatar-archetypes.exception",
 			    "type=unknown");
 			return 0;
@@ -813,14 +813,14 @@ namespace
 
 	void __cdecl abi_set_diagnostic_logging(std::uint32_t enabled) noexcept
 	{
-		kcd2mp::kcse::join_trace::set_diagnostics_enabled(enabled != 0);
+		kcd2o::kcse::join_trace::set_diagnostics_enabled(enabled != 0);
 	}
 
-	const kcd2mp::kcse::client_api g_api{
-	    sizeof(kcd2mp::kcse::client_api),
-	    kcd2mp::kcd2mp_version_major,
-	    kcd2mp::kcd2mp_version_minor,
-	    kcd2mp::kcd2mp_version_patch,
+	const kcd2o::kcse::client_api g_api{
+	    sizeof(kcd2o::kcse::client_api),
+	    kcd2o::kcd2o_version_major,
+	    kcd2o::kcd2o_version_minor,
+	    kcd2o::kcd2o_version_patch,
 	    abi_get_runtime_status,
 	    abi_connect,
 	    abi_disconnect,
@@ -838,7 +838,7 @@ namespace
 KCSE_EXPORT KCSE::PluginVersionData KCSEPlugin_Version = {
     KCSE::PluginVersionData::kDataVersion,
     4,
-    "KCD2MPClient",
+    "KCD2OnlineClient",
     "F02K",
     {0x01050600},
     1,
@@ -857,8 +857,8 @@ KCSE_EXPORT bool KCSEPlugin_Load(const KCSE::IKCSEInterface *kcse)
 
 	// KCSE plugins are process-lifetime objects. Intentionally leak the client
 	// so its network thread is never joined from DLL_PROCESS_DETACH.
-	g_runtime = new kcd2mp::kcse::native_runtime(*kcse);
-	g_client = new kcd2mp::multiplayer_client(*g_runtime);
+	g_runtime = new kcd2o::kcse::native_runtime(*kcse);
+	g_client = new kcd2o::multiplayer_client(*g_runtime);
 	if (!install_activity_hooks())
 	{
 		delete g_client;
@@ -879,14 +879,14 @@ KCSE_EXPORT bool KCSEPlugin_Load(const KCSE::IKCSEInterface *kcse)
 	return true;
 }
 
-KCSE_EXPORT const kcd2mp::kcse::client_api *__cdecl KCD2MP_QueryClient(
+KCSE_EXPORT const kcd2o::kcse::client_api *__cdecl KCD2Online_QueryClient(
     std::uint32_t requested_version_major,
     std::uint32_t requested_version_minor,
     std::uint32_t requested_version_patch) noexcept
 {
-	return requested_version_major == kcd2mp::kcd2mp_version_major
-	        && requested_version_minor == kcd2mp::kcd2mp_version_minor
-	        && requested_version_patch == kcd2mp::kcd2mp_version_patch
+	return requested_version_major == kcd2o::kcd2o_version_major
+	        && requested_version_minor == kcd2o::kcd2o_version_minor
+	        && requested_version_patch == kcd2o::kcd2o_version_patch
 	    ? &g_api
 	    : nullptr;
 }

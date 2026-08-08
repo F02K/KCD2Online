@@ -1,7 +1,7 @@
 {
   "name": "gamenetworkingsockets",
   "version": "1.5.1",
-  "description": "GameNetworkingSockets configured for KCD2MP's static Windows BCrypt build.",
+  "description": "GameNetworkingSockets configured for KCD2Online's static Windows BCrypt build.",
   "homepage": "https://github.com/ValveSoftware/GameNetworkingSockets",
   "license": "BSD-3-Clause",
   "supports": "windows & !uwp & !arm64",

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kcd2mp.pb.h"
+#include "kcd2o.pb.h"
 
 #include <cstdint>
 #include <deque>
@@ -16,7 +16,7 @@ namespace Offsets
 	struct IEntity;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	enum class world_inventory_source : std::uint8_t
 	{

@@ -19,8 +19,8 @@
 
 namespace
 {
-	using namespace kcd2mp;
-	using namespace kcd2mp::server;
+	using namespace kcd2o;
+	using namespace kcd2o::server;
 
 	protocol::InventoryItem item(
 	    std::string instance,

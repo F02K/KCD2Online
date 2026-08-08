@@ -8,7 +8,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	enum class item_location_kind
 	{

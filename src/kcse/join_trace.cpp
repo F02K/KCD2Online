@@ -8,7 +8,7 @@
 #include <mutex>
 #include <string>
 
-namespace kcd2mp::kcse::join_trace
+namespace kcd2o::kcse::join_trace
 {
 	namespace
 	{
@@ -43,10 +43,10 @@ namespace kcd2mp::kcse::join_trace
 				{
 					path.resize(length);
 					return std::filesystem::path(path).parent_path()
-					    / L"KCD2MP-join.log";
+					    / L"KCD2Online-join.log";
 				}
 			}
-			return std::filesystem::current_path() / L"KCD2MP-join.log";
+			return std::filesystem::current_path() / L"KCD2Online-join.log";
 		}
 
 		std::string_view filename(std::string_view path)

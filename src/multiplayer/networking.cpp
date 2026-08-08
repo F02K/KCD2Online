@@ -1,21 +1,110 @@
 #include "multiplayer/networking.hpp"
 
 #include <steam/isteamnetworkingsockets.h>
+#include <steam/isteamnetworkingutils.h>
 #include <steam/steamnetworkingsockets.h>
 
+#include <algorithm>
 #include <array>
+#include <cstring>
 #include <stdexcept>
 
-namespace kcd2mp::net
+namespace kcd2o::net
 {
 	namespace
 	{
+		constexpr std::array<int, traffic_lane_count> lane_priorities{
+		    10, // player_realtime
+		    10, // ordered_state
+		    10, // npc_realtime
+		    0   // interactive
+		};
+		constexpr std::array<uint16, traffic_lane_count> lane_weights{
+		    8, // player_realtime
+		    6, // ordered_state
+		    2, // npc_realtime
+		    1  // ignored while interactive has a unique priority
+		};
+
+		static_assert(
+		    static_cast<std::size_t>(traffic_lane::interactive) + 1
+		    == traffic_lane_count);
+
 		void set_error(std::string *error, std::string message)
 		{
 			if (error)
 			{
 				*error = std::move(message);
 			}
+		}
+
+		bool configure_lanes(
+		    ISteamNetworkingSockets *sockets,
+		    HSteamNetConnection connection)
+		{
+			return sockets->ConfigureConnectionLanes(
+			           connection,
+			           static_cast<int>(traffic_lane_count),
+			           lane_priorities.data(),
+			           lane_weights.data())
+		    == k_EResultOK;
+		}
+
+		bool send_message(
+		    ISteamNetworkingSockets *sockets,
+		    HSteamNetConnection connection,
+		    std::span<const std::byte> bytes,
+		    reliability delivery,
+		    traffic_lane lane,
+		    std::string *error,
+		    bool *congested)
+		{
+			if (congested)
+				*congested = false;
+			if (bytes.empty() || bytes.size() > max_application_message_size)
+			{
+				set_error(error, "message size is invalid");
+				return false;
+			}
+			const auto lane_index = static_cast<std::size_t>(lane);
+			if (lane_index >= traffic_lane_count)
+			{
+				set_error(error, "message lane is invalid");
+				return false;
+			}
+
+			auto *utils = SteamNetworkingUtils();
+			auto *message = utils
+			    ? utils->AllocateMessage(static_cast<int>(bytes.size()))
+			    : nullptr;
+			if (!message)
+			{
+				set_error(error, "could not allocate networking message");
+				return false;
+			}
+			std::memcpy(message->m_pData, bytes.data(), bytes.size());
+			message->m_conn = connection;
+			message->m_nFlags = delivery == reliability::reliable
+			    ? k_nSteamNetworkingSend_ReliableNoNagle
+			    : k_nSteamNetworkingSend_UnreliableNoDelay;
+			message->m_idxLane = static_cast<uint16>(lane_index);
+
+			int64 result{};
+			sockets->SendMessages(1, &message, &result, true);
+			if (result > 0)
+				return true;
+
+			const auto code = result < 0
+			    ? static_cast<EResult>(-result)
+			    : k_EResultFail;
+			if (congested)
+				*congested = code == k_EResultLimitExceeded
+				    || code == k_EResultIgnored;
+			set_error(
+			    error,
+			    "SendMessages returned "
+			        + std::to_string(static_cast<int>(code)));
+			return false;
 		}
 	}
 
@@ -89,6 +178,7 @@ namespace kcd2mp::net
 			{
 			case k_ESteamNetworkingConnectionState_Connecting:
 				if (sockets->AcceptConnection(info->m_hConn) != k_EResultOK
+				    || !configure_lanes(sockets, info->m_hConn)
 				    || !sockets->SetConnectionPollGroup(info->m_hConn, poll_group))
 				{
 					sockets->CloseConnection(
@@ -213,26 +303,46 @@ namespace kcd2mp::net
 		}
 	}
 
-	bool server_transport::send(connection_id connection, std::span<const std::byte> bytes, reliability delivery, std::string *error)
+	bool server_transport::send(
+	    connection_id connection,
+	    std::span<const std::byte> bytes,
+	    reliability delivery,
+	    traffic_lane lane,
+	    std::string *error,
+	    bool *congested)
 	{
-		if (bytes.empty() || bytes.size() > max_application_message_size)
-		{
-			set_error(error, "message size is invalid");
-			return false;
-		}
-		const auto flags = delivery == reliability::reliable ? k_nSteamNetworkingSend_ReliableNoNagle : k_nSteamNetworkingSend_UnreliableNoDelay;
-		const auto result = m_impl->sockets->SendMessageToConnection(static_cast<HSteamNetConnection>(connection),
-		                                                             bytes.data(),
-		                                                             static_cast<std::uint32_t>(bytes.size()),
-		                                                             flags,
-		                                                             nullptr);
-		if (result != k_EResultOK)
-		{
-			set_error(error, "SendMessageToConnection returned "
-			    + std::to_string(static_cast<int>(result)));
-			return false;
-		}
-		return true;
+		return send_message(
+		    m_impl->sockets,
+		    static_cast<HSteamNetConnection>(connection),
+		    bytes,
+		    delivery,
+		    lane,
+		    error,
+		    congested);
+	}
+
+	std::optional<std::size_t> server_transport::pending_send_bytes(
+	    connection_id connection,
+	    traffic_lane lane) const
+	{
+		const auto lane_index = static_cast<std::size_t>(lane);
+		if (lane_index >= traffic_lane_count)
+			return std::nullopt;
+		SteamNetConnectionRealTimeStatus_t status{};
+		std::array<SteamNetConnectionRealTimeLaneStatus_t, traffic_lane_count>
+		    lanes{};
+		if (m_impl->sockets->GetConnectionRealTimeStatus(
+		        static_cast<HSteamNetConnection>(connection),
+		        &status,
+		        static_cast<int>(lanes.size()),
+		        lanes.data())
+		    != k_EResultOK)
+			return std::nullopt;
+		const auto &lane_status = lanes[lane_index];
+		return static_cast<std::size_t>(
+		           std::max(0, lane_status.m_cbPendingReliable))
+		    + static_cast<std::size_t>(
+		        std::max(0, lane_status.m_cbPendingUnreliable));
 	}
 
 	void server_transport::close(
@@ -314,6 +424,23 @@ namespace kcd2mp::net
 			switch (info->m_info.m_eState)
 			{
 			case k_ESteamNetworkingConnectionState_Connected:
+				if (!configure_lanes(sockets, connection))
+				{
+					const auto failed_connection = connection;
+					connection = k_HSteamNetConnection_Invalid;
+					connected = false;
+					intentional_disconnect = true;
+					sockets->CloseConnection(
+					    failed_connection,
+					    client_goodbye_reason,
+					    "could not configure transport lanes",
+					    false);
+					if (callbacks.disconnected)
+						callbacks.disconnected(
+						    false,
+						    "could not configure transport lanes");
+					return;
+				}
 				intentional_disconnect = false;
 				connected = true;
 				if (callbacks.connected)
@@ -424,6 +551,7 @@ namespace kcd2mp::net
 	bool client_transport::send(
 	    std::span<const std::byte> bytes,
 	    reliability delivery,
+	    traffic_lane lane,
 	    std::string *error)
 	{
 		if (m_impl->connection == k_HSteamNetConnection_Invalid
@@ -432,21 +560,14 @@ namespace kcd2mp::net
 			set_error(error, "client is not connected");
 			return false;
 		}
-		if (bytes.empty() || bytes.size() > max_application_message_size)
-		{
-			set_error(error, "message size is invalid");
-			return false;
-		}
-		const auto flags = delivery == reliability::reliable ? k_nSteamNetworkingSend_ReliableNoNagle : k_nSteamNetworkingSend_UnreliableNoDelay;
-		const auto result =
-		    m_impl->sockets->SendMessageToConnection(m_impl->connection, bytes.data(), static_cast<std::uint32_t>(bytes.size()), flags, nullptr);
-		if (result != k_EResultOK)
-		{
-			set_error(error, "SendMessageToConnection returned "
-			    + std::to_string(static_cast<int>(result)));
-			return false;
-		}
-		return true;
+		return send_message(
+		    m_impl->sockets,
+		    m_impl->connection,
+		    bytes,
+		    delivery,
+		    lane,
+		    error,
+		    nullptr);
 	}
 
 	void client_transport::disconnect(std::string_view message)

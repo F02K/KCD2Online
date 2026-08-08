@@ -15,7 +15,7 @@
 #include <Windows.h>
 
 /**
- * Runtime facade over the shared KCD2MP signature registry.
+ * Runtime facade over the shared KCD2Online signature registry.
  *
  * Required WHGame addresses are preflighted through signature_core before
  * kcd2_init creates any hook objects. scan()/get_call() remain only for the

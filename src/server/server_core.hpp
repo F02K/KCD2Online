@@ -17,7 +17,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	using clock = std::chrono::steady_clock;
 	using time_point = clock::time_point;
@@ -230,7 +230,7 @@ namespace kcd2mp::server
 		    player_session &player,
 		    const protocol::ClientSleepState &message,
 		    time_point now);
-		void handle_death(player_session &player);
+		void handle_death(player_session &player, time_point now);
 		void handle_respawn_request(player_session &player, time_point now);
 		void handle_activity_start(
 		    player_session &player,
@@ -258,6 +258,10 @@ namespace kcd2mp::server
 		void advance_environment_clock(time_point now);
 		void broadcast_environment(time_point now);
 		void broadcast_sleep_state(bool time_skipped = false);
+		void broadcast_system_message(
+		    std::string text,
+		    time_point now,
+		    std::optional<connection_id> except = std::nullopt);
 		void remove_sleep_vote(player_id id);
 		[[nodiscard]] std::uint32_t effective_sleep_requirement() const;
 		void apply_default_avatar(protocol::PlayerProfile &profile);
@@ -317,8 +321,10 @@ namespace kcd2mp::server
 		item_ledger m_items;
 		struct npc_delivery_state
 		{
+			std::uint64_t motion_revision{};
+			std::uint64_t gameplay_revision{};
 			std::uint64_t inventory_revision{};
-			time_point inventory_sent_at{};
+			time_point motion_sent_at{};
 		};
 		std::unordered_map<player_id,
 		    std::unordered_map<std::uint64_t, npc_delivery_state>>

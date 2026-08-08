@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	enum runtime_capability : std::uint64_t
 	{

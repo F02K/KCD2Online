@@ -23,8 +23,8 @@
 
 namespace
 {
-	using namespace kcd2mp;
-	using namespace kcd2mp::server;
+	using namespace kcd2o;
+	using namespace kcd2o::server;
 	using namespace std::chrono_literals;
 
 	protocol::TransformState transform(float x)
@@ -48,8 +48,8 @@ namespace
 
 int main()
 {
-	using namespace kcd2mp;
-	using namespace kcd2mp::server;
+	using namespace kcd2o;
+	using namespace kcd2o::server;
 	using namespace std::chrono_literals;
 
 	npc_registry registry;
@@ -157,12 +157,14 @@ int main()
 	assert(registry.size() == 0);
 
 	const auto catalog_path = std::filesystem::temp_directory_path()
-	    / "kcd2mp-npc-registry-catalog.json";
+	    / "kcd2o-npc-registry-catalog.json";
 	{
 		std::ofstream catalog(catalog_path, std::ios::binary | std::ios::trunc);
 		catalog << R"({"levels":[{"level_id":"2","npcs":[{"entity_guid":"12345678-9abc-def0","kind":"human","entity_class":"NPC","name":"catalogued","position":[0.0,0.0,0.0],"rotation":[0.0,0.0,0.0,1.0]}]}]})";
 	}
 	npc_registry catalogued("2", catalog_path);
+	assert(catalogued.size() == 0); // catalog is an identity allowlist, not live state
+	first_position = transform(0.0F);
 	protocol::ClientNpcDiscovery catalog_discovery;
 	auto *catalog_human = catalog_discovery.add_observations();
 	catalog_human->set_authored_guid(0xDEF09ABC12345678ULL);
@@ -171,8 +173,7 @@ int main()
 	set_gameplay(*catalog_human, 100.0F);
 	catalogued.observe(
 	    1, catalog_discovery, &first_position, true, true, start + 500ms);
-	assert(catalogued.size() == 1); // server catalog is populated before discovery
-	first_position = transform(0.0F);
+	assert(catalogued.size() == 1);
 	catalogued.observe(
 	    1, catalog_discovery, &first_position, true, true, start + 600ms);
 	assert(catalogued.size() == 1);
@@ -200,19 +201,19 @@ int main()
 	set_gameplay(*dynamic, 80.0F);
 	catalogued.observe(
 	    1, dynamic_discovery, &first_position, true, true, start + 700ms);
-	assert(catalogued.size() == 2);
-	// A second reporter observing the same uncatalogued runtime GUID must
-	// resolve to the existing canonical dynamic NPC, not create a duplicate.
+	assert(catalogued.size() == 1);
+	// Runtime GUIDs are client-local and cannot safely identify a shared NPC.
+	// A second reporter must not turn either observation into a replicated spawn.
 	catalogued.observe(
 	    2, dynamic_discovery, &first_position, true, true, start + 701ms);
-	assert(catalogued.size() == 2);
+	assert(catalogued.size() == 1);
 	protocol::ClientNpcDiscovery recursive_managed_discovery;
 	auto *recursive = recursive_managed_discovery.add_observations();
 	recursive->set_authored_guid(0xCAFE);
 	recursive->set_kind(protocol::NPC_KIND_HUMAN);
 	recursive->set_dynamic(true);
 	recursive->set_entity_class("NPC");
-	recursive->set_entity_name("KCD2MP_Remote_1_2_3");
+	recursive->set_entity_name("KCD2Online_Remote_1_2_3");
 	*recursive->mutable_transform() = transform(5.0F);
 	set_gameplay(*recursive, 100.0F);
 	catalogued.observe(
@@ -222,17 +223,14 @@ int main()
 	    true,
 	    true,
 	    start + 702ms);
-	assert(catalogued.size() == 2);
+	assert(catalogued.size() == 1);
 	std::vector<npc_registry::player_position> dynamic_players{
 	    {1, &first_position, true}};
 	(void)catalogued.reconcile(dynamic_players, start + 700ms);
 	const auto dynamic_states = catalogued.states_for(1);
-	const auto dynamic_state = std::ranges::find_if(
+	assert(std::ranges::none_of(
 	    dynamic_states,
-	    [](const protocol::NpcState &state) { return state.dynamic(); });
-	assert(dynamic_state != dynamic_states.end());
-	assert(dynamic_state->npc_id() >= 0x8000000000000000ULL);
-	assert(dynamic_state->entity_class() == "NPC");
+	    [](const protocol::NpcState &state) { return state.dynamic(); }));
 	std::error_code ignored;
 	std::filesystem::remove(catalog_path, ignored);
 	return 0;

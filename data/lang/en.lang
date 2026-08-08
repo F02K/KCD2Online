@@ -1,9 +1,9 @@
-# KCD2MP in-game UI — English fallback
+# KCD2Online in-game UI — English fallback
 menu.root.multiplayer=MULTIPLAYER
 menu.root.pending=MULTIPLAYER - JOIN PENDING
 menu.root.connected=MULTIPLAYER - CONNECTED
 menu.root.tooltip=Select a server or connect directly by address
-menu.multiplayer.title=KCD2MP MULTIPLAYER
+menu.multiplayer.title=KCD2Online MULTIPLAYER
 menu.field.edit_prefix=> 
 menu.field.address=SERVER ADDRESS: {value}
 menu.field.address.tooltip=Address with port, for example 127.0.0.1:27020

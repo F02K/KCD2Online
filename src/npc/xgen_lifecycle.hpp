@@ -8,7 +8,7 @@
 #include <format>
 #include <string>
 
-namespace kcd2mp::npc
+namespace kcd2o::npc
 {
 	struct xgen_spawn_parameters
 	{
@@ -33,9 +33,9 @@ namespace kcd2mp::npc
 		const auto pitch        = std::asin(sin_pitch);
 		const auto sin_yaw      = 2.0F * (w * z + x * y);
 		const auto cos_yaw      = 1.0F - 2.0F * (y * y + z * z);
-		return {.name             = std::format("KCD2MP_Remote_{}", handle),
+		return {.name             = std::format("KCD2Online_Remote_{}", handle),
 		        .shared_soul_guid = request.archetype_id,
 		        .position         = request.world_transform.position,
 		        .rotation         = {roll, pitch, std::atan2(sin_yaw, cos_yaw)}};
 	}
-} // namespace kcd2mp::npc
+} // namespace kcd2o::npc

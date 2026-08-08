@@ -19,10 +19,10 @@ namespace
 	constexpr std::string_view guest_id =
 	    "33333333-3333-4333-8333-333333333333";
 
-	kcd2mp::protocol::PropertyCatalog catalog()
+	kcd2o::protocol::PropertyCatalog catalog()
 	{
-		kcd2mp::protocol::PropertyCatalog result;
-		result.set_schema(kcd2mp::property::catalog_schema);
+		kcd2o::protocol::PropertyCatalog result;
+		result.set_schema(kcd2o::property::catalog_schema);
 		result.set_level_id("3");
 		result.set_content_fingerprint("fixture");
 		auto *property = result.add_properties();
@@ -38,10 +38,10 @@ namespace
 		property->mutable_marker_position()->set_z(30.0F);
 		auto *door = property->add_resources();
 		door->set_entity_guid(10);
-		door->set_kind(kcd2mp::protocol::PROPERTY_RESOURCE_KIND_DOOR);
+		door->set_kind(kcd2o::protocol::PROPERTY_RESOURCE_KIND_DOOR);
 		auto *container = property->add_resources();
 		container->set_entity_guid(11);
-		container->set_kind(kcd2mp::protocol::PROPERTY_RESOURCE_KIND_CONTAINER);
+		container->set_kind(kcd2o::protocol::PROPERTY_RESOURCE_KIND_CONTAINER);
 		return result;
 	}
 
@@ -64,8 +64,8 @@ namespace
 
 int main()
 {
-	using namespace kcd2mp;
-	using namespace kcd2mp::property;
+	using namespace kcd2o;
+	using namespace kcd2o::property;
 
 	assert(is_uuid(server::random_uuid_v4()));
 	service permissions(catalog(), {});
@@ -117,7 +117,7 @@ int main()
 	assert(permissions.ledger().assignments_size() == 1);
 
 	const auto root = std::filesystem::temp_directory_path()
-	    / ("kcd2mp_property_" + server::random_hex(8));
+	    / ("kcd2o_property_" + server::random_hex(8));
 	std::filesystem::create_directories(root);
 	const auto pak = root / "level.pak";
 	write_fixture_pak(pak);

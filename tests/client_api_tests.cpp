@@ -8,12 +8,12 @@
 namespace
 {
 	std::uint32_t __cdecl runtime(
-	    kcd2mp::kcse::runtime_status *) noexcept
+	    kcd2o::kcse::runtime_status *) noexcept
 	{
 		return 1;
 	}
 	std::uint32_t __cdecl connect(
-	    const kcd2mp::kcse::connect_request *) noexcept
+	    const kcd2o::kcse::connect_request *) noexcept
 	{
 		return 1;
 	}
@@ -21,24 +21,24 @@ namespace
 	std::uint32_t __cdecl text(const char *) noexcept { return 1; }
 	std::uint32_t __cdecl action() noexcept { return 1; }
 	std::uint32_t __cdecl status(
-	    kcd2mp::kcse::client_status_view *) noexcept
+	    kcd2o::kcse::client_status_view *) noexcept
 	{
 		return 1;
 	}
 	std::uint32_t __cdecl players(
-	    kcd2mp::kcse::remote_player_view *,
+	    kcd2o::kcse::remote_player_view *,
 	    std::uint32_t) noexcept
 	{
 		return 0;
 	}
 	std::uint32_t __cdecl chat(
-	    kcd2mp::kcse::chat_entry_view *,
+	    kcd2o::kcse::chat_entry_view *,
 	    std::uint32_t) noexcept
 	{
 		return 0;
 	}
 	std::uint32_t __cdecl archetypes(
-	    kcd2mp::kcse::fixed_string *,
+	    kcd2o::kcse::fixed_string *,
 	    std::uint32_t) noexcept
 	{
 		return 0;
@@ -48,7 +48,7 @@ namespace
 
 int main()
 {
-	using namespace kcd2mp::kcse;
+	using namespace kcd2o::kcse;
 	static_assert(std::is_standard_layout_v<fixed_string>);
 	static_assert(std::is_trivially_copyable_v<fixed_string>);
 	static_assert(std::is_standard_layout_v<connect_request>);
@@ -75,9 +75,9 @@ int main()
 
 	client_api valid{
 	    sizeof(client_api),
-	    kcd2mp::kcd2mp_version_major,
-	    kcd2mp::kcd2mp_version_minor,
-	    kcd2mp::kcd2mp_version_patch,
+	    kcd2o::kcd2o_version_major,
+	    kcd2o::kcd2o_version_minor,
+	    kcd2o::kcd2o_version_patch,
 	    runtime,
 	    connect,
 	    disconnect,
@@ -91,10 +91,10 @@ int main()
 	    archetypes,
 	    diagnostic_logging};
 	assert(compatible(&valid));
-	static_assert(kcd2mp::kcd2mp_version == "0.1.1");
-	static_assert(kcd2mp::kcd2mp_version_major == 0);
-	static_assert(kcd2mp::kcd2mp_version_minor == 1);
-	static_assert(kcd2mp::kcd2mp_version_patch == 1);
+	static_assert(kcd2o::kcd2o_version == "0.1.2");
+	static_assert(kcd2o::kcd2o_version_major == 0);
+	static_assert(kcd2o::kcd2o_version_minor == 1);
+	static_assert(kcd2o::kcd2o_version_patch == 2);
 
 	auto wrong_version = valid;
 	++wrong_version.version_patch;

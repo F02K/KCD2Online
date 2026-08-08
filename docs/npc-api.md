@@ -4,7 +4,7 @@ The former Lua-backed controlled-NPC API was removed in protocol/runtime v4.
 It used Game Lua for XGen spawning, inventory and equipment, and therefore is
 not a valid implementation source for the native multiplayer client.
 
-Remote players now belong exclusively to `KCD2MPKCSEClient.dll`. A replacement
+Remote players now belong exclusively to `KCD2OnlineKCSEClient.dll`. A replacement
 general-purpose mod API is intentionally not exposed. The multiplayer runtime
 uses the complete internal native lifecycle:
 

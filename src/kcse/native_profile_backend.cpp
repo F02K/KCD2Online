@@ -30,7 +30,7 @@
 #include <ranges>
 #include <vector>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	native_profile_backend::native_profile_backend(
 	    native_entity_backend &entities) :
@@ -244,7 +244,7 @@ namespace kcd2mp::kcse
 		result.set_money(native_money / money_subunits_per_groschen);
 		result.set_money_subunits(static_cast<std::uint32_t>(
 		    native_money % money_subunits_per_groschen));
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.profile.capture.money",
 		    std::format(
 		        "native_units={} groschen={} subunits={} stacks={}",
@@ -487,7 +487,7 @@ namespace kcd2mp::kcse
 			    item.condition(),
 			    actual_quality,
 			    item.quality());
-			KCD2MP_JOIN_TRACE("join.profile.update-item.failed", error);
+			KCD2Online_JOIN_TRACE("join.profile.update-item.failed", error);
 			return false;
 		}
 		error.clear();
@@ -509,7 +509,7 @@ namespace kcd2mp::kcse
 			    "invalid native money target: groschen={} subunits={}",
 			    money,
 			    subunits);
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.profile.apply-money.rejected",
 			    error);
 			return false;
@@ -543,7 +543,7 @@ namespace kcd2mp::kcse
 
 		std::int64_t remaining =
 		    money * money_subunits_per_groschen + subunits;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.profile.apply-money.begin",
 		    std::format(
 		        "groschen={} subunits={} native_units={} existing_stacks={}",
@@ -587,7 +587,7 @@ namespace kcd2mp::kcse
 			}
 			remaining -= amount;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.profile.apply-money.complete",
 		    std::format(
 		        "groschen={} subunits={} native_units={}",
@@ -632,7 +632,7 @@ namespace kcd2mp::kcse
 		{
 			return false;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.profile.apply-rpg.begin",
 		    std::format(
 		        "kind={} id={} native_id={} level={} progress={}",
@@ -666,11 +666,11 @@ namespace kcd2mp::kcse
 			    value.progress(),
 			    actual_level,
 			    actual_progress);
-			KCD2MP_JOIN_TRACE("join.profile.apply-rpg.failed", error);
+			KCD2Online_JOIN_TRACE("join.profile.apply-rpg.failed", error);
 		}
 		else
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.profile.apply-rpg.complete",
 			    std::format(
 			        "kind={} id={} native_id={} level={} progress={}",

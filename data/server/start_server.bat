@@ -22,19 +22,19 @@ if not exist "game_data\WHGame.dll" (
     echo.
     echo ERROR: The required game_data folder has not been generated yet.
     echo.
-    echo Run KCD2MPGameDataGenerator.exe ONCE on a Windows PC where
+    echo Run KCD2OnlineGameDataGenerator.exe ONCE on a Windows PC where
     echo Kingdom Come: Deliverance II is installed. Then copy the generated
-    echo game_data folder back next to KCD2MPServer.exe and run this file again.
+    echo game_data folder back next to KCD2OnlineServer.exe and run this file again.
     echo.
     pause
     exit /b 1
 )
 
-"%~dp0KCD2MPServer.exe" "%~dp0server.toml"
-set "KCD2MP_SERVER_EXIT=%ERRORLEVEL%"
-if not "%KCD2MP_SERVER_EXIT%"=="0" (
+"%~dp0KCD2OnlineServer.exe" "%~dp0server.toml"
+set "KCD2Online_SERVER_EXIT=%ERRORLEVEL%"
+if not "%KCD2Online_SERVER_EXIT%"=="0" (
     echo.
-    echo KCD2MPServer exited with code %KCD2MP_SERVER_EXIT%.
+    echo KCD2OnlineServer exited with code %KCD2Online_SERVER_EXIT%.
     pause
 )
-exit /b %KCD2MP_SERVER_EXIT%
+exit /b %KCD2Online_SERVER_EXIT%

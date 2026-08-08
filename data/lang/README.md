@@ -1,4 +1,4 @@
-# KCD2MP language files
+# KCD2Online language files
 
 The in-game UI reads UTF-8 `key=value` files from this directory. `en.lang` is
 the required fallback. The game value from `g_language` is normalized to an ISO

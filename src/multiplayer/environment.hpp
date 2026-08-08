@@ -1,13 +1,13 @@
 #pragma once
 
-#include "kcd2mp.pb.h"
+#include "kcd2o.pb.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	constexpr double hours_per_day = 24.0;
 	constexpr float maximum_time_scale = 1000.0F;

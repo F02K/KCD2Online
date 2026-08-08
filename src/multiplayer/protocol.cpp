@@ -7,7 +7,7 @@
 #include <limits>
 #include <unordered_set>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	namespace
 	{
@@ -207,6 +207,24 @@ namespace kcd2mp
 				    && (!message.has_gameplay()
 				        || valid_npc_gameplay(message.gameplay()));
 			}
+			if (envelope.has_client_npc_update_batch())
+			{
+				const auto &message = envelope.client_npc_update_batch();
+				if (message.updates_size() == 0
+				    || message.updates_size()
+				        > static_cast<int>(max_npcs_per_message))
+					return false;
+				std::unordered_set<std::uint64_t> ids;
+				for (const auto &update : message.updates())
+					if (update.npc_id() == 0 || update.generation() == 0
+					    || update.lease_id() == 0 || !update.has_transform()
+					    || !is_finite_transform(update.transform())
+					    || (update.has_gameplay()
+					        && !valid_npc_gameplay(update.gameplay()))
+					    || !ids.insert(update.npc_id()).second)
+						return false;
+				return true;
+			}
 			if (envelope.has_server_npc_enter())
 				return envelope.server_npc_enter().has_state()
 				    && is_valid_npc_state(envelope.server_npc_enter().state());
@@ -238,6 +256,29 @@ namespace kcd2mp
 						return false;
 				}
 				return true;
+			}
+			if (envelope.has_server_npc_motion())
+			{
+				const auto &message = envelope.server_npc_motion();
+				if (message.server_tick() == 0 || message.npcs_size() == 0
+				    || message.npcs_size()
+				        > static_cast<int>(max_npcs_per_message))
+					return false;
+				std::unordered_set<std::uint64_t> ids;
+				for (const auto &motion : message.npcs())
+					if (motion.npc_id() == 0 || motion.generation() == 0
+					    || motion.revision() == 0 || !motion.has_transform()
+					    || !is_finite_transform(motion.transform())
+					    || !ids.insert(motion.npc_id()).second)
+						return false;
+				return true;
+			}
+			if (envelope.has_server_npc_gameplay_update())
+			{
+				const auto &message = envelope.server_npc_gameplay_update();
+				return message.npc_id() != 0 && message.generation() != 0
+				    && message.state_revision() != 0 && message.has_gameplay()
+				    && valid_npc_gameplay(message.gameplay());
 			}
 			if (envelope.has_client_hello())
 			{
@@ -598,6 +639,29 @@ namespace kcd2mp
 				    && is_valid_chat(envelope.chat_broadcast().text());
 			}
 			return true;
+		}
+	}
+
+	traffic_lane lane_for(const protocol::Envelope &envelope) noexcept
+	{
+		switch (envelope.payload_case())
+		{
+		case protocol::Envelope::kChatSend:
+		case protocol::Envelope::kChatBroadcast:
+			return traffic_lane::interactive;
+
+		case protocol::Envelope::kClientTransform:
+		case protocol::Envelope::kWorldSnapshot:
+			return traffic_lane::player_realtime;
+
+		case protocol::Envelope::kClientNpcUpdate:
+		case protocol::Envelope::kClientNpcUpdateBatch:
+		case protocol::Envelope::kServerNpcSnapshot:
+		case protocol::Envelope::kServerNpcMotion:
+			return traffic_lane::npc_realtime;
+
+		default:
+			return traffic_lane::ordered_state;
 		}
 	}
 

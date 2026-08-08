@@ -2,7 +2,7 @@
 
 #include <iterator>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	namespace
 	{

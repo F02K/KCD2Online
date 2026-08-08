@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	class native_remote_avatar_backend final : public remote_avatar_backend
 	{

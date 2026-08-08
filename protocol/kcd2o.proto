@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package kcd2mp.protocol;
+package kcd2o.protocol;
 
 enum MovementMode {
   MOVEMENT_MODE_IDLE = 0;
@@ -699,6 +699,13 @@ message ClientNpcUpdate {
   NpcGameplayState gameplay = 5;
 }
 
+// Authority reports share one sampling instant and are batched to avoid one
+// transport packet per NPC. Individual ClientNpcUpdate remains accepted for
+// protocol diagnostics and rolling upgrades.
+message ClientNpcUpdateBatch {
+  repeated ClientNpcUpdate updates = 1;
+}
+
 message ServerNpcEnter {
   NpcState state = 1;
 }
@@ -718,6 +725,29 @@ message ServerNpcAuthority {
 message ServerNpcSnapshot {
   uint64 server_tick = 1;
   repeated NpcState npcs = 2;
+}
+
+// High-frequency absolute motion recovery. Lifecycle, authority and gameplay
+// are deliberately kept out of this unreliable stream.
+message NpcMotionState {
+  uint64 npc_id = 1;
+  uint32 generation = 2;
+  uint64 revision = 3;
+  TransformState transform = 4;
+}
+
+message ServerNpcMotion {
+  uint64 server_tick = 1;
+  repeated NpcMotionState npcs = 2;
+}
+
+// Revisioned gameplay is reliable and independent from the lossy motion
+// stream. Inventory may be omitted when its own revision did not change.
+message ServerNpcGameplayUpdate {
+  uint64 npc_id = 1;
+  uint32 generation = 2;
+  uint64 state_revision = 3;
+  NpcGameplayState gameplay = 4;
 }
 
 message ClientAvatarUpdate {
@@ -793,5 +823,8 @@ message Envelope {
     ServerNpcLeave server_npc_leave = 50;
     ServerNpcAuthority server_npc_authority = 51;
     ServerNpcSnapshot server_npc_snapshot = 52;
+    ClientNpcUpdateBatch client_npc_update_batch = 53;
+    ServerNpcMotion server_npc_motion = 54;
+    ServerNpcGameplayUpdate server_npc_gameplay_update = 55;
   }
 }

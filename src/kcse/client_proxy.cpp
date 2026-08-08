@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	namespace
 	{
@@ -35,9 +35,9 @@ namespace kcd2mp::kcse
 		    GetProcAddress(module, client_query_export));
 		const auto *candidate = query
 		    ? query(
-		          kcd2mp_version_major,
-		          kcd2mp_version_minor,
-		          kcd2mp_version_patch)
+		          kcd2o_version_major,
+		          kcd2o_version_minor,
+		          kcd2o_version_patch)
 		    : nullptr;
 		if (!compatible(candidate))
 			return nullptr;
@@ -55,7 +55,7 @@ namespace kcd2mp::kcse
 		runtime_status value;
 		const auto *api = load();
 		if (!api || api->get_runtime_status(&value) == 0)
-			return {false, false, "KCD2MP KCSE client is not loaded."};
+			return {false, false, "KCD2Online KCSE client is not loaded."};
 		return {value.available != 0, false, value.diagnostic};
 	}
 
@@ -133,14 +133,14 @@ namespace kcd2mp::kcse
 		if (!api || api->get_status(&value) == 0)
 		{
 			client_status result;
-			result.error = "KCD2MP KCSE client is not loaded.";
+			result.error = "KCD2Online KCSE client is not loaded.";
 			return result;
 		}
 		client_status result;
 		const auto state = static_cast<client_state>(value.state);
 		if (!is_valid_client_state(state))
 		{
-			result.error = "KCD2MP KCSE client returned an invalid state value.";
+			result.error = "KCD2Online KCSE client returned an invalid state value.";
 			return result;
 		}
 		result.state = state;
@@ -174,21 +174,21 @@ namespace kcd2mp::kcse
 		return result;
 	}
 
-	std::vector<kcd2mp::remote_player_view>
+	std::vector<kcd2o::remote_player_view>
 	ui_client_proxy::remote_players() const
 	{
 		const auto *api = load();
 		if (!api)
 			return {};
 		const auto count = api->copy_players(nullptr, 0);
-		std::vector<kcd2mp::kcse::remote_player_view> raw(count);
+		std::vector<kcd2o::kcse::remote_player_view> raw(count);
 		if (count != 0)
 			raw.resize(std::min(count, api->copy_players(raw.data(), count)));
-		std::vector<kcd2mp::remote_player_view> result;
+		std::vector<kcd2o::remote_player_view> result;
 		result.reserve(raw.size());
 		for (const auto &value : raw)
 		{
-			kcd2mp::remote_player_view player;
+			kcd2o::remote_player_view player;
 			player.id = value.player_id;
 			player.connected = value.connected != 0;
 			player.movement_mode =

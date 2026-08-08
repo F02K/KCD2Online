@@ -5,7 +5,7 @@ namespace wh::combatmodule
 	class C_CombatActor;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	// Read-only view of the game's CombatActor state. Observing combat must
 	// never start, stop, or otherwise repair native combat actions.

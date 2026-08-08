@@ -2,7 +2,7 @@
 
 ## Scope and baselines
 
-- KCD2MP: `master` at `8d4b913`.
+- KCD2Online: `master` at `8d4b913`.
 - Bundled libKCD2 fork: `800f6aea241a22afe0dd592d905df89765a43734`.
 - libKCD2 upstream comparison point: `6d92dc3` (`upstream/master`).
 - Nested KCSE loader: `9279808`, identical on fork and upstream.
@@ -14,7 +14,7 @@ not use a Lua `System.SpawnEntity` call. It calls:
 ```text
 IActorSystem::CreateActor(
     channelId = 0,
-    name = "KCD2MP_Remote_<epoch>_<playerId>_<handle>",
+    name = "KCD2Online_Remote_<epoch>_<playerId>_<handle>",
     actorClass = "NPC",
     pos,
     rot,
@@ -210,7 +210,7 @@ MonsterLOD processing.
   `void*` reference parameters retain the same Win64 ABI (addresses in the same
   argument registers).
 - `IEntitySystem::SpawnEntity(SEntitySpawnParams&, bool)` is unchanged and is
-  not called directly by KCD2MP.
+  not called directly by KCD2Online.
 - The fork changes `Offsets::IEntitySystem::AddSink` from two declared
   parameters to three and adds the complete typed `IEntitySystemSink` vtable.
   The runtime calls the new signature with an event mask of zero.
@@ -299,12 +299,12 @@ queues the final profile update, then queues the reliable transport close.
 Remote-avatar synchronization and server corrections accept only `Connected`,
 so no native multiplayer mutation can race the shutdown. `Closing` immediately
 starts the same deferred `unload` transition used for handled join failures;
-after the game context is gone, KCD2MP opens the native main menu. No quit or
+after the game context is gone, KCD2Online opens the native main menu. No quit or
 process-termination command is issued.
 
 ## Trace output and interpretation
 
-`KCD2MP-join.log` is written next to `KCD2MPKCSEClient.dll`. Every line is
+`KCD2Online-join.log` is written next to `KCD2OnlineKCSEClient.dll`. Every line is
 flushed immediately and contains:
 
 - wall-clock timestamp;

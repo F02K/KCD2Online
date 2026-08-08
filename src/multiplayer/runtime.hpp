@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kcd2mp.pb.h"
+#include "kcd2o.pb.h"
 #include "multiplayer/runtime_capabilities.hpp"
 
 #include <cstdint>
@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	enum class sandbox_phase
 	{

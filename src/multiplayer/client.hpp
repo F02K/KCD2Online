@@ -19,7 +19,7 @@
 #include <variant>
 #include <vector>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	struct client_options
 	{
@@ -164,9 +164,9 @@ namespace kcd2mp
 		{
 			protocol::ClientNpcDiscovery message;
 		};
-		struct npc_update_command
+		struct npc_update_batch_command
 		{
-			protocol::ClientNpcUpdate message;
+			protocol::ClientNpcUpdateBatch message;
 		};
 		struct sleep_command
 		{
@@ -198,7 +198,7 @@ namespace kcd2mp
 		    world_object_command,
 		    world_item_command,
 		    npc_discovery_command,
-		    npc_update_command,
+		    npc_update_batch_command,
 		    sleep_command,
 		    death_command,
 		    respawn_command,
@@ -295,6 +295,10 @@ namespace kcd2mp
 		    m_deferred_world_items;
 		std::unordered_map<std::uint64_t, protocol::NpcState> m_npcs;
 		std::unordered_map<std::uint64_t, std::uint64_t> m_npc_by_guid;
+		// Motion and gameplay use independent delivery streams. Keep the latest
+		// motion revision separately so a reliable gameplay update cannot make a
+		// later-arriving unreliable transform look stale.
+		std::unordered_map<std::uint64_t, std::uint64_t> m_npc_motion_revisions;
 		bool m_human_npcs_disabled{};
 		bool m_animal_npcs_disabled{};
 		std::uint32_t m_profile_snapshot_interval_seconds{15};
@@ -315,4 +319,4 @@ namespace kcd2mp
 		std::chrono::steady_clock::time_point m_last_npc_sampled{};
 		std::chrono::steady_clock::time_point m_last_npc_discovery_sent{};
 	};
-} // namespace kcd2mp
+} // namespace kcd2o

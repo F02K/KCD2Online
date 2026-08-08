@@ -5,9 +5,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <fstream>
 #include <stdexcept>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	namespace
 	{
@@ -88,19 +89,28 @@ namespace kcd2mp::server
 		    });
 		if ((m_store.property_catalog().properties().empty()
 		        || catalog_needs_markers)
-		    && !m_config.property_game_root.empty())
+		    && !m_config.property_game_data.empty())
 		{
 			protocol::PropertyCatalog catalog;
-			std::string error;
-			const auto path = property::level_pak_path(
-			    m_config.property_game_root, m_store.manifest().level_id);
-			if (!property::scan_level_pak(
-			        path, m_store.manifest().level_id, catalog, error))
+			const auto path = m_config.property_game_data
+			    / ("property_catalog_" + m_store.manifest().level_id + ".pb");
+			std::ifstream input(path, std::ios::binary);
+			if (!input || !catalog.ParseFromIstream(&input))
 			{
 				throw std::runtime_error(
-				    "automatic property discovery failed: " + error);
+				    "could not load generated property catalog: "
+				    + path.string());
 			}
-			m_store.save_property_catalog(catalog);
+			try
+			{
+				m_store.save_property_catalog(catalog);
+			}
+			catch (const std::invalid_argument &)
+			{
+				throw std::runtime_error(
+				    "generated property catalog does not match level "
+				    + m_store.manifest().level_id + ": " + path.string());
+			}
 		}
 		m_properties.reset(
 		    m_store.property_catalog(), m_store.property_ledger());
@@ -191,6 +201,11 @@ namespace kcd2mp::server
 		if (allow_reconnect)
 		{
 			remove_sleep_vote(player->id);
+			broadcast_system_message(
+			    player->display_name
+			        + " lost connection; waiting for reconnection.",
+			    now,
+			    connection);
 			player->connection.reset();
 			const auto positions = player_positions();
 			queue_npc_events(m_npcs.remove_player(player->id, positions, now));
@@ -249,6 +264,11 @@ namespace kcd2mp::server
 			case protocol::Envelope::kClientNpcUpdate:
 				handle_npc_update(*player, envelope.client_npc_update(), now);
 				break;
+			case protocol::Envelope::kClientNpcUpdateBatch:
+				for (const auto &update :
+				     envelope.client_npc_update_batch().updates())
+					handle_npc_update(*player, update, now);
+				break;
 			case protocol::Envelope::kPing:
 				handle_ping(*player, envelope.ping(), now);
 				break;
@@ -259,7 +279,7 @@ namespace kcd2mp::server
 				    now);
 				break;
 			case protocol::Envelope::kClientDeath:
-				handle_death(*player);
+				handle_death(*player, now);
 				break;
 			case protocol::Envelope::kClientRespawnRequest:
 				handle_respawn_request(*player, now);
@@ -370,7 +390,10 @@ namespace kcd2mp::server
 		std::vector<connection_id> expired_pending;
 		for (const auto &[connection, pending] : m_pending)
 		{
-			if (now >= pending.deadline)
+			const auto handshake_pending =
+			    pending.stage == pending_stage::hello
+			    || pending.stage == pending_stage::authenticate;
+			if (handshake_pending && now >= pending.deadline)
 			{
 				expired_pending.push_back(connection);
 			}
@@ -380,7 +403,7 @@ namespace kcd2mp::server
 			reject(
 			    connection,
 			    protocol::REJECT_REASON_BOOTSTRAP_FAILED,
-			    "handshake or sandbox bootstrap timed out");
+			    "handshake timed out");
 		}
 
 		std::vector<player_id> expired_players;
@@ -714,6 +737,14 @@ namespace kcd2mp::server
 
 	void server_core::server_say(std::string text, time_point now)
 	{
+		broadcast_system_message(std::move(text), now);
+	}
+
+	void server_core::broadcast_system_message(
+	    std::string text,
+	    time_point now,
+	    std::optional<connection_id> except)
+	{
 		if (!is_valid_chat(text))
 		{
 			return;
@@ -724,7 +755,7 @@ namespace kcd2mp::server
 		chat->set_display_name("Server");
 		chat->set_text(std::move(text));
 		chat->set_server_time_ms(milliseconds(now));
-		broadcast(std::move(envelope), reliability::reliable);
+		broadcast(std::move(envelope), reliability::reliable, except);
 	}
 
 	bool server_core::set_npc_entities_disabled(
@@ -765,6 +796,7 @@ namespace kcd2mp::server
 	void server_core::shutdown(std::string reason)
 	{
 		const auto now = clock::now();
+		broadcast_system_message("Server is shutting down.", now);
 		for (auto &[id, player] : m_players)
 		{
 			(void)id;
@@ -1025,12 +1057,12 @@ namespace kcd2mp::server
 		{
 			reject(connection, reason, std::move(message));
 		};
-		if (hello.version() != kcd2mp_version)
+		if (hello.version() != kcd2o_version)
 		{
 			reject_hello(
 			    protocol::REJECT_REASON_VERSION_MISMATCH,
-			    "KCD2MP version mismatch; server requires "
-			        + std::string(kcd2mp_version));
+			    "KCD2Online version mismatch; server requires "
+			        + std::string(kcd2o_version));
 			return;
 		}
 		if (hello.whgame_timestamp() != supported_whgame_timestamp
@@ -1328,8 +1360,11 @@ namespace kcd2mp::server
 			m_store.save_profile(profile->identity_hash, profile->profile);
 		pending.persisted = std::move(profile);
 		pending.resume_token = message.resume_token();
-		pending.deadline =
-		    now + std::chrono::seconds(m_config.bootstrap_timeout_seconds);
+		// A native KCD2 level load can legitimately take much longer than the
+		// configured bootstrap estimate. Transport disconnects still remove the
+		// pending session, so an authenticated client may wait for the engine's
+		// actual level-complete signal without a wall-clock deadline.
+		pending.deadline = time_point::max();
 		if (m_store.manifest().spawn_valid)
 		{
 			pending.stage = pending_stage::loading_world;
@@ -1440,6 +1475,7 @@ namespace kcd2mp::server
 			// pose, but start sequence validation fresh after authentication.
 			session.last_sequence = 0;
 		}
+		const auto reconnecting = m_players.contains(session.id);
 		auto [iterator, inserted] =
 		    m_players.insert_or_assign(session.id, std::move(session));
 		(void)inserted;
@@ -1450,6 +1486,11 @@ namespace kcd2mp::server
 		*joined.mutable_player_joined()->mutable_player() =
 		    snapshot_of(iterator->second, true);
 		broadcast(std::move(joined), reliability::reliable, connection);
+		broadcast_system_message(
+		    iterator->second.display_name
+		        + (reconnecting ? " reconnected." : " joined the server."),
+		    now,
+		    connection);
 		wake_bootstrap_waiters();
 	}
 
@@ -2523,18 +2564,22 @@ namespace kcd2mp::server
 			m_sleeping_players.clear();
 			++m_sleep_revision;
 			broadcast_sleep_state(true);
+			broadcast_system_message(
+			    "Time advanced because enough players went to sleep.",
+			    now);
 			return;
 		}
 		broadcast_sleep_state();
 	}
 
-	void server_core::handle_death(player_session &player)
+	void server_core::handle_death(player_session &player, time_point now)
 	{
 		if (player.dead)
 			return;
 		player.dead = true;
 		remove_sleep_vote(player.id);
 		release_activity(player);
+		broadcast_system_message(player.display_name + " died.", now);
 	}
 
 	void server_core::handle_respawn_request(
@@ -2563,6 +2608,7 @@ namespace kcd2mp::server
 		queue(*player.connection, std::move(envelope), reliability::reliable);
 		++m_sleep_revision;
 		broadcast_sleep_state();
+		broadcast_system_message(player.display_name + " respawned.", now);
 	}
 
 	void server_core::handle_activity_start(
@@ -2704,6 +2750,7 @@ namespace kcd2mp::server
 			return;
 		}
 		const auto dummy = iterator->second.dummy;
+		const auto display_name = iterator->second.display_name;
 		persist_player(iterator->second, now);
 		remove_sleep_vote(id);
 		release_activity(iterator->second);
@@ -2726,6 +2773,15 @@ namespace kcd2mp::server
 		    player_left_envelope(id, reason),
 		    reliability::reliable,
 		    connection);
+		if (!dummy)
+		{
+			const auto notice = close == close_kind::kick
+			    ? display_name
+			        + (reason == "timed out" ? " timed out."
+			                                 : " was kicked from the server.")
+			    : display_name + " left the server.";
+			broadcast_system_message(notice, now, connection);
+		}
 	}
 
 	void server_core::send_accepted(player_session &player)
@@ -3167,10 +3223,23 @@ namespace kcd2mp::server
 			switch (event.kind)
 			{
 			case npc_registry::event_kind::enter:
+			{
+				auto &delivery = m_npc_delivery[event.recipient]
+				    [event.state.npc_id()];
+				delivery.motion_revision = event.state.revision();
+				delivery.gameplay_revision = event.state.has_gameplay()
+				    ? event.state.gameplay().revision() : 0;
+				delivery.inventory_revision =
+				    event.state.has_gameplay()
+				        && event.state.gameplay().has_inventory()
+				    ? event.state.gameplay().inventory().revision() : 0;
+				delivery.motion_sent_at = m_current_time;
 				*envelope.mutable_server_npc_enter()->mutable_state() =
 				    std::move(event.state);
 				break;
+			}
 			case npc_registry::event_kind::leave:
+				m_npc_delivery[event.recipient].erase(event.state.npc_id());
 				envelope.mutable_server_npc_leave()->set_npc_id(
 				    event.state.npc_id());
 				envelope.mutable_server_npc_leave()->set_generation(
@@ -3196,8 +3265,8 @@ namespace kcd2mp::server
 
 	void server_core::queue_npc_snapshots()
 	{
-		constexpr std::size_t npc_snapshot_payload_budget = 56 * 1024;
-		constexpr auto inventory_refresh_interval = std::chrono::seconds(5);
+		constexpr std::size_t npc_motion_tick_budget = 12 * 1024;
+		constexpr auto motion_keyframe_interval = std::chrono::seconds(2);
 		const auto now = m_current_time == time_point{}
 		    ? std::chrono::steady_clock::now() : m_current_time;
 		for (const auto &[id, player] : m_players)
@@ -3206,51 +3275,87 @@ namespace kcd2mp::server
 				continue;
 			auto states = m_npcs.states_for(id);
 			auto &deliveries = m_npc_delivery[id];
-			for (auto &state : states)
+			for (const auto &state : states)
+				deliveries.try_emplace(state.npc_id());
+
+			// Gameplay revisions are sparse and must not depend on the lossy motion
+			// stream. Enter already carries a full baseline; later changes are sent
+			// reliably, with inventory omitted unless its own revision changed.
+			for (const auto &state : states)
 			{
-				if (!state.has_gameplay()
-				    || !state.gameplay().has_inventory())
+				if (!state.has_gameplay())
 					continue;
 				auto &delivery = deliveries[state.npc_id()];
-				const auto revision = state.gameplay().inventory().revision();
-				const bool include = delivery.inventory_revision != revision
-				    || delivery.inventory_sent_at == time_point{}
-				    || now - delivery.inventory_sent_at >= inventory_refresh_interval;
-				if (include)
-				{
-					delivery.inventory_revision = revision;
-					delivery.inventory_sent_at = now;
-				}
-				else
-					state.mutable_gameplay()->clear_inventory();
-			}
-			for (std::size_t offset{}; offset < states.size();)
-			{
+				if (state.gameplay().revision() <= delivery.gameplay_revision)
+					continue;
+
 				protocol::Envelope envelope;
-				auto *snapshot = envelope.mutable_server_npc_snapshot();
-				snapshot->set_server_tick(m_server_tick);
-				std::size_t count{};
-				std::size_t payload_size = 32;
-				while (offset + count < states.size()
-				    && count < max_npcs_per_message)
-				{
-					const auto state_size =
-					    states[offset + count].ByteSizeLong() + 16;
-					if (count != 0
-					    && payload_size + state_size > npc_snapshot_payload_budget)
-						break;
-					*snapshot->add_npcs() = states[offset + count];
-					payload_size += state_size;
-					++count;
-				}
-				if (count == 0)
+				auto *update = envelope.mutable_server_npc_gameplay_update();
+				update->set_npc_id(state.npc_id());
+				update->set_generation(state.generation());
+				update->set_state_revision(state.revision());
+				*update->mutable_gameplay() = state.gameplay();
+				if (update->gameplay().has_inventory()
+				    && update->gameplay().inventory().revision()
+				        == delivery.inventory_revision)
+					update->mutable_gameplay()->clear_inventory();
+				else if (update->gameplay().has_inventory())
+					delivery.inventory_revision =
+					    update->gameplay().inventory().revision();
+
+				queue(
+				    *player.connection,
+				    std::move(envelope),
+				    reliability::reliable);
+				delivery.gameplay_revision = state.gameplay().revision();
+			}
+
+			std::ranges::sort(
+			    states,
+			    [&](const protocol::NpcState &left,
+			        const protocol::NpcState &right)
+			    {
+				const auto &a = deliveries.at(left.npc_id());
+				const auto &b = deliveries.at(right.npc_id());
+				return a.motion_sent_at == b.motion_sent_at
+				    ? left.npc_id() < right.npc_id()
+				    : a.motion_sent_at < b.motion_sent_at;
+			    });
+
+			protocol::Envelope envelope;
+			auto *motion = envelope.mutable_server_npc_motion();
+			motion->set_server_tick(m_server_tick);
+			std::size_t payload_size = 32;
+			for (const auto &state : states)
+			{
+				auto &delivery = deliveries[state.npc_id()];
+				const bool keyframe_due = delivery.motion_sent_at == time_point{}
+				    || now - delivery.motion_sent_at >= motion_keyframe_interval;
+				if (state.revision() <= delivery.motion_revision && !keyframe_due)
+					continue;
+
+				protocol::NpcMotionState candidate;
+				candidate.set_npc_id(state.npc_id());
+				candidate.set_generation(state.generation());
+				candidate.set_revision(state.revision());
+				*candidate.mutable_transform() = state.transform();
+				const auto candidate_size = candidate.ByteSizeLong() + 16;
+				if (motion->npcs_size() != 0
+				    && (motion->npcs_size()
+				            >= static_cast<int>(max_npcs_per_message)
+				        || payload_size + candidate_size > npc_motion_tick_budget))
 					break;
+
+				*motion->add_npcs() = std::move(candidate);
+				payload_size += candidate_size;
+				delivery.motion_revision = state.revision();
+				delivery.motion_sent_at = now;
+			}
+			if (motion->npcs_size() != 0)
 				queue(
 				    *player.connection,
 				    std::move(envelope),
 				    reliability::unreliable);
-				offset += count;
-			}
 		}
 	}
 

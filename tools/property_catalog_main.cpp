@@ -13,10 +13,10 @@ namespace
 	    std::string_view level,
 	    const std::filesystem::path &output)
 	{
-		kcd2mp::protocol::PropertyCatalog catalog;
+		kcd2o::protocol::PropertyCatalog catalog;
 		std::string error;
-		const auto pak = kcd2mp::property::level_pak_path(game_root, level);
-		if (!kcd2mp::property::scan_level_pak(pak, level, catalog, error))
+		const auto pak = kcd2o::property::level_pak_path(game_root, level);
+		if (!kcd2o::property::scan_level_pak(pak, level, catalog, error))
 		{
 			std::cerr << error << '\n';
 			return false;
@@ -50,7 +50,7 @@ int main(int argc, char **argv)
 	if (argc != 4)
 	{
 		std::cerr
-		    << "usage: KCD2MPPropertyCatalog <KCD2 game root> "
+		    << "usage: KCD2OnlinePropertyCatalog <KCD2 game root> "
 		       "<level id|name|--all> <output file|directory>\n";
 		return 2;
 	}
@@ -61,7 +61,7 @@ int main(int argc, char **argv)
 		return write_catalog(game_root, level, output) ? 0 : 1;
 
 	bool success = true;
-	for (const auto &candidate : kcd2mp::native_world_levels)
+	for (const auto &candidate : kcd2o::native_world_levels)
 	{
 		if (!candidate.production)
 			continue;

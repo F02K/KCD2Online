@@ -1,4 +1,4 @@
-"""KCD2MP build and deployment tool."""
+"""KCD2Online build and deployment tool."""
 
 from .core import (
     BUILD_PROFILES,

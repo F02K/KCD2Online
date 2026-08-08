@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace kcd2mp::property
+namespace kcd2o::property
 {
 	inline constexpr std::uint32_t catalog_schema = 1;
 

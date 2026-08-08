@@ -2,7 +2,7 @@
 
 #include "kcse/native_world_object_sync.hpp"
 #include "kcse/native_world_item_sync.hpp"
-#include "kcd2mp.pb.h"
+#include "kcd2o.pb.h"
 
 #include <Offsets/vtables/IEntitySystem.h>
 
@@ -25,7 +25,7 @@ namespace wh::entitymodule
 	class C_Actor;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	struct native_player_view
 	{

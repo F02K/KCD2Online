@@ -4,7 +4,7 @@
 #include <optional>
 #include <string_view>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	struct native_world_level
 	{

@@ -1,11 +1,11 @@
 # Multiplayer architecture and prototype status
 
-This document describes KCD2MP **v0.1.1**. The implementation is an active
+This document describes KCD2Online **v0.1.2**. The implementation is an active
 prototype and is not intended for production servers or valuable saves.
 
 ## Versioning and compatibility
 
-KCD2MP has one semantic project version shared by:
+KCD2Online has one semantic project version shared by:
 
 - the native client;
 - the dedicated server;
@@ -13,7 +13,7 @@ KCD2MP has one semantic project version shared by:
 - packaged artifacts; and
 - the multiplayer handshake.
 
-The current version is `0.1.1`. There is no separate public protocol or KCSE C
+The current version is `0.1.2`. There is no separate public protocol or KCSE C
 ABI version. The KCSE query boundary reads the same generated major, minor, and
 patch components as the rest of the project. During the prototype phase, all
 components must match exactly; a mismatch is rejected before authentication or
@@ -23,7 +23,7 @@ Internal formats such as the persistence schema and Address Library remain
 independently versioned implementation details.
 
 Wire messages still evolve with the project, but their compatibility boundary
-is the KCD2MP version. This avoids a numeric wire version carrying a different,
+is the KCD2Online version. This avoids a numeric wire version carrying a different,
 unrelated application version. Version changes are recorded in the
 project [changelog](../CHANGELOG.md).
 
@@ -38,15 +38,35 @@ A normal connection follows this sequence:
 5. `ClientWorldReady` or `ClientWorldFailed`
 6. `ServerAccepted`
 
-`ClientHello` contains the KCD2MP version and native runtime descriptor. The
+`ClientHello` contains the KCD2Online version and native runtime descriptor. The
 server verifies the game fingerprint, KCSE/libKCD2 release, Address Library,
 required capabilities, level, and content hash. Only control traffic is
 accepted while the client loads; gameplay updates start after
 `ServerAccepted`.
 
-The client loads a save through KCD2's own UI before joining. KCD2MP adopts the
+The client loads a save through KCD2's own UI before joining. KCD2Online adopts the
 already loaded world only when its level matches the server. It does not load,
 copy, upload, or modify native save files.
+
+## Transport lanes
+
+Each connection configures four outbound GameNetworkingSockets lanes. Chat is
+the only strictly prioritized lane. Reliable protocol state remains in one
+ordered lane, while absolute player and NPC motion use separate unreliable
+lanes with weighted bandwidth sharing. This keeps chat and player movement
+responsive during NPC bursts without weakening the ordering guarantees used by
+handshake, entity lifecycle, inventory, and world transactions.
+
+The lane mapping is symmetric but configured independently in each direction:
+
+- `interactive`: reliable chat send/broadcast traffic;
+- `ordered_state`: all other reliable and causally ordered messages;
+- `player_realtime`: client transforms and server world snapshots; and
+- `npc_realtime`: NPC authority update batches and server NPC motion.
+
+Lanes share one connection and congestion controller; they prioritize queued
+traffic but do not create bandwidth. Realtime queues use per-lane backpressure
+so NPC congestion does not cause player-motion packets to be discarded.
 
 ## Server authority and persistence
 
@@ -140,6 +160,9 @@ Exact combat replay is deliberately deferred. A later combat protocol must
 carry authoritative action identity, phase/timing, target, hit validation,
 interrupts, stamina, and damage results; the presentation-only Mannequin stream
 must not be extended into combat by merely forwarding attack fragments.
+The ownership-preserving respawn flow and the proposed server-authoritative
+life/PvP state machine are specified in
+[player lifecycle, respawn, and combat authority](player-lifecycle.md).
 
 ## Doors and loot containers
 
@@ -337,7 +360,7 @@ The test suites cover:
 - NPC dialogue sync exposes session/phase state but does not yet replay exact
   dialogue branches or cinematic timing on every peer
 - No shared quests, schedules, crime, reputation, or story progression
-- No compatibility promise between different KCD2MP versions
+- No compatibility promise between different KCD2Online versions
 - One explicitly supported Steam/WHGame build
 - Direct-IP hosting without matchmaking or relay service
 - Remaining multi-client gameplay and long-duration checks require manual

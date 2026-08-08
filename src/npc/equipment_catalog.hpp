@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace kcd2mp::npc
+namespace kcd2o::npc
 {
 	struct equipment_definition
 	{

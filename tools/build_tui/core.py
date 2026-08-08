@@ -20,13 +20,13 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 APP_ID = "1771300"
 GAME_BIN_RELATIVE = Path("Bin") / "Win64MasterMasterSteamPGO"
 GAME_EXECUTABLE = "KingdomCome.exe"
-PROJECT_TARGET = "KCD2MPRuntime"
-SERVER_TARGET = "KCD2MPServer"
-AUDIT_TARGET = "KCD2MPSignatureAudit"
-PROPERTY_CATALOG_TARGET = "KCD2MPPropertyCatalog"
-GAME_DATA_GENERATOR_EXECUTABLE = "KCD2MPGameDataGenerator.exe"
+PROJECT_TARGET = "KCD2OnlineRuntime"
+SERVER_TARGET = "KCD2OnlineServer"
+AUDIT_TARGET = "KCD2OnlineSignatureAudit"
+PROPERTY_CATALOG_TARGET = "KCD2OnlinePropertyCatalog"
+GAME_DATA_GENERATOR_EXECUTABLE = "KCD2OnlineGameDataGenerator.exe"
 SERVER_GAME_DATA_DIRECTORY = "server_game_data"
-TEST_TARGETS = ("KCD2MPTests",)
+TEST_TARGETS = ("KCD2OnlineTests",)
 VCPKG_BASELINE = "908da3a305a0a8028d9602ab241b433652b3df69"
 VCPKG_REPOSITORY = "https://github.com/microsoft/vcpkg.git"
 VCPKG_TRIPLET = "x64-windows-static"
@@ -156,8 +156,8 @@ class ConfigStore:
 def default_config_path() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
-        return Path(local_app_data) / "KCD2MP" / "build-tool.json"
-    return Path.home() / "AppData" / "Local" / "KCD2MP" / "build-tool.json"
+        return Path(local_app_data) / "KCD2Online" / "build-tool.json"
+    return Path.home() / "AppData" / "Local" / "KCD2Online" / "build-tool.json"
 
 
 def normalize_game_root(path: Path) -> Path:
@@ -582,7 +582,7 @@ class BuildService:
                 "-C",
                 profile.cmake_config,
                 "-R",
-                "^KCD2MP",
+                "^KCD2Online",
                 "--output-on-failure",
             ],
             log,
@@ -598,8 +598,8 @@ class BuildService:
             server_path=artifact_dir / "{}.exe".format(SERVER_TARGET),
             kcse_loader_path=artifact_dir / "dinput8.dll",
             kcse_loader_pdb_path=artifact_dir / "dinput8.pdb",
-            kcse_client_path=artifact_dir / "KCD2MPKCSEClient.dll",
-            kcse_client_pdb_path=artifact_dir / "KCD2MPKCSEClient.pdb",
+            kcse_client_path=artifact_dir / "KCD2OnlineKCSEClient.dll",
+            kcse_client_pdb_path=artifact_dir / "KCD2OnlineKCSEClient.pdb",
             address_library_paths=discover_address_libraries(
                 artifact_dir / "KCSE" / "addresslib"
             ),
@@ -1084,11 +1084,11 @@ def client_deployment_layout(
         (result.kcse_loader_pdb_path, game_bin / "dinput8.pdb"),
         (
             result.kcse_client_path,
-            Path("Mods") / "KCD2MP" / "KCSE" / "Plugins" / "KCD2MPKCSEClient.dll",
+            Path("Mods") / "KCD2Online" / "KCSE" / "Plugins" / "KCD2OnlineKCSEClient.dll",
         ),
         (
             result.kcse_client_pdb_path,
-            Path("Mods") / "KCD2MP" / "KCSE" / "Plugins" / "KCD2MPKCSEClient.pdb",
+            Path("Mods") / "KCD2Online" / "KCSE" / "Plugins" / "KCD2OnlineKCSEClient.pdb",
         ),
     )
     targets.extend(
@@ -1103,7 +1103,7 @@ def client_deployment_layout(
         )
         for path in result.address_library_paths
     )
-    language_root = result.dll_path.parent / "Mods" / "KCD2MP" / "Lang"
+    language_root = result.dll_path.parent / "Mods" / "KCD2Online" / "Lang"
     language_files = tuple(sorted(language_root.glob("*.lang")))
     fallback_language = language_root / CLIENT_FALLBACK_LANGUAGE_FILE
     if fallback_language not in language_files:
@@ -1115,14 +1115,14 @@ def client_deployment_layout(
     targets.extend(
         (
             path,
-            Path("Mods") / "KCD2MP" / "Lang" / path.name,
+            Path("Mods") / "KCD2Online" / "Lang" / path.name,
         )
         for path in language_files
     )
     language_readme = language_root / "README.md"
     if language_readme.is_file():
         targets.append(
-            (language_readme, Path("Mods") / "KCD2MP" / "Lang" / "README.md")
+            (language_readme, Path("Mods") / "KCD2Online" / "Lang" / "README.md")
         )
     return tuple(targets)
 
@@ -1176,10 +1176,10 @@ def read_project_version(project_root: Path = PROJECT_ROOT) -> str:
         encoding="utf-8", errors="strict"
     )
     match = re.search(
-        r"project\(KCD2MP\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", cmake
+        r"project\(KCD2Online\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", cmake
     )
     if match is None:
-        raise BuildToolError("CMakeLists.txt does not declare the KCD2MP version.")
+        raise BuildToolError("CMakeLists.txt does not declare the KCD2Online version.")
     return match.group(1)
 
 
@@ -1202,7 +1202,7 @@ def package_artifacts(
     client_layout = client_deployment_layout(result, project_root)
     _required_artifacts(client_layout, "package the client")
     if result.server_path is None or not result.server_path.is_file():
-        raise BuildToolError("Cannot package the server: KCD2MPServer.exe is missing.")
+        raise BuildToolError("Cannot package the server: KCD2OnlineServer.exe is missing.")
     if (
         result.game_data_generator_path is None
         or not result.game_data_generator_path.is_file()
@@ -1214,9 +1214,9 @@ def package_artifacts(
         )
 
     artifact_dir = result.dll_path.parent
-    test_executables = tuple(sorted(artifact_dir.glob("KCD2MP*Tests.exe")))
+    test_executables = tuple(sorted(artifact_dir.glob("KCD2Online*Tests.exe")))
     if not test_executables:
-        raise BuildToolError("Cannot package tests: no KCD2MP test executables were found.")
+        raise BuildToolError("Cannot package tests: no KCD2Online test executables were found.")
 
     package_root.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
@@ -1310,10 +1310,10 @@ def package_artifacts(
                 shutil.copy2(symbols, tests_root / symbols.name)
 
         version = read_project_version(project_root)
-        client_zip = client_root / "KCD2MP-Client-v{}.zip".format(version)
+        client_zip = client_root / "KCD2Online-Client-v{}.zip".format(version)
         _write_deterministic_zip(game_root, client_zip)
 
-        server_bundle_name = "KCD2MP-Server-v{}".format(version)
+        server_bundle_name = "KCD2Online-Server-v{}".format(version)
         server_bundle_root = staging / server_bundle_name
         shutil.copytree(
             server_root,
@@ -1349,10 +1349,10 @@ def package_artifacts(
         tests_root=package_root / "tests",
         client_zip=package_root
         / "client"
-        / "KCD2MP-Client-v{}.zip".format(read_project_version(project_root)),
+        / "KCD2Online-Client-v{}.zip".format(read_project_version(project_root)),
         server_zip=package_root
         / "server"
-        / "KCD2MP-Server-v{}.zip".format(read_project_version(project_root)),
+        / "KCD2Online-Server-v{}.zip".format(read_project_version(project_root)),
     )
 
 
@@ -1379,14 +1379,14 @@ def deploy_artifacts(
     try:
         for source, target in targets:
             target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_name(target.name + ".kcd2mp.tmp")
+            temporary = target.with_name(target.name + ".kcd2o.tmp")
             shutil.copy2(source, temporary)
             temporary_paths.append(temporary)
         for temporary, (_, target) in zip(temporary_paths, targets):
             os.replace(temporary, target)
     except PermissionError as exc:
         raise BuildToolError(
-            "Windows refused to replace a KCD2MP/KCSE runtime file. "
+            "Windows refused to replace a KCD2Online/KCSE runtime file. "
             "Close the game and any debugger, then retry."
         ) from exc
     except OSError as exc:

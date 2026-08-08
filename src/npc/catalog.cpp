@@ -16,7 +16,7 @@
 #include <Windows.h>
 #endif
 
-namespace kcd2mp::npc
+namespace kcd2o::npc
 {
 	namespace
 	{

@@ -42,7 +42,7 @@ namespace big::ingame_ui
 			const std::filesystem::path executable(
 			    std::wstring_view(path.data(), length));
 			return executable.parent_path().parent_path().parent_path()
-			    / "mods" / "KCD2MP" / "Lang";
+			    / "mods" / "KCD2Online" / "Lang";
 		}
 
 		const char *guarded_native_game_language() noexcept
@@ -89,7 +89,7 @@ namespace big::ingame_ui
 			{
 				value.last_error = std::move(error);
 				const auto diagnostic =
-				    "KCD2MP localization: " + value.last_error + "\n";
+				    "KCD2Online localization: " + value.last_error + "\n";
 				OutputDebugStringA(diagnostic.c_str());
 			}
 		}

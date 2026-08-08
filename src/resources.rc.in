@@ -19,11 +19,11 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName",      "KCD2MP\0"
+            VALUE "CompanyName",      "KCD2Online\0"
             VALUE "FileDescription",  "Multiplayer framework for Kingdom Come: Deliverance II\0"
             VALUE "InternalName",     "d3d12\0"
             VALUE "OriginalFilename", "d3d12.dll\0"
-            VALUE "ProductName",      "KCD2MP\0"
+            VALUE "ProductName",      "KCD2Online\0"
             VALUE "FileVersion",      "@PROJECT_VERSION@\0"
             VALUE "ProductVersion",   "@PROJECT_VERSION@\0"
         END

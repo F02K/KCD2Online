@@ -33,21 +33,21 @@ from tools.build_tui.core import (
 
 
 class BuildTargetCoverageTests(unittest.TestCase):
-    def test_aggregate_target_builds_every_registered_kcd2mp_test(self) -> None:
+    def test_aggregate_target_builds_every_registered_kcd2o_test(self) -> None:
         cmake_path = Path(__file__).resolve().parents[1] / "CMakeLists.txt"
         cmake = cmake_path.read_text(encoding="utf-8")
         registered = set(
-            re.findall(r"add_test\s*\(\s*NAME\s+(KCD2MP[A-Za-z0-9_]+)", cmake)
+            re.findall(r"add_test\s*\(\s*NAME\s+(KCD2Online[A-Za-z0-9_]+)", cmake)
         )
         aggregate_match = re.search(
-            r"add_custom_target\s*\(\s*KCD2MPTests\b(?P<body>.*?)\n\s*\)",
+            r"add_custom_target\s*\(\s*KCD2OnlineTests\b(?P<body>.*?)\n\s*\)",
             cmake,
             re.DOTALL,
         )
         self.assertIsNotNone(aggregate_match)
         aggregate = aggregate_match.group("body")
         missing = sorted(name for name in registered if name not in aggregate)
-        self.assertEqual(missing, [], "KCD2MPTests misses registered test targets")
+        self.assertEqual(missing, [], "KCD2OnlineTests misses registered test targets")
 
 
 def _vdf_path(path: Path) -> str:
@@ -177,7 +177,7 @@ class DeploymentTests(unittest.TestCase):
         pdb = root / "d3d12_.pdb"
         dll.write_bytes(b"dll")
         pdb.write_bytes(b"pdb")
-        language_root = root / "Mods" / "KCD2MP" / "Lang"
+        language_root = root / "Mods" / "KCD2Online" / "Lang"
         language_root.mkdir(parents=True)
         (language_root / "en.lang").write_text(
             "menu.title=Multiplayer\n", encoding="utf-8"
@@ -211,8 +211,8 @@ class DeploymentTests(unittest.TestCase):
 
             self.assertEqual((destination / "d3d12.dll").read_bytes(), b"dll")
             self.assertEqual((destination / "d3d12.pdb").read_bytes(), b"pdb")
-            self.assertFalse((destination / "d3d12.dll.kcd2mp.tmp").exists())
-            deployed_languages = game_root / "Mods" / "KCD2MP" / "Lang"
+            self.assertFalse((destination / "d3d12.dll.kcd2o.tmp").exists())
+            deployed_languages = game_root / "Mods" / "KCD2Online" / "Lang"
             self.assertEqual(
                 (deployed_languages / "en.lang").read_text(encoding="utf-8"),
                 "menu.title=Multiplayer\n",
@@ -228,7 +228,7 @@ class DeploymentTests(unittest.TestCase):
             artifacts = root / "artifacts"
             artifacts.mkdir()
             result = self._result(artifacts)
-            bundled = artifacts / "Mods" / "KCD2MP" / "Lang"
+            bundled = artifacts / "Mods" / "KCD2Online" / "Lang"
             bundled.mkdir(parents=True, exist_ok=True)
             (bundled / "en.lang").write_text(
                 "menu.title=Bundled build\n", encoding="utf-8"
@@ -249,7 +249,7 @@ class DeploymentTests(unittest.TestCase):
                 result, game_root, lambda: False, project_root
             )
 
-            deployed = game_root / "Mods" / "KCD2MP" / "Lang"
+            deployed = game_root / "Mods" / "KCD2Online" / "Lang"
             self.assertEqual(
                 (deployed / "en.lang").read_text(encoding="utf-8"),
                 "menu.title=Bundled build\n",
@@ -288,8 +288,8 @@ class DeploymentTests(unittest.TestCase):
             result = self._result(artifacts)
             kcse_loader = artifacts / "dinput8.dll"
             kcse_loader_pdb = artifacts / "dinput8.pdb"
-            kcse_client = artifacts / "KCD2MPKCSEClient.dll"
-            kcse_client_pdb = artifacts / "KCD2MPKCSEClient.pdb"
+            kcse_client = artifacts / "KCD2OnlineKCSEClient.dll"
+            kcse_client_pdb = artifacts / "KCD2OnlineKCSEClient.pdb"
             kcse_loader.write_bytes(b"kcse")
             kcse_loader_pdb.write_bytes(b"kcse-pdb")
             kcse_client.write_bytes(b"client")
@@ -316,9 +316,9 @@ class DeploymentTests(unittest.TestCase):
             destination = deploy_artifacts(result, game_root, lambda: False)
 
             self.assertEqual((destination / "dinput8.dll").read_bytes(), b"kcse")
-            plugin_dir = game_root / "Mods" / "KCD2MP" / "KCSE" / "Plugins"
+            plugin_dir = game_root / "Mods" / "KCD2Online" / "KCSE" / "Plugins"
             self.assertEqual(
-                (plugin_dir / "KCD2MPKCSEClient.dll").read_bytes(), b"client"
+                (plugin_dir / "KCD2OnlineKCSEClient.dll").read_bytes(), b"client"
             )
             self.assertEqual(
                 (
@@ -409,7 +409,7 @@ class PackagingTests(unittest.TestCase):
         (project / "data" / "server").mkdir()
         artifacts.mkdir()
         (project / "CMakeLists.txt").write_text(
-            "project(KCD2MP VERSION 0.1.0 LANGUAGES CXX)\n", encoding="utf-8"
+            "project(KCD2Online VERSION 0.1.0 LANGUAGES CXX)\n", encoding="utf-8"
         )
         (project / "server.toml.example").write_text("[server]\n", encoding="utf-8")
         (project / "starter_profile.toml").write_text("money = 0\n", encoding="utf-8")
@@ -429,7 +429,7 @@ class PackagingTests(unittest.TestCase):
         (project / "data" / "lang" / "de.lang").write_text(
             "menu.title=Mehrspieler\n", encoding="utf-8"
         )
-        bundled_languages = artifacts / "Mods" / "KCD2MP" / "Lang"
+        bundled_languages = artifacts / "Mods" / "KCD2Online" / "Lang"
         bundled_languages.mkdir(parents=True)
         shutil.copy2(
             project / "data" / "lang" / "en.lang",
@@ -445,15 +445,15 @@ class PackagingTests(unittest.TestCase):
             "d3d12_.pdb": b"frontend-symbols",
             "dinput8.dll": b"kcse",
             "dinput8.pdb": b"kcse-symbols",
-            "KCD2MPKCSEClient.dll": b"client",
-            "KCD2MPKCSEClient.pdb": b"client-symbols",
-            "KCD2MPServer.exe": b"server",
-            "KCD2MPServer.pdb": b"server-symbols",
-            "KCD2MPSignatureAudit.exe": b"audit",
-            "KCD2MPSignatureAudit.pdb": b"audit-symbols",
-            "KCD2MPGameDataGenerator.exe": b"generator",
-            "KCD2MPProtocolTests.exe": b"tests",
-            "KCD2MPProtocolTests.pdb": b"test-symbols",
+            "KCD2OnlineKCSEClient.dll": b"client",
+            "KCD2OnlineKCSEClient.pdb": b"client-symbols",
+            "KCD2OnlineServer.exe": b"server",
+            "KCD2OnlineServer.pdb": b"server-symbols",
+            "KCD2OnlineSignatureAudit.exe": b"audit",
+            "KCD2OnlineSignatureAudit.pdb": b"audit-symbols",
+            "KCD2OnlineGameDataGenerator.exe": b"generator",
+            "KCD2OnlineProtocolTests.exe": b"tests",
+            "KCD2OnlineProtocolTests.pdb": b"test-symbols",
         }
         for name, content in names.items():
             (artifacts / name).write_bytes(content)
@@ -469,14 +469,14 @@ class PackagingTests(unittest.TestCase):
             build_dir=root,
             dll_path=artifacts / "d3d12_.dll",
             pdb_path=artifacts / "d3d12_.pdb",
-            audit_path=artifacts / "KCD2MPSignatureAudit.exe",
-            server_path=artifacts / "KCD2MPServer.exe",
+            audit_path=artifacts / "KCD2OnlineSignatureAudit.exe",
+            server_path=artifacts / "KCD2OnlineServer.exe",
             kcse_loader_path=artifacts / "dinput8.dll",
             kcse_loader_pdb_path=artifacts / "dinput8.pdb",
-            kcse_client_path=artifacts / "KCD2MPKCSEClient.dll",
-            kcse_client_pdb_path=artifacts / "KCD2MPKCSEClient.pdb",
+            kcse_client_path=artifacts / "KCD2OnlineKCSEClient.dll",
+            kcse_client_pdb_path=artifacts / "KCD2OnlineKCSEClient.pdb",
             address_library_paths=address_libraries,
-            game_data_generator_path=artifacts / "KCD2MPGameDataGenerator.exe",
+            game_data_generator_path=artifacts / "KCD2OnlineGameDataGenerator.exe",
         )
 
     def test_package_separates_outputs_and_mirrors_deployment_zip(self) -> None:
@@ -495,24 +495,24 @@ class PackagingTests(unittest.TestCase):
                 (
                     game
                     / "Mods"
-                    / "KCD2MP"
+                    / "KCD2Online"
                     / "KCSE"
                     / "Plugins"
-                    / "KCD2MPKCSEClient.dll"
+                    / "KCD2OnlineKCSEClient.dll"
                 ).read_bytes(),
                 b"client",
             )
             self.assertEqual(
-                (game / "Mods" / "KCD2MP" / "Lang" / "de.lang").read_text(
+                (game / "Mods" / "KCD2Online" / "Lang" / "de.lang").read_text(
                     encoding="utf-8"
                 ),
                 "menu.title=Mehrspieler\n",
             )
             self.assertEqual(
-                (package.server_root / "KCD2MPServer.exe").read_bytes(), b"server"
+                (package.server_root / "KCD2OnlineServer.exe").read_bytes(), b"server"
             )
             self.assertTrue(
-                (package.server_root / "tools" / "KCD2MPSignatureAudit.exe").is_file()
+                (package.server_root / "tools" / "KCD2OnlineSignatureAudit.exe").is_file()
             )
             self.assertTrue((package.server_root / "start_server.bat").is_file())
             self.assertTrue((package.server_root / "README.txt").is_file())
@@ -520,17 +520,17 @@ class PackagingTests(unittest.TestCase):
             with zipfile.ZipFile(package.server_zip) as archive:
                 names = set(archive.namelist())
                 self.assertIn(
-                    "KCD2MP-Server-v0.1.0/start_server.bat",
+                    "KCD2Online-Server-v0.1.0/start_server.bat",
                     names,
                 )
                 self.assertIn(
-                    "KCD2MP-Server-v0.1.0/KCD2MPGameDataGenerator.exe",
+                    "KCD2Online-Server-v0.1.0/KCD2OnlineGameDataGenerator.exe",
                     names,
                 )
                 self.assertFalse(any("/game_data/" in name for name in names))
             self.assertEqual(
                 {path.name for path in package.tests_root.iterdir()},
-                {"KCD2MPProtocolTests.exe", "KCD2MPProtocolTests.pdb"},
+                {"KCD2OnlineProtocolTests.exe", "KCD2OnlineProtocolTests.pdb"},
             )
             self.assertTrue((package.root / "SHA256SUMS.txt").is_file())
 
@@ -568,7 +568,7 @@ class PackagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             project, result = self._project_and_result(root)
-            bundled = result.dll_path.parent / "Mods" / "KCD2MP" / "Lang"
+            bundled = result.dll_path.parent / "Mods" / "KCD2Online" / "Lang"
             bundled.mkdir(parents=True, exist_ok=True)
             (bundled / "en.lang").write_text(
                 "menu.title=Bundled release\n", encoding="utf-8"
@@ -582,7 +582,7 @@ class PackagingTests(unittest.TestCase):
                 package.client_root
                 / "KingdomComeDeliverance2"
                 / "Mods"
-                / "KCD2MP"
+                / "KCD2Online"
                 / "Lang"
                 / "de.lang"
             )
@@ -593,7 +593,7 @@ class PackagingTests(unittest.TestCase):
             with zipfile.ZipFile(package.client_zip) as archive:
                 self.assertEqual(
                     archive.read(
-                        "KingdomComeDeliverance2/Mods/KCD2MP/Lang/de.lang"
+                        "KingdomComeDeliverance2/Mods/KCD2Online/Lang/de.lang"
                     ).decode("utf-8").replace("\r\n", "\n"),
                     "menu.title=Gebündeltes Release\n",
                 )

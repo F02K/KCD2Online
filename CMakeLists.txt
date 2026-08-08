@@ -8,11 +8,11 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
 
-project(KCD2MP VERSION 0.1.1 LANGUAGES CXX C ASM ASM_MASM)
+project(KCD2Online VERSION 0.1.2 LANGUAGES CXX C ASM ASM_MASM)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/multiplayer/version.hpp.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/kcd2mp_version.hpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/kcd2o_version.hpp"
     @ONLY
 )
 set(GENERATED_RESOURCE_FILE
@@ -29,8 +29,8 @@ add_compile_definitions(
 )
 
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/src")
-set(KCD2MP_WHGAME_PATH "" CACHE FILEPATH "Path to WHGame.dll for the offline signature audit")
-option(KCD2MP_BUILD_KCSE "Build the bundled libKCD2 KCSE loader and KCD2MP client plugin" ON)
+set(KCD2Online_WHGAME_PATH "" CACHE FILEPATH "Path to WHGame.dll for the offline signature audit")
+option(KCD2Online_BUILD_KCSE "Build the bundled libKCD2 KCSE loader and KCD2Online client plugin" ON)
 
 # Fetch modules
 message("\nFetching modules")
@@ -45,7 +45,7 @@ include(cmake_scripts/zip.cmake)
 # WHGame DLL must nevertheless use the same retail CRT ABI. Apply the rule to
 # all dependency targets that exist at this point; targets created below keep
 # inheriting the project-wide default set above.
-function(kcd2mp_force_retail_msvc_runtime directory)
+function(kcd2o_force_retail_msvc_runtime directory)
     get_property(directory_targets DIRECTORY "${directory}"
         PROPERTY BUILDSYSTEM_TARGETS
     )
@@ -64,47 +64,47 @@ function(kcd2mp_force_retail_msvc_runtime directory)
         PROPERTY SUBDIRECTORIES
     )
     foreach(subdirectory IN LISTS subdirectories)
-        kcd2mp_force_retail_msvc_runtime("${subdirectory}")
+        kcd2o_force_retail_msvc_runtime("${subdirectory}")
     endforeach()
 endfunction()
-kcd2mp_force_retail_msvc_runtime("${CMAKE_CURRENT_SOURCE_DIR}")
+kcd2o_force_retail_msvc_runtime("${CMAKE_CURRENT_SOURCE_DIR}")
 
 find_package(Protobuf CONFIG REQUIRED)
 find_package(GameNetworkingSockets CONFIG REQUIRED)
 
-if(KCD2MP_BUILD_KCSE)
+if(KCD2Online_BUILD_KCSE)
     find_package(spdlog CONFIG REQUIRED)
     find_package(boost_container CONFIG REQUIRED)
     find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
-    set(KCD2MP_LIBKCD2_ROOT "${PROJECT_SOURCE_DIR}/libKCD2")
-    set(KCD2MP_KCSE_ROOT "${KCD2MP_LIBKCD2_ROOT}/Projects/KCSE")
-    set(KCD2MP_ADDRESS_LIBRARY_ROOT
+    set(KCD2Online_LIBKCD2_ROOT "${PROJECT_SOURCE_DIR}/libKCD2")
+    set(KCD2Online_KCSE_ROOT "${KCD2Online_LIBKCD2_ROOT}/Projects/KCSE")
+    set(KCD2Online_ADDRESS_LIBRARY_ROOT
         "${PROJECT_SOURCE_DIR}/vendor/Address-Library-For-KCSE/kcd2_address_library"
     )
-    if(NOT EXISTS "${KCD2MP_LIBKCD2_ROOT}/.buildenv/PCH.h")
+    if(NOT EXISTS "${KCD2Online_LIBKCD2_ROOT}/.buildenv/PCH.h")
         message(FATAL_ERROR
             "libKCD2 is not initialized. Run "
             "`powershell -ExecutionPolicy Bypass -File tools/init_vendor.ps1` "
             "from the repository root.")
     endif()
-    if(NOT EXISTS "${KCD2MP_KCSE_ROOT}/src/dllmain.cpp")
+    if(NOT EXISTS "${KCD2Online_KCSE_ROOT}/src/dllmain.cpp")
         message(FATAL_ERROR
             "libKCD2's nested KCSE submodule is not initialized. Run "
             "`powershell -ExecutionPolicy Bypass -File tools/init_vendor.ps1` "
             "from the repository root.")
     endif()
-    file(GLOB KCD2MP_ADDRESS_LIBRARY_FILES CONFIGURE_DEPENDS
-        "${KCD2MP_ADDRESS_LIBRARY_ROOT}/kcd_addresslib_*.bin"
+    file(GLOB KCD2Online_ADDRESS_LIBRARY_FILES CONFIGURE_DEPENDS
+        "${KCD2Online_ADDRESS_LIBRARY_ROOT}/kcd_addresslib_*.bin"
     )
-    if(NOT KCD2MP_ADDRESS_LIBRARY_FILES)
+    if(NOT KCD2Online_ADDRESS_LIBRARY_FILES)
         message(FATAL_ERROR
             "Address-Library-For-KCSE is not initialized. Run "
             "`powershell -ExecutionPolicy Bypass -File tools/init_vendor.ps1` "
             "from the repository root.")
     endif()
 
-    add_custom_target(KCD2MPAddressLibraryAudit
+    add_custom_target(KCD2OnlineAddressLibraryAudit
         COMMAND
             "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/tools/generate_address_library_manifest.py"
@@ -118,43 +118,43 @@ if(KCD2MP_BUILD_KCSE)
             "${PROJECT_SOURCE_DIR}/tools/generate_address_library_manifest.py"
             "${PROJECT_SOURCE_DIR}/src/multiplayer/address_library_manifest.generated.hpp"
             "${PROJECT_SOURCE_DIR}/tools/audit_address_library.py"
-            ${KCD2MP_ADDRESS_LIBRARY_FILES}
+            ${KCD2Online_ADDRESS_LIBRARY_FILES}
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
         COMMENT "Auditing native REL::ID coverage in the vendored Address Library"
         VERBATIM
     )
 
     get_target_property(
-        KCD2MP_SPDLOG_INCLUDE_DIRECTORIES
+        KCD2Online_SPDLOG_INCLUDE_DIRECTORIES
         spdlog::spdlog_header_only
         INTERFACE_INCLUDE_DIRECTORIES
     )
-    add_library(KCD2MPSpdlogHeaderOnly INTERFACE)
-    target_include_directories(KCD2MPSpdlogHeaderOnly INTERFACE
-        ${KCD2MP_SPDLOG_INCLUDE_DIRECTORIES}
+    add_library(KCD2OnlineSpdlogHeaderOnly INTERFACE)
+    target_include_directories(KCD2OnlineSpdlogHeaderOnly INTERFACE
+        ${KCD2Online_SPDLOG_INCLUDE_DIRECTORIES}
     )
-    target_compile_definitions(KCD2MPSpdlogHeaderOnly INTERFACE
+    target_compile_definitions(KCD2OnlineSpdlogHeaderOnly INTERFACE
         "FMT_HEADER_ONLY"
         "SPDLOG_FMT_EXTERNAL"
         "SPDLOG_HEADER_ONLY"
     )
 
-    file(GLOB_RECURSE KCD2MP_LIBKCD2_HEADERS CONFIGURE_DEPENDS
-        "${KCD2MP_LIBKCD2_ROOT}/include/*.h"
+    file(GLOB_RECURSE KCD2Online_LIBKCD2_HEADERS CONFIGURE_DEPENDS
+        "${KCD2Online_LIBKCD2_ROOT}/include/*.h"
     )
-    file(GLOB_RECURSE KCD2MP_LIBKCD2_SOURCES CONFIGURE_DEPENDS
-        "${KCD2MP_LIBKCD2_ROOT}/src/*.cpp"
+    file(GLOB_RECURSE KCD2Online_LIBKCD2_SOURCES CONFIGURE_DEPENDS
+        "${KCD2Online_LIBKCD2_ROOT}/src/*.cpp"
     )
     add_library(kcd_re STATIC
-        "${KCD2MP_LIBKCD2_ROOT}/.buildenv/check_sizes.cpp"
-        "${KCD2MP_LIBKCD2_ROOT}/.buildenv/CrySDKStubs.cpp"
-        ${KCD2MP_LIBKCD2_SOURCES}
-        ${KCD2MP_LIBKCD2_HEADERS}
+        "${KCD2Online_LIBKCD2_ROOT}/.buildenv/check_sizes.cpp"
+        "${KCD2Online_LIBKCD2_ROOT}/.buildenv/CrySDKStubs.cpp"
+        ${KCD2Online_LIBKCD2_SOURCES}
+        ${KCD2Online_LIBKCD2_HEADERS}
     )
     set_property(TARGET kcd_re PROPERTY CXX_STANDARD 17)
     set_property(TARGET kcd_re PROPERTY CXX_STANDARD_REQUIRED ON)
     target_precompile_headers(kcd_re PRIVATE
-        "${KCD2MP_LIBKCD2_ROOT}/.buildenv/PCH.h"
+        "${KCD2Online_LIBKCD2_ROOT}/.buildenv/PCH.h"
     )
     target_compile_definitions(kcd_re PRIVATE
         "_ITERATOR_DEBUG_LEVEL=0"
@@ -164,19 +164,19 @@ if(KCD2MP_BUILD_KCSE)
     )
     target_compile_options(kcd_re PRIVATE /utf-8 /W4 /wd4100 /wd4819)
     target_include_directories(kcd_re PUBLIC
-        "${KCD2MP_LIBKCD2_ROOT}/include"
-        "${KCD2MP_LIBKCD2_ROOT}/include/CryEngine/CryCommon"
+        "${KCD2Online_LIBKCD2_ROOT}/include"
+        "${KCD2Online_LIBKCD2_ROOT}/include/CryEngine/CryCommon"
     )
     target_link_libraries(kcd_re PUBLIC Boost::container)
 
-    file(GLOB_RECURSE KCD2MP_KCSE_SOURCES CONFIGURE_DEPENDS
-        "${KCD2MP_KCSE_ROOT}/src/*.cpp"
+    file(GLOB_RECURSE KCD2Online_KCSE_SOURCES CONFIGURE_DEPENDS
+        "${KCD2Online_KCSE_ROOT}/src/*.cpp"
     )
-    add_library(KCSE SHARED ${KCD2MP_KCSE_SOURCES})
+    add_library(KCSE SHARED ${KCD2Online_KCSE_SOURCES})
     set_property(TARGET KCSE PROPERTY CXX_STANDARD 17)
     set_property(TARGET KCSE PROPERTY CXX_STANDARD_REQUIRED ON)
     target_precompile_headers(KCSE PRIVATE
-        "${KCD2MP_LIBKCD2_ROOT}/.buildenv/PCH.h"
+        "${KCD2Online_LIBKCD2_ROOT}/.buildenv/PCH.h"
     )
     target_compile_definitions(KCSE PRIVATE
         "_ITERATOR_DEBUG_LEVEL=0"
@@ -186,13 +186,13 @@ if(KCD2MP_BUILD_KCSE)
     )
     target_compile_options(KCSE PRIVATE /utf-8 /W4 /wd4100 /wd4819)
     target_include_directories(KCSE PRIVATE
-        "${KCD2MP_LIBKCD2_ROOT}/include"
-        "${KCD2MP_LIBKCD2_ROOT}/include/CryEngine/CryCommon"
-        "${KCD2MP_KCSE_ROOT}/src"
+        "${KCD2Online_LIBKCD2_ROOT}/include"
+        "${KCD2Online_LIBKCD2_ROOT}/include/CryEngine/CryCommon"
+        "${KCD2Online_KCSE_ROOT}/src"
     )
     target_link_libraries(KCSE PRIVATE
         kcd_re
-        KCD2MPSpdlogHeaderOnly
+        KCD2OnlineSpdlogHeaderOnly
         version.lib
     )
     set_target_properties(KCSE PROPERTIES
@@ -203,16 +203,16 @@ if(KCD2MP_BUILD_KCSE)
 endif()
 
 if (TARGET GameNetworkingSockets::GameNetworkingSockets)
-    set(KCD2MP_GNS_TARGET GameNetworkingSockets::GameNetworkingSockets)
+    set(KCD2Online_GNS_TARGET GameNetworkingSockets::GameNetworkingSockets)
 elseif (TARGET GameNetworkingSockets::GameNetworkingSockets_s)
-    set(KCD2MP_GNS_TARGET GameNetworkingSockets::GameNetworkingSockets_s)
+    set(KCD2Online_GNS_TARGET GameNetworkingSockets::GameNetworkingSockets_s)
 elseif (TARGET GameNetworkingSockets)
-    set(KCD2MP_GNS_TARGET GameNetworkingSockets)
+    set(KCD2Online_GNS_TARGET GameNetworkingSockets)
 else()
     message(FATAL_ERROR "The GameNetworkingSockets package did not export a supported CMake target.")
 endif()
 
-message(STATUS "KCD2MP")
+message(STATUS "KCD2Online")
 file(GLOB_RECURSE SRC_MAIN CONFIGURE_DEPENDS
     "${SRC_DIR}/**.hpp"
     "${SRC_DIR}/**.h"
@@ -241,23 +241,23 @@ list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]gui[/\\\\]native_ui_localization\\.cp
 
 if (NOT TARGET Zydis)
     message(FATAL_ERROR
-        "KCD2MP requires the Zydis target supplied by the pinned "
+        "KCD2Online requires the Zydis target supplied by the pinned "
         "ReturnOfModdingBase/PolyHook dependency.")
 endif()
 
-add_library(KCD2MPSignatureCore STATIC
+add_library(KCD2OnlineSignatureCore STATIC
     "${SRC_DIR}/signatures/signature_core.cpp"
     "${SRC_DIR}/signatures/signature_core.hpp"
 )
-set_property(TARGET KCD2MPSignatureCore PROPERTY CXX_STANDARD 23)
-target_include_directories(KCD2MPSignatureCore PUBLIC "${SRC_DIR}")
-target_compile_definitions(KCD2MPSignatureCore PRIVATE
+set_property(TARGET KCD2OnlineSignatureCore PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineSignatureCore PUBLIC "${SRC_DIR}")
+target_compile_definitions(KCD2OnlineSignatureCore PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
-target_link_libraries(KCD2MPSignatureCore PUBLIC Zydis)
-set_property(TARGET KCD2MPSignatureCore PROPERTY COMPILE_WARNING_AS_ERROR ON)
+target_link_libraries(KCD2OnlineSignatureCore PUBLIC Zydis)
+set_property(TARGET KCD2OnlineSignatureCore PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
 add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/bigobj>")
 add_compile_options("$<$<COMPILE_LANG_AND_ID:C,MSVC>:/utf-8>")
@@ -267,85 +267,85 @@ if (FINAL)
     add_compile_definitions(FINAL)
 endif()
 
-add_library(KCD2MPNpcCatalog STATIC
+add_library(KCD2OnlineNpcCatalog STATIC
     "${SRC_DIR}/npc/catalog.cpp"
     "${SRC_DIR}/npc/catalog.hpp"
     "${SRC_DIR}/npc/equipment_catalog.cpp"
     "${SRC_DIR}/npc/equipment_catalog.hpp"
 )
-set_property(TARGET KCD2MPNpcCatalog PROPERTY CXX_STANDARD 23)
-target_include_directories(KCD2MPNpcCatalog PUBLIC
+set_property(TARGET KCD2OnlineNpcCatalog PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineNpcCatalog PUBLIC
     "${SRC_DIR}"
     "${zip_SOURCE_DIR}"
 )
-target_link_libraries(KCD2MPNpcCatalog PUBLIC
+target_link_libraries(KCD2OnlineNpcCatalog PUBLIC
     pugixml::pugixml
     nlohmann_json::nlohmann_json
     zip
 )
-target_compile_definitions(KCD2MPNpcCatalog PRIVATE
+target_compile_definitions(KCD2OnlineNpcCatalog PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
-set_property(TARGET KCD2MPNpcCatalog PROPERTY COMPILE_WARNING_AS_ERROR ON)
+set_property(TARGET KCD2OnlineNpcCatalog PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
-add_library(KCD2MPProtocol STATIC
+add_library(KCD2OnlineProtocol STATIC
     "${SRC_DIR}/multiplayer/protocol.cpp"
     "${SRC_DIR}/multiplayer/protocol.hpp"
-    "${PROJECT_SOURCE_DIR}/protocol/kcd2mp.proto"
+    "${PROJECT_SOURCE_DIR}/protocol/kcd2o.proto"
 )
-set_property(TARGET KCD2MPProtocol PROPERTY CXX_STANDARD 23)
-target_include_directories(KCD2MPProtocol PUBLIC
+set_property(TARGET KCD2OnlineProtocol PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineProtocol PUBLIC
     "${SRC_DIR}"
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
-target_link_libraries(KCD2MPProtocol PUBLIC protobuf::libprotobuf)
-target_compile_definitions(KCD2MPProtocol PRIVATE
+target_link_libraries(KCD2OnlineProtocol PUBLIC protobuf::libprotobuf)
+target_compile_definitions(KCD2OnlineProtocol PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
-set_property(TARGET KCD2MPProtocol PROPERTY COMPILE_WARNING_AS_ERROR ON)
+set_property(TARGET KCD2OnlineProtocol PROPERTY COMPILE_WARNING_AS_ERROR ON)
 protobuf_generate(
-    TARGET KCD2MPProtocol
+    TARGET KCD2OnlineProtocol
     LANGUAGE cpp
-    PROTOS "${PROJECT_SOURCE_DIR}/protocol/kcd2mp.proto"
+    PROTOS "${PROJECT_SOURCE_DIR}/protocol/kcd2o.proto"
     IMPORT_DIRS "${PROJECT_SOURCE_DIR}/protocol"
 )
 
-add_library(KCD2MPNetworking STATIC
+add_library(KCD2OnlineNetworking STATIC
     "${SRC_DIR}/multiplayer/networking.cpp"
     "${SRC_DIR}/multiplayer/networking.hpp"
 )
-set_property(TARGET KCD2MPNetworking PROPERTY CXX_STANDARD 23)
-target_include_directories(KCD2MPNetworking PUBLIC "${SRC_DIR}")
-target_link_libraries(KCD2MPNetworking PUBLIC KCD2MPProtocol ${KCD2MP_GNS_TARGET})
-target_compile_definitions(KCD2MPNetworking PRIVATE
+set_property(TARGET KCD2OnlineNetworking PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineNetworking PUBLIC "${SRC_DIR}")
+target_link_libraries(KCD2OnlineNetworking PUBLIC KCD2OnlineProtocol ${KCD2Online_GNS_TARGET})
+target_compile_definitions(KCD2OnlineNetworking PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
-set_property(TARGET KCD2MPNetworking PROPERTY COMPILE_WARNING_AS_ERROR ON)
+set_property(TARGET KCD2OnlineNetworking PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
-add_library(KCD2MPProperty STATIC
+add_library(KCD2OnlineProperty STATIC
     "${SRC_DIR}/property/catalog.cpp"
     "${SRC_DIR}/property/catalog.hpp"
     "${SRC_DIR}/property/service.cpp"
     "${SRC_DIR}/property/service.hpp"
 )
-set_property(TARGET KCD2MPProperty PROPERTY CXX_STANDARD 23)
-target_include_directories(KCD2MPProperty PUBLIC "${SRC_DIR}")
-target_link_libraries(KCD2MPProperty PUBLIC KCD2MPProtocol)
-target_link_libraries(KCD2MPProperty PRIVATE pugixml::pugixml zip)
-target_compile_definitions(KCD2MPProperty PRIVATE
+set_property(TARGET KCD2OnlineProperty PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineProperty PUBLIC "${SRC_DIR}")
+target_link_libraries(KCD2OnlineProperty PUBLIC KCD2OnlineProtocol)
+target_link_libraries(KCD2OnlineProperty PRIVATE pugixml::pugixml zip)
+target_compile_definitions(KCD2OnlineProperty PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
-set_property(TARGET KCD2MPProperty PROPERTY COMPILE_WARNING_AS_ERROR ON)
+set_property(TARGET KCD2OnlineProperty PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
-add_library(KCD2MPServerCore STATIC
+add_library(KCD2OnlineServerCore STATIC
 	"${SRC_DIR}/server/item_ledger.cpp"
 	"${SRC_DIR}/server/item_ledger.hpp"
 	"${SRC_DIR}/server/npc_registry.cpp"
@@ -359,51 +359,51 @@ add_library(KCD2MPServerCore STATIC
     "${SRC_DIR}/server/world_store.cpp"
     "${SRC_DIR}/server/world_store.hpp"
 )
-set_property(TARGET KCD2MPServerCore PROPERTY CXX_STANDARD 23)
-target_include_directories(KCD2MPServerCore PUBLIC "${SRC_DIR}")
-target_link_libraries(KCD2MPServerCore PUBLIC
-    KCD2MPProtocol
-    KCD2MPProperty
+set_property(TARGET KCD2OnlineServerCore PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineServerCore PUBLIC "${SRC_DIR}")
+target_link_libraries(KCD2OnlineServerCore PUBLIC
+    KCD2OnlineProtocol
+    KCD2OnlineProperty
     tomlplusplus::tomlplusplus
     bcrypt
 	 nlohmann_json::nlohmann_json
 )
-target_compile_definitions(KCD2MPServerCore PRIVATE
+target_compile_definitions(KCD2OnlineServerCore PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
-set_property(TARGET KCD2MPServerCore PROPERTY COMPILE_WARNING_AS_ERROR ON)
+set_property(TARGET KCD2OnlineServerCore PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
-add_executable(KCD2MPServer "${SRC_DIR}/server/server_main.cpp")
-set_property(TARGET KCD2MPServer PROPERTY CXX_STANDARD 23)
-target_include_directories(KCD2MPServer PRIVATE "${SRC_DIR}")
-target_link_libraries(KCD2MPServer PRIVATE
-    KCD2MPServerCore
-    KCD2MPNetworking
+add_executable(KCD2OnlineServer "${SRC_DIR}/server/server_main.cpp")
+set_property(TARGET KCD2OnlineServer PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineServer PRIVATE "${SRC_DIR}")
+target_link_libraries(KCD2OnlineServer PRIVATE
+    KCD2OnlineServerCore
+    KCD2OnlineNetworking
 )
-target_compile_definitions(KCD2MPServer PRIVATE
+target_compile_definitions(KCD2OnlineServer PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
-set_property(TARGET KCD2MPServer PROPERTY COMPILE_WARNING_AS_ERROR ON)
-add_custom_command(TARGET KCD2MPServer POST_BUILD
+set_property(TARGET KCD2OnlineServer PROPERTY COMPILE_WARNING_AS_ERROR ON)
+add_custom_command(TARGET KCD2OnlineServer POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PROJECT_SOURCE_DIR}/server.toml.example"
-        "$<TARGET_FILE_DIR:KCD2MPServer>/server.toml.example"
+        "$<TARGET_FILE_DIR:KCD2OnlineServer>/server.toml.example"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PROJECT_SOURCE_DIR}/starter_profile.toml"
-        "$<TARGET_FILE_DIR:KCD2MPServer>/starter_profile.toml"
+        "$<TARGET_FILE_DIR:KCD2OnlineServer>/starter_profile.toml"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PROJECT_SOURCE_DIR}/data/npc_archetypes.json"
-        "$<TARGET_FILE_DIR:KCD2MPServer>/npc_archetypes.json"
+        "$<TARGET_FILE_DIR:KCD2OnlineServer>/npc_archetypes.json"
 )
 
 # The native Scaleform menu uses CryEngine ABI types and must therefore be
 # compiled with libKCD2's PCH instead of the main module's ROM/ImGui PCH.
-if(KCD2MP_BUILD_KCSE)
-    add_library(KCD2MPNativeMultiplayerMenu OBJECT
+if(KCD2Online_BUILD_KCSE)
+    add_library(KCD2OnlineNativeMultiplayerMenu OBJECT
 		"${SRC_DIR}/gui/ingame_menu.hpp"
 		"${SRC_DIR}/gui/native_ingame_menu_api.cpp"
 		"${SRC_DIR}/gui/native_ingame_menu_api.hpp"
@@ -412,53 +412,53 @@ if(KCD2MP_BUILD_KCSE)
         "${SRC_DIR}/gui/native_multiplayer_menu.cpp"
         "${SRC_DIR}/gui/native_multiplayer_menu.hpp"
     )
-    set_property(TARGET KCD2MPNativeMultiplayerMenu PROPERTY CXX_STANDARD 23)
-    set_property(TARGET KCD2MPNativeMultiplayerMenu PROPERTY CXX_STANDARD_REQUIRED ON)
-    target_precompile_headers(KCD2MPNativeMultiplayerMenu PRIVATE
-        "${KCD2MP_LIBKCD2_ROOT}/.buildenv/PCH.h"
+    set_property(TARGET KCD2OnlineNativeMultiplayerMenu PROPERTY CXX_STANDARD 23)
+    set_property(TARGET KCD2OnlineNativeMultiplayerMenu PROPERTY CXX_STANDARD_REQUIRED ON)
+    target_precompile_headers(KCD2OnlineNativeMultiplayerMenu PRIVATE
+        "${KCD2Online_LIBKCD2_ROOT}/.buildenv/PCH.h"
     )
-    target_include_directories(KCD2MPNativeMultiplayerMenu PRIVATE
+    target_include_directories(KCD2OnlineNativeMultiplayerMenu PRIVATE
         "${SRC_DIR}"
-        "${KCD2MP_LIBKCD2_ROOT}/include"
-        "${KCD2MP_LIBKCD2_ROOT}/include/CryEngine/CryCommon"
+        "${KCD2Online_LIBKCD2_ROOT}/include"
+        "${KCD2Online_LIBKCD2_ROOT}/include/CryEngine/CryCommon"
     )
-    target_compile_definitions(KCD2MPNativeMultiplayerMenu PRIVATE
-        "KCD2MP_NATIVE_MULTIPLAYER_MENU"
+    target_compile_definitions(KCD2OnlineNativeMultiplayerMenu PRIVATE
+        "KCD2Online_NATIVE_MULTIPLAYER_MENU"
         "_ITERATOR_DEBUG_LEVEL=0"
         "FORCE_STANDARD_ASSERT"
         "_CRT_SECURE_NO_WARNINGS"
         "NOMINMAX"
         "WIN32_LEAN_AND_MEAN"
     )
-    target_compile_options(KCD2MPNativeMultiplayerMenu PRIVATE
+    target_compile_options(KCD2OnlineNativeMultiplayerMenu PRIVATE
         /utf-8 /W4 /wd4100 /wd4819 /permissive
     )
-    target_link_libraries(KCD2MPNativeMultiplayerMenu PRIVATE
+    target_link_libraries(KCD2OnlineNativeMultiplayerMenu PRIVATE
         kcd_re
-        KCD2MPProtocol
-        KCD2MPNetworking
+        KCD2OnlineProtocol
+        KCD2OnlineNetworking
     )
-    set_property(TARGET KCD2MPNativeMultiplayerMenu PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    set_property(TARGET KCD2OnlineNativeMultiplayerMenu PROPERTY COMPILE_WARNING_AS_ERROR ON)
 endif()
 
-add_library(KCD2MP MODULE
+add_library(KCD2Online MODULE
     "${SRC_MAIN}"
     "${GENERATED_VERSION_SOURCE}"
     "${GENERATED_RESOURCE_FILE}"
 )
 
-if(KCD2MP_BUILD_KCSE)
-    target_sources(KCD2MP PRIVATE
-        $<TARGET_OBJECTS:KCD2MPNativeMultiplayerMenu>
+if(KCD2Online_BUILD_KCSE)
+    target_sources(KCD2Online PRIVATE
+        $<TARGET_OBJECTS:KCD2OnlineNativeMultiplayerMenu>
     )
-    target_compile_definitions(KCD2MP PRIVATE
-        "KCD2MP_NATIVE_MULTIPLAYER_MENU"
+    target_compile_definitions(KCD2Online PRIVATE
+        "KCD2Online_NATIVE_MULTIPLAYER_MENU"
     )
-    target_link_libraries(KCD2MP PRIVATE kcd_re)
+    target_link_libraries(KCD2Online PRIVATE kcd_re)
 endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-set_property(TARGET KCD2MP PROPERTY CXX_STANDARD 23)
+set_property(TARGET KCD2Online PROPERTY CXX_STANDARD 23)
 
 source_group(TREE ${SRC_DIR} PREFIX "src" FILES ${SRC_MAIN})
 source_group("generated" FILES
@@ -466,27 +466,27 @@ source_group("generated" FILES
     "${GENERATED_RESOURCE_FILE}"
 )
 
-target_include_directories(KCD2MP PRIVATE
+target_include_directories(KCD2Online PRIVATE
     "${SRC_DIR}"
     "${imguizmo_SOURCE_DIR}"
     "${zip_SOURCE_DIR}"
 )
 
-target_precompile_headers(KCD2MP PRIVATE "${SRC_DIR}/common.hpp")
+target_precompile_headers(KCD2Online PRIVATE "${SRC_DIR}/common.hpp")
 
-target_link_libraries(KCD2MP PRIVATE
+target_link_libraries(KCD2Online PRIVATE
     ReturnOfModdingBase
-    KCD2MPProtocol
-    KCD2MPSignatureCore
-    KCD2MPNpcCatalog
+    KCD2OnlineProtocol
+    KCD2OnlineSignatureCore
+    KCD2OnlineNpcCatalog
     Zydis
     zip
     imguizmo
     mimalloc-static
 )
 
-if(KCD2MP_BUILD_KCSE)
-    add_library(KCD2MPKCSENativeRuntime OBJECT
+if(KCD2Online_BUILD_KCSE)
+    add_library(KCD2OnlineKCSENativeRuntime OBJECT
 		"${SRC_DIR}/kcse/native_avatar_combat.cpp"
 		"${SRC_DIR}/kcse/native_avatar_combat.hpp"
 		"${SRC_DIR}/kcse/native_combat_observer.cpp"
@@ -505,6 +505,7 @@ if(KCD2MP_BUILD_KCSE)
 		"${SRC_DIR}/kcse/remote_avatar_readiness.hpp"
 		"${SRC_DIR}/kcse/native_weapon_controller.cpp"
 		"${SRC_DIR}/kcse/native_weapon_controller.hpp"
+		"${SRC_DIR}/kcse/player_respawn_guard.hpp"
 		"${SRC_DIR}/kcse/native_runtime.cpp"
         "${SRC_DIR}/kcse/native_runtime.hpp"
 		"${SRC_DIR}/kcse/native_world_object_sync.cpp"
@@ -512,17 +513,17 @@ if(KCD2MP_BUILD_KCSE)
 		"${SRC_DIR}/kcse/native_world_item_sync.cpp"
 		"${SRC_DIR}/kcse/native_world_item_sync.hpp"
     )
-    set_property(TARGET KCD2MPKCSENativeRuntime PROPERTY CXX_STANDARD 23)
-    set_property(TARGET KCD2MPKCSENativeRuntime PROPERTY CXX_STANDARD_REQUIRED ON)
-    target_precompile_headers(KCD2MPKCSENativeRuntime PRIVATE
+    set_property(TARGET KCD2OnlineKCSENativeRuntime PROPERTY CXX_STANDARD 23)
+    set_property(TARGET KCD2OnlineKCSENativeRuntime PROPERTY CXX_STANDARD_REQUIRED ON)
+    target_precompile_headers(KCD2OnlineKCSENativeRuntime PRIVATE
         "${PROJECT_SOURCE_DIR}/libKCD2/.buildenv/PCH.h"
     )
-    target_include_directories(KCD2MPKCSENativeRuntime PRIVATE
+    target_include_directories(KCD2OnlineKCSENativeRuntime PRIVATE
         "${SRC_DIR}"
         "${PROJECT_SOURCE_DIR}/libKCD2/include"
         "${PROJECT_SOURCE_DIR}/libKCD2/include/CryEngine/CryCommon"
     )
-    target_compile_definitions(KCD2MPKCSENativeRuntime PRIVATE
+    target_compile_definitions(KCD2OnlineKCSENativeRuntime PRIVATE
         "_ITERATOR_DEBUG_LEVEL=0"
         "FORCE_STANDARD_ASSERT"
         "_CRT_SECURE_NO_WARNINGS"
@@ -534,17 +535,17 @@ if(KCD2MP_BUILD_KCSE)
     # lookup mode; this does not alter generated ABI. /FS serializes access to
     # the target PDB when MSBuild launches several compiler processes in
     # parallel.
-    target_compile_options(KCD2MPKCSENativeRuntime PRIVATE
+    target_compile_options(KCD2OnlineKCSENativeRuntime PRIVATE
         /utf-8 /W4 /wd4100 /wd4819 /permissive /FS
     )
-    target_link_libraries(KCD2MPKCSENativeRuntime PRIVATE
+    target_link_libraries(KCD2OnlineKCSENativeRuntime PRIVATE
         kcd_re
-        KCD2MPNpcCatalog
-        KCD2MPProtocol
+        KCD2OnlineNpcCatalog
+        KCD2OnlineProtocol
     )
-    set_property(TARGET KCD2MPKCSENativeRuntime PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    set_property(TARGET KCD2OnlineKCSENativeRuntime PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
-    add_library(KCD2MPKCSEClient SHARED
+    add_library(KCD2OnlineKCSEClient SHARED
         "${SRC_DIR}/kcse/client_api.hpp"
         "${SRC_DIR}/kcse/join_trace.cpp"
         "${SRC_DIR}/kcse/join_trace.hpp"
@@ -557,101 +558,101 @@ if(KCD2MP_BUILD_KCSE)
         "${SRC_DIR}/multiplayer/identity_store.cpp"
         "${SRC_DIR}/multiplayer/identity_store.hpp"
     )
-    set_property(TARGET KCD2MPKCSEClient PROPERTY CXX_STANDARD 23)
-    set_property(TARGET KCD2MPKCSEClient PROPERTY CXX_STANDARD_REQUIRED ON)
-    target_include_directories(KCD2MPKCSEClient PRIVATE
+    set_property(TARGET KCD2OnlineKCSEClient PROPERTY CXX_STANDARD 23)
+    set_property(TARGET KCD2OnlineKCSEClient PROPERTY CXX_STANDARD_REQUIRED ON)
+    target_include_directories(KCD2OnlineKCSEClient PRIVATE
         "${SRC_DIR}"
         "${PROJECT_SOURCE_DIR}/libKCD2/include"
         "${PROJECT_SOURCE_DIR}/libKCD2/include/CryEngine/CryCommon"
     )
-    target_compile_definitions(KCD2MPKCSEClient PRIVATE
+    target_compile_definitions(KCD2OnlineKCSEClient PRIVATE
         "_ITERATOR_DEBUG_LEVEL=0"
         "FORCE_STANDARD_ASSERT"
         "_CRT_SECURE_NO_WARNINGS"
         "NOMINMAX"
         "WIN32_LEAN_AND_MEAN"
     )
-    target_compile_options(KCD2MPKCSEClient PRIVATE /utf-8 /W4 /wd4100 /wd4819)
-    target_link_libraries(KCD2MPKCSEClient PRIVATE
-        KCD2MPKCSENativeRuntime
+    target_compile_options(KCD2OnlineKCSEClient PRIVATE /utf-8 /W4 /wd4100 /wd4819)
+    target_link_libraries(KCD2OnlineKCSEClient PRIVATE
+        KCD2OnlineKCSENativeRuntime
         kcd_re
-        KCD2MPProtocol
-        KCD2MPNetworking
-        KCD2MPNpcCatalog
+        KCD2OnlineProtocol
+        KCD2OnlineNetworking
+        KCD2OnlineNpcCatalog
         crypt32
     )
-    set_property(TARGET KCD2MPKCSEClient PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_dependencies(KCSE KCD2MPAddressLibraryAudit)
-    add_dependencies(KCD2MPKCSEClient KCD2MPAddressLibraryAudit)
+    set_property(TARGET KCD2OnlineKCSEClient PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_dependencies(KCSE KCD2OnlineAddressLibraryAudit)
+    add_dependencies(KCD2OnlineKCSEClient KCD2OnlineAddressLibraryAudit)
 
-    add_custom_command(TARGET KCD2MPKCSEClient POST_BUILD
+    add_custom_command(TARGET KCD2OnlineKCSEClient POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory
-            "$<TARGET_FILE_DIR:KCD2MPKCSEClient>/KCSE/addresslib"
+            "$<TARGET_FILE_DIR:KCD2OnlineKCSEClient>/KCSE/addresslib"
         COMMENT "Bundling KCSE Address Library tables"
     )
-    foreach(KCD2MP_ADDRESS_LIBRARY_FILE IN LISTS KCD2MP_ADDRESS_LIBRARY_FILES)
-        add_custom_command(TARGET KCD2MPKCSEClient POST_BUILD
+    foreach(KCD2Online_ADDRESS_LIBRARY_FILE IN LISTS KCD2Online_ADDRESS_LIBRARY_FILES)
+        add_custom_command(TARGET KCD2OnlineKCSEClient POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${KCD2MP_ADDRESS_LIBRARY_FILE}"
-                "$<TARGET_FILE_DIR:KCD2MPKCSEClient>/KCSE/addresslib"
+                "${KCD2Online_ADDRESS_LIBRARY_FILE}"
+                "$<TARGET_FILE_DIR:KCD2OnlineKCSEClient>/KCSE/addresslib"
         )
     endforeach()
 
-    add_custom_target(KCD2MPRuntime
-        DEPENDS KCD2MP KCSE KCD2MPKCSEClient
+    add_custom_target(KCD2OnlineRuntime
+        DEPENDS KCD2Online KCSE KCD2OnlineKCSEClient
     )
 else()
-    add_custom_target(KCD2MPRuntime DEPENDS KCD2MP)
+    add_custom_target(KCD2OnlineRuntime DEPENDS KCD2Online)
 endif()
 
 # Warnings as errors
-set_property(TARGET KCD2MP PROPERTY COMPILE_WARNING_AS_ERROR ON)
+set_property(TARGET KCD2Online PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
-target_compile_definitions(KCD2MP PRIVATE
+target_compile_definitions(KCD2Online PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
 
 # Keep the raw CMake build output usable as a client artifact tree as well.
-# The runtime resolves translations below <game-root>/Mods/KCD2MP/Lang, so the
+# The runtime resolves translations below <game-root>/Mods/KCD2Online/Lang, so the
 # same relative layout is emitted beside the other build artifacts. The custom
-# target intentionally runs on every KCD2MP build, allowing translation-only
+# target intentionally runs on every KCD2Online build, allowing translation-only
 # edits to be picked up without relinking the DLL.
-set(KCD2MP_LANGUAGE_ROOT "${PROJECT_SOURCE_DIR}/data/lang")
-file(GLOB KCD2MP_LANGUAGE_FILES CONFIGURE_DEPENDS
-    "${KCD2MP_LANGUAGE_ROOT}/*.lang"
+set(KCD2Online_LANGUAGE_ROOT "${PROJECT_SOURCE_DIR}/data/lang")
+file(GLOB KCD2Online_LANGUAGE_FILES CONFIGURE_DEPENDS
+    "${KCD2Online_LANGUAGE_ROOT}/*.lang"
 )
-if(NOT EXISTS "${KCD2MP_LANGUAGE_ROOT}/en.lang")
+if(NOT EXISTS "${KCD2Online_LANGUAGE_ROOT}/en.lang")
     message(FATAL_ERROR
-        "KCD2MP requires data/lang/en.lang as its localization fallback."
+        "KCD2Online requires data/lang/en.lang as its localization fallback."
     )
 endif()
-if(EXISTS "${KCD2MP_LANGUAGE_ROOT}/README.md")
-    list(APPEND KCD2MP_LANGUAGE_FILES
-        "${KCD2MP_LANGUAGE_ROOT}/README.md"
+if(EXISTS "${KCD2Online_LANGUAGE_ROOT}/README.md")
+    list(APPEND KCD2Online_LANGUAGE_FILES
+        "${KCD2Online_LANGUAGE_ROOT}/README.md"
     )
 endif()
 
-add_custom_target(KCD2MPLanguageFiles
+add_custom_target(KCD2OnlineLanguageFiles
     COMMAND "${CMAKE_COMMAND}" -E remove_directory
-        "$<TARGET_FILE_DIR:KCD2MP>/Mods/KCD2MP/Lang"
+        "$<TARGET_FILE_DIR:KCD2Online>/Mods/KCD2Online/Lang"
     COMMAND "${CMAKE_COMMAND}" -E make_directory
-        "$<TARGET_FILE_DIR:KCD2MP>/Mods/KCD2MP/Lang"
-    DEPENDS ${KCD2MP_LANGUAGE_FILES}
-    COMMENT "Bundling KCD2MP language files"
+        "$<TARGET_FILE_DIR:KCD2Online>/Mods/KCD2Online/Lang"
+    DEPENDS ${KCD2Online_LANGUAGE_FILES}
+    COMMENT "Bundling KCD2Online language files"
     VERBATIM
 )
-foreach(KCD2MP_LANGUAGE_FILE IN LISTS KCD2MP_LANGUAGE_FILES)
-    add_custom_command(TARGET KCD2MPLanguageFiles POST_BUILD
+foreach(KCD2Online_LANGUAGE_FILE IN LISTS KCD2Online_LANGUAGE_FILES)
+    add_custom_command(TARGET KCD2OnlineLanguageFiles POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${KCD2MP_LANGUAGE_FILE}"
-            "$<TARGET_FILE_DIR:KCD2MP>/Mods/KCD2MP/Lang"
+            "${KCD2Online_LANGUAGE_FILE}"
+            "$<TARGET_FILE_DIR:KCD2Online>/Mods/KCD2Online/Lang"
     )
 endforeach()
-add_dependencies(KCD2MP KCD2MPLanguageFiles)
-if(TARGET KCD2MPKCSEClient)
-    add_dependencies(KCD2MPKCSEClient KCD2MPLanguageFiles)
+add_dependencies(KCD2Online KCD2OnlineLanguageFiles)
+if(TARGET KCD2OnlineKCSEClient)
+    add_dependencies(KCD2OnlineKCSEClient KCD2OnlineLanguageFiles)
 endif()
 
 if (MSVC)
@@ -692,286 +693,295 @@ if (MSVC)
     endif()
 endif()
 
-set_target_properties(KCD2MP PROPERTIES OUTPUT_NAME "d3d12_")
+set_target_properties(KCD2Online PROPERTIES OUTPUT_NAME "d3d12_")
 
-add_executable(KCD2MPSignatureAudit "${PROJECT_SOURCE_DIR}/tools/signature_audit_main.cpp")
-set_property(TARGET KCD2MPSignatureAudit PROPERTY CXX_STANDARD 23)
-target_include_directories(KCD2MPSignatureAudit PRIVATE "${SRC_DIR}")
-target_compile_definitions(KCD2MPSignatureAudit PRIVATE
+add_executable(KCD2OnlineSignatureAudit "${PROJECT_SOURCE_DIR}/tools/signature_audit_main.cpp")
+set_property(TARGET KCD2OnlineSignatureAudit PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineSignatureAudit PRIVATE "${SRC_DIR}")
+target_compile_definitions(KCD2OnlineSignatureAudit PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
 )
-target_link_libraries(KCD2MPSignatureAudit PRIVATE KCD2MPSignatureCore bcrypt)
-set_property(TARGET KCD2MPSignatureAudit PROPERTY COMPILE_WARNING_AS_ERROR ON)
+target_link_libraries(KCD2OnlineSignatureAudit PRIVATE KCD2OnlineSignatureCore bcrypt)
+set_property(TARGET KCD2OnlineSignatureAudit PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
-add_executable(KCD2MPPropertyCatalog
+add_executable(KCD2OnlinePropertyCatalog
     "${PROJECT_SOURCE_DIR}/tools/property_catalog_main.cpp"
 )
-set_property(TARGET KCD2MPPropertyCatalog PROPERTY CXX_STANDARD 23)
-target_link_libraries(KCD2MPPropertyCatalog PRIVATE KCD2MPProperty)
-set_property(TARGET KCD2MPPropertyCatalog PROPERTY COMPILE_WARNING_AS_ERROR ON)
+set_property(TARGET KCD2OnlinePropertyCatalog PROPERTY CXX_STANDARD 23)
+target_link_libraries(KCD2OnlinePropertyCatalog PRIVATE KCD2OnlineProperty)
+set_property(TARGET KCD2OnlinePropertyCatalog PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
 include(CTest)
 if (BUILD_TESTING)
-    add_executable(KCD2MPSignatureCoreTests "${PROJECT_SOURCE_DIR}/tests/signature_core_tests.cpp")
-    set_property(TARGET KCD2MPSignatureCoreTests PROPERTY CXX_STANDARD 23)
-    target_include_directories(KCD2MPSignatureCoreTests PRIVATE "${SRC_DIR}")
-    target_compile_definitions(KCD2MPSignatureCoreTests PRIVATE
+    add_executable(KCD2OnlineSignatureCoreTests "${PROJECT_SOURCE_DIR}/tests/signature_core_tests.cpp")
+    set_property(TARGET KCD2OnlineSignatureCoreTests PROPERTY CXX_STANDARD 23)
+    target_include_directories(KCD2OnlineSignatureCoreTests PRIVATE "${SRC_DIR}")
+    target_compile_definitions(KCD2OnlineSignatureCoreTests PRIVATE
         "_CRT_SECURE_NO_WARNINGS"
         "NOMINMAX"
         "WIN32_LEAN_AND_MEAN"
     )
-    target_link_libraries(KCD2MPSignatureCoreTests PRIVATE KCD2MPSignatureCore)
-    set_property(TARGET KCD2MPSignatureCoreTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPSignatureCoreTests COMMAND KCD2MPSignatureCoreTests)
+    target_link_libraries(KCD2OnlineSignatureCoreTests PRIVATE KCD2OnlineSignatureCore)
+    set_property(TARGET KCD2OnlineSignatureCoreTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineSignatureCoreTests COMMAND KCD2OnlineSignatureCoreTests)
 
-    add_executable(KCD2MPEnginePathTests "${PROJECT_SOURCE_DIR}/tests/engine_path_tests.cpp")
-    set_property(TARGET KCD2MPEnginePathTests PROPERTY CXX_STANDARD 23)
-    target_include_directories(KCD2MPEnginePathTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPEnginePathTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPEnginePathTests COMMAND KCD2MPEnginePathTests)
+    add_executable(KCD2OnlineEnginePathTests "${PROJECT_SOURCE_DIR}/tests/engine_path_tests.cpp")
+    set_property(TARGET KCD2OnlineEnginePathTests PROPERTY CXX_STANDARD 23)
+    target_include_directories(KCD2OnlineEnginePathTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineEnginePathTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineEnginePathTests COMMAND KCD2OnlineEnginePathTests)
 
-    add_executable(KCD2MPProtocolTests "${PROJECT_SOURCE_DIR}/tests/protocol_tests.cpp")
-    set_property(TARGET KCD2MPProtocolTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPProtocolTests PRIVATE KCD2MPProtocol)
-    set_property(TARGET KCD2MPProtocolTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPProtocolTests COMMAND KCD2MPProtocolTests)
+    add_executable(KCD2OnlineProtocolTests "${PROJECT_SOURCE_DIR}/tests/protocol_tests.cpp")
+    set_property(TARGET KCD2OnlineProtocolTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineProtocolTests PRIVATE KCD2OnlineProtocol)
+    set_property(TARGET KCD2OnlineProtocolTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineProtocolTests COMMAND KCD2OnlineProtocolTests)
 
-    add_executable(KCD2MPServerCoreTests "${PROJECT_SOURCE_DIR}/tests/server_core_tests.cpp")
-    set_property(TARGET KCD2MPServerCoreTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPServerCoreTests PRIVATE KCD2MPServerCore)
-    target_compile_definitions(KCD2MPServerCoreTests PRIVATE
-        "KCD2MP_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\""
+    add_executable(KCD2OnlineServerCoreTests "${PROJECT_SOURCE_DIR}/tests/server_core_tests.cpp")
+    set_property(TARGET KCD2OnlineServerCoreTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineServerCoreTests PRIVATE KCD2OnlineServerCore)
+    target_compile_definitions(KCD2OnlineServerCoreTests PRIVATE
+        "KCD2Online_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\""
     )
-    set_property(TARGET KCD2MPServerCoreTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPServerCoreTests COMMAND KCD2MPServerCoreTests)
+    set_property(TARGET KCD2OnlineServerCoreTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineServerCoreTests COMMAND KCD2OnlineServerCoreTests)
 
-	add_executable(KCD2MPItemLedgerTests
+	add_executable(KCD2OnlineItemLedgerTests
 		"${PROJECT_SOURCE_DIR}/tests/item_ledger_tests.cpp"
 	)
-	set_property(TARGET KCD2MPItemLedgerTests PROPERTY CXX_STANDARD 23)
-	target_link_libraries(KCD2MPItemLedgerTests PRIVATE KCD2MPServerCore)
-	set_property(TARGET KCD2MPItemLedgerTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-	add_test(NAME KCD2MPItemLedgerTests COMMAND KCD2MPItemLedgerTests)
+	set_property(TARGET KCD2OnlineItemLedgerTests PROPERTY CXX_STANDARD 23)
+	target_link_libraries(KCD2OnlineItemLedgerTests PRIVATE KCD2OnlineServerCore)
+	set_property(TARGET KCD2OnlineItemLedgerTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+	add_test(NAME KCD2OnlineItemLedgerTests COMMAND KCD2OnlineItemLedgerTests)
 
-	add_executable(KCD2MPNpcRegistryTests
+	add_executable(KCD2OnlineNpcRegistryTests
 		"${PROJECT_SOURCE_DIR}/tests/npc_registry_tests.cpp"
 	)
-	set_property(TARGET KCD2MPNpcRegistryTests PROPERTY CXX_STANDARD 23)
-	target_link_libraries(KCD2MPNpcRegistryTests PRIVATE KCD2MPServerCore)
-	set_property(TARGET KCD2MPNpcRegistryTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-	add_test(NAME KCD2MPNpcRegistryTests COMMAND KCD2MPNpcRegistryTests)
+	set_property(TARGET KCD2OnlineNpcRegistryTests PROPERTY CXX_STANDARD 23)
+	target_link_libraries(KCD2OnlineNpcRegistryTests PRIVATE KCD2OnlineServerCore)
+	set_property(TARGET KCD2OnlineNpcRegistryTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+	add_test(NAME KCD2OnlineNpcRegistryTests COMMAND KCD2OnlineNpcRegistryTests)
 
-    add_executable(KCD2MPPropertyTests
+    add_executable(KCD2OnlinePropertyTests
         "${PROJECT_SOURCE_DIR}/tests/property_tests.cpp"
     )
-    set_property(TARGET KCD2MPPropertyTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPPropertyTests PRIVATE
-        KCD2MPServerCore
-        KCD2MPProperty
+    set_property(TARGET KCD2OnlinePropertyTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlinePropertyTests PRIVATE
+        KCD2OnlineServerCore
+        KCD2OnlineProperty
         zip
     )
-    set_property(TARGET KCD2MPPropertyTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPPropertyTests COMMAND KCD2MPPropertyTests)
+    set_property(TARGET KCD2OnlinePropertyTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlinePropertyTests COMMAND KCD2OnlinePropertyTests)
 
-    add_executable(KCD2MPGameCommandQueueTests
+    add_executable(KCD2OnlineGameCommandQueueTests
         "${PROJECT_SOURCE_DIR}/tests/game_command_queue_tests.cpp"
     )
-    set_property(TARGET KCD2MPGameCommandQueueTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPGameCommandQueueTests PRIVATE KCD2MPProtocol)
-    target_include_directories(KCD2MPGameCommandQueueTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPGameCommandQueueTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPGameCommandQueueTests COMMAND KCD2MPGameCommandQueueTests)
+    set_property(TARGET KCD2OnlineGameCommandQueueTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineGameCommandQueueTests PRIVATE KCD2OnlineProtocol)
+    target_include_directories(KCD2OnlineGameCommandQueueTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineGameCommandQueueTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineGameCommandQueueTests COMMAND KCD2OnlineGameCommandQueueTests)
 
-    add_executable(KCD2MPClientStateTests
+    add_executable(KCD2OnlineClientStateTests
         "${PROJECT_SOURCE_DIR}/tests/client_state_tests.cpp"
     )
-    set_property(TARGET KCD2MPClientStateTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPClientStateTests PRIVATE KCD2MPProtocol)
-    target_include_directories(KCD2MPClientStateTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPClientStateTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPClientStateTests COMMAND KCD2MPClientStateTests)
+    set_property(TARGET KCD2OnlineClientStateTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineClientStateTests PRIVATE KCD2OnlineProtocol)
+    target_include_directories(KCD2OnlineClientStateTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineClientStateTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineClientStateTests COMMAND KCD2OnlineClientStateTests)
 
-    add_executable(KCD2MPEntityControlTests
+	add_executable(KCD2OnlinePlayerRespawnGuardTests
+		"${PROJECT_SOURCE_DIR}/tests/player_respawn_guard_tests.cpp"
+	)
+	set_property(TARGET KCD2OnlinePlayerRespawnGuardTests PROPERTY CXX_STANDARD 23)
+	target_include_directories(KCD2OnlinePlayerRespawnGuardTests PRIVATE "${SRC_DIR}")
+	set_property(TARGET KCD2OnlinePlayerRespawnGuardTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+	add_test(NAME KCD2OnlinePlayerRespawnGuardTests COMMAND KCD2OnlinePlayerRespawnGuardTests)
+
+    add_executable(KCD2OnlineEntityControlTests
         "${PROJECT_SOURCE_DIR}/tests/entity_control_tests.cpp"
     )
-    set_property(TARGET KCD2MPEntityControlTests PROPERTY CXX_STANDARD 23)
-    target_include_directories(KCD2MPEntityControlTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPEntityControlTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPEntityControlTests COMMAND KCD2MPEntityControlTests)
+    set_property(TARGET KCD2OnlineEntityControlTests PROPERTY CXX_STANDARD 23)
+    target_include_directories(KCD2OnlineEntityControlTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineEntityControlTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineEntityControlTests COMMAND KCD2OnlineEntityControlTests)
 
-    add_executable(KCD2MPRuntimeHandleTests
+    add_executable(KCD2OnlineRuntimeHandleTests
         "${PROJECT_SOURCE_DIR}/tests/runtime_handle_tests.cpp"
     )
-    set_property(TARGET KCD2MPRuntimeHandleTests PROPERTY CXX_STANDARD 23)
-    target_include_directories(KCD2MPRuntimeHandleTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPRuntimeHandleTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPRuntimeHandleTests COMMAND KCD2MPRuntimeHandleTests)
+    set_property(TARGET KCD2OnlineRuntimeHandleTests PROPERTY CXX_STANDARD 23)
+    target_include_directories(KCD2OnlineRuntimeHandleTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineRuntimeHandleTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineRuntimeHandleTests COMMAND KCD2OnlineRuntimeHandleTests)
 
-    add_executable(KCD2MPRemoteAvatarTests
+    add_executable(KCD2OnlineRemoteAvatarTests
         "${PROJECT_SOURCE_DIR}/tests/remote_avatar_tests.cpp"
     )
-    set_property(TARGET KCD2MPRemoteAvatarTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPRemoteAvatarTests PRIVATE KCD2MPProtocol)
-    target_include_directories(KCD2MPRemoteAvatarTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPRemoteAvatarTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPRemoteAvatarTests COMMAND KCD2MPRemoteAvatarTests)
+    set_property(TARGET KCD2OnlineRemoteAvatarTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineRemoteAvatarTests PRIVATE KCD2OnlineProtocol)
+    target_include_directories(KCD2OnlineRemoteAvatarTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineRemoteAvatarTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineRemoteAvatarTests COMMAND KCD2OnlineRemoteAvatarTests)
 
-    add_executable(KCD2MPNpcTests
+    add_executable(KCD2OnlineNpcTests
         "${PROJECT_SOURCE_DIR}/tests/npc_tests.cpp"
     )
-    set_property(TARGET KCD2MPNpcTests PROPERTY CXX_STANDARD 23)
-    target_include_directories(KCD2MPNpcTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPNpcTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPNpcTests COMMAND KCD2MPNpcTests)
+    set_property(TARGET KCD2OnlineNpcTests PROPERTY CXX_STANDARD 23)
+    target_include_directories(KCD2OnlineNpcTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineNpcTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineNpcTests COMMAND KCD2OnlineNpcTests)
 
-    add_executable(KCD2MPKCSEClientApiTests
+    add_executable(KCD2OnlineKCSEClientApiTests
         "${PROJECT_SOURCE_DIR}/tests/client_api_tests.cpp"
     )
-    set_property(TARGET KCD2MPKCSEClientApiTests PROPERTY CXX_STANDARD 23)
-    target_include_directories(KCD2MPKCSEClientApiTests PRIVATE
+    set_property(TARGET KCD2OnlineKCSEClientApiTests PROPERTY CXX_STANDARD 23)
+    target_include_directories(KCD2OnlineKCSEClientApiTests PRIVATE
         "${SRC_DIR}"
         "${CMAKE_CURRENT_BINARY_DIR}"
     )
-    set_property(TARGET KCD2MPKCSEClientApiTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPKCSEClientApiTests COMMAND KCD2MPKCSEClientApiTests)
+    set_property(TARGET KCD2OnlineKCSEClientApiTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineKCSEClientApiTests COMMAND KCD2OnlineKCSEClientApiTests)
 
-    add_executable(KCD2MPNpcCatalogTests
+    add_executable(KCD2OnlineNpcCatalogTests
         "${PROJECT_SOURCE_DIR}/tests/npc_catalog_tests.cpp"
     )
-    set_property(TARGET KCD2MPNpcCatalogTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPNpcCatalogTests PRIVATE KCD2MPNpcCatalog)
-    target_compile_definitions(KCD2MPNpcCatalogTests PRIVATE
-        "KCD2MP_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\""
+    set_property(TARGET KCD2OnlineNpcCatalogTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineNpcCatalogTests PRIVATE KCD2OnlineNpcCatalog)
+    target_compile_definitions(KCD2OnlineNpcCatalogTests PRIVATE
+        "KCD2Online_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\""
     )
-    set_property(TARGET KCD2MPNpcCatalogTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPNpcCatalogTests COMMAND KCD2MPNpcCatalogTests)
+    set_property(TARGET KCD2OnlineNpcCatalogTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineNpcCatalogTests COMMAND KCD2OnlineNpcCatalogTests)
 
-    add_executable(KCD2MPEquipmentCatalogTests
+    add_executable(KCD2OnlineEquipmentCatalogTests
         "${PROJECT_SOURCE_DIR}/tests/equipment_catalog_tests.cpp"
     )
-    set_property(TARGET KCD2MPEquipmentCatalogTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPEquipmentCatalogTests PRIVATE KCD2MPNpcCatalog)
-    set_property(TARGET KCD2MPEquipmentCatalogTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPEquipmentCatalogTests COMMAND KCD2MPEquipmentCatalogTests)
+    set_property(TARGET KCD2OnlineEquipmentCatalogTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineEquipmentCatalogTests PRIVATE KCD2OnlineNpcCatalog)
+    set_property(TARGET KCD2OnlineEquipmentCatalogTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineEquipmentCatalogTests COMMAND KCD2OnlineEquipmentCatalogTests)
 
-    add_executable(KCD2MPAvatarVisualTests
+    add_executable(KCD2OnlineAvatarVisualTests
         "${PROJECT_SOURCE_DIR}/tests/avatar_visual_tests.cpp"
     )
-    set_property(TARGET KCD2MPAvatarVisualTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPAvatarVisualTests PRIVATE KCD2MPProtocol)
-    target_include_directories(KCD2MPAvatarVisualTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPAvatarVisualTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPAvatarVisualTests COMMAND KCD2MPAvatarVisualTests)
+    set_property(TARGET KCD2OnlineAvatarVisualTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineAvatarVisualTests PRIVATE KCD2OnlineProtocol)
+    target_include_directories(KCD2OnlineAvatarVisualTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineAvatarVisualTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineAvatarVisualTests COMMAND KCD2OnlineAvatarVisualTests)
 
-	add_executable(KCD2MPIngameMenuTests
+	add_executable(KCD2OnlineIngameMenuTests
 		"${PROJECT_SOURCE_DIR}/tests/ingame_menu_tests.cpp"
 	)
-	set_property(TARGET KCD2MPIngameMenuTests PROPERTY CXX_STANDARD 23)
-	target_include_directories(KCD2MPIngameMenuTests PRIVATE "${SRC_DIR}")
-	set_property(TARGET KCD2MPIngameMenuTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-	add_test(NAME KCD2MPIngameMenuTests COMMAND KCD2MPIngameMenuTests)
+	set_property(TARGET KCD2OnlineIngameMenuTests PROPERTY CXX_STANDARD 23)
+	target_include_directories(KCD2OnlineIngameMenuTests PRIVATE "${SRC_DIR}")
+	set_property(TARGET KCD2OnlineIngameMenuTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+	add_test(NAME KCD2OnlineIngameMenuTests COMMAND KCD2OnlineIngameMenuTests)
 
-	add_executable(KCD2MPLocalizationTests
+	add_executable(KCD2OnlineLocalizationTests
 		"${PROJECT_SOURCE_DIR}/tests/localization_tests.cpp"
 		"${SRC_DIR}/gui/localization.cpp"
 		"${SRC_DIR}/gui/localization.hpp"
 	)
-	set_property(TARGET KCD2MPLocalizationTests PROPERTY CXX_STANDARD 23)
-	target_include_directories(KCD2MPLocalizationTests PRIVATE "${SRC_DIR}")
-	target_compile_definitions(KCD2MPLocalizationTests PRIVATE
-		"KCD2MP_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\""
+	set_property(TARGET KCD2OnlineLocalizationTests PROPERTY CXX_STANDARD 23)
+	target_include_directories(KCD2OnlineLocalizationTests PRIVATE "${SRC_DIR}")
+	target_compile_definitions(KCD2OnlineLocalizationTests PRIVATE
+		"KCD2Online_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\""
 	)
-	set_property(TARGET KCD2MPLocalizationTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-	add_test(NAME KCD2MPLocalizationTests COMMAND KCD2MPLocalizationTests)
+	set_property(TARGET KCD2OnlineLocalizationTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+	add_test(NAME KCD2OnlineLocalizationTests COMMAND KCD2OnlineLocalizationTests)
 
-    add_executable(KCD2MPProfileReconcilerTests
+    add_executable(KCD2OnlineProfileReconcilerTests
         "${PROJECT_SOURCE_DIR}/tests/profile_reconciler_tests.cpp"
     )
-    set_property(TARGET KCD2MPProfileReconcilerTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPProfileReconcilerTests PRIVATE
-        KCD2MPServerCore
+    set_property(TARGET KCD2OnlineProfileReconcilerTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineProfileReconcilerTests PRIVATE
+        KCD2OnlineServerCore
     )
-    target_include_directories(KCD2MPProfileReconcilerTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPProfileReconcilerTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPProfileReconcilerTests COMMAND KCD2MPProfileReconcilerTests)
+    target_include_directories(KCD2OnlineProfileReconcilerTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineProfileReconcilerTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineProfileReconcilerTests COMMAND KCD2OnlineProfileReconcilerTests)
 
-    add_executable(KCD2MPEngineConsoleQueueTests
+    add_executable(KCD2OnlineEngineConsoleQueueTests
         "${PROJECT_SOURCE_DIR}/tests/engine_console_queue_tests.cpp"
     )
-    set_property(TARGET KCD2MPEngineConsoleQueueTests PROPERTY CXX_STANDARD 23)
-    target_include_directories(KCD2MPEngineConsoleQueueTests PRIVATE "${SRC_DIR}")
-    set_property(TARGET KCD2MPEngineConsoleQueueTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPEngineConsoleQueueTests COMMAND KCD2MPEngineConsoleQueueTests)
+    set_property(TARGET KCD2OnlineEngineConsoleQueueTests PROPERTY CXX_STANDARD 23)
+    target_include_directories(KCD2OnlineEngineConsoleQueueTests PRIVATE "${SRC_DIR}")
+    set_property(TARGET KCD2OnlineEngineConsoleQueueTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineEngineConsoleQueueTests COMMAND KCD2OnlineEngineConsoleQueueTests)
 
-    add_executable(KCD2MPNetworkingTests
+    add_executable(KCD2OnlineNetworkingTests
         "${PROJECT_SOURCE_DIR}/tests/networking_tests.cpp"
     )
-    set_property(TARGET KCD2MPNetworkingTests PROPERTY CXX_STANDARD 23)
-    target_link_libraries(KCD2MPNetworkingTests PRIVATE KCD2MPNetworking)
-    set_property(TARGET KCD2MPNetworkingTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPNetworkingTests COMMAND KCD2MPNetworkingTests)
+    set_property(TARGET KCD2OnlineNetworkingTests PROPERTY CXX_STANDARD 23)
+    target_link_libraries(KCD2OnlineNetworkingTests PRIVATE KCD2OnlineNetworking)
+    set_property(TARGET KCD2OnlineNetworkingTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineNetworkingTests COMMAND KCD2OnlineNetworkingTests)
 
-    add_executable(KCD2MPIdentityStoreTests
+    add_executable(KCD2OnlineIdentityStoreTests
         "${PROJECT_SOURCE_DIR}/tests/identity_store_tests.cpp"
         "${SRC_DIR}/multiplayer/identity_store.cpp"
         "${SRC_DIR}/multiplayer/identity_store.hpp"
     )
-    set_property(TARGET KCD2MPIdentityStoreTests PROPERTY CXX_STANDARD 23)
-    target_include_directories(KCD2MPIdentityStoreTests PRIVATE "${SRC_DIR}")
-    target_compile_definitions(KCD2MPIdentityStoreTests PRIVATE
+    set_property(TARGET KCD2OnlineIdentityStoreTests PROPERTY CXX_STANDARD 23)
+    target_include_directories(KCD2OnlineIdentityStoreTests PRIVATE "${SRC_DIR}")
+    target_compile_definitions(KCD2OnlineIdentityStoreTests PRIVATE
         "_CRT_SECURE_NO_WARNINGS"
         "NOMINMAX"
         "WIN32_LEAN_AND_MEAN"
     )
-    target_link_libraries(KCD2MPIdentityStoreTests PRIVATE crypt32)
-    set_property(TARGET KCD2MPIdentityStoreTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-    add_test(NAME KCD2MPIdentityStoreTests COMMAND KCD2MPIdentityStoreTests)
+    target_link_libraries(KCD2OnlineIdentityStoreTests PRIVATE crypt32)
+    set_property(TARGET KCD2OnlineIdentityStoreTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+    add_test(NAME KCD2OnlineIdentityStoreTests COMMAND KCD2OnlineIdentityStoreTests)
 
-	add_executable(KCD2MPWorldObjectSyncTests
+	add_executable(KCD2OnlineWorldObjectSyncTests
 		"${PROJECT_SOURCE_DIR}/tests/world_object_sync_tests.cpp"
 	)
-	set_property(TARGET KCD2MPWorldObjectSyncTests PROPERTY CXX_STANDARD 23)
-	target_include_directories(KCD2MPWorldObjectSyncTests PRIVATE "${SRC_DIR}")
-	target_link_libraries(KCD2MPWorldObjectSyncTests PRIVATE KCD2MPProtocol)
-	set_property(TARGET KCD2MPWorldObjectSyncTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
-	add_test(NAME KCD2MPWorldObjectSyncTests COMMAND KCD2MPWorldObjectSyncTests)
+	set_property(TARGET KCD2OnlineWorldObjectSyncTests PROPERTY CXX_STANDARD 23)
+	target_include_directories(KCD2OnlineWorldObjectSyncTests PRIVATE "${SRC_DIR}")
+	target_link_libraries(KCD2OnlineWorldObjectSyncTests PRIVATE KCD2OnlineProtocol)
+	set_property(TARGET KCD2OnlineWorldObjectSyncTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+	add_test(NAME KCD2OnlineWorldObjectSyncTests COMMAND KCD2OnlineWorldObjectSyncTests)
 
-    add_custom_target(KCD2MPTests
+    add_custom_target(KCD2OnlineTests
         DEPENDS
-            KCD2MPSignatureCoreTests
-            KCD2MPEnginePathTests
-            KCD2MPProtocolTests
-            KCD2MPServerCoreTests
-			KCD2MPItemLedgerTests
-			KCD2MPNpcRegistryTests
-            KCD2MPPropertyTests
-            KCD2MPGameCommandQueueTests
-            KCD2MPClientStateTests
-            KCD2MPEntityControlTests
-            KCD2MPRuntimeHandleTests
-            KCD2MPRemoteAvatarTests
-            KCD2MPNpcTests
-            KCD2MPKCSEClientApiTests
-            KCD2MPNpcCatalogTests
-            KCD2MPEquipmentCatalogTests
-            KCD2MPAvatarVisualTests
-			KCD2MPIngameMenuTests
-			KCD2MPLocalizationTests
-            KCD2MPProfileReconcilerTests
-            KCD2MPEngineConsoleQueueTests
-            KCD2MPNetworkingTests
-            KCD2MPIdentityStoreTests
-			KCD2MPWorldObjectSyncTests
+            KCD2OnlineSignatureCoreTests
+            KCD2OnlineEnginePathTests
+            KCD2OnlineProtocolTests
+            KCD2OnlineServerCoreTests
+			KCD2OnlineItemLedgerTests
+			KCD2OnlineNpcRegistryTests
+            KCD2OnlinePropertyTests
+            KCD2OnlineGameCommandQueueTests
+            KCD2OnlineClientStateTests
+            KCD2OnlinePlayerRespawnGuardTests
+            KCD2OnlineEntityControlTests
+            KCD2OnlineRuntimeHandleTests
+            KCD2OnlineRemoteAvatarTests
+            KCD2OnlineNpcTests
+            KCD2OnlineKCSEClientApiTests
+            KCD2OnlineNpcCatalogTests
+            KCD2OnlineEquipmentCatalogTests
+            KCD2OnlineAvatarVisualTests
+			KCD2OnlineIngameMenuTests
+			KCD2OnlineLocalizationTests
+            KCD2OnlineProfileReconcilerTests
+            KCD2OnlineEngineConsoleQueueTests
+            KCD2OnlineNetworkingTests
+            KCD2OnlineIdentityStoreTests
+			KCD2OnlineWorldObjectSyncTests
     )
 endif()
 
-if (KCD2MP_WHGAME_PATH)
-    add_custom_target(KCD2MPAuditInstalledGame
-        COMMAND "$<TARGET_FILE:KCD2MPSignatureAudit>" "${KCD2MP_WHGAME_PATH}"
-        DEPENDS KCD2MPSignatureAudit
-        COMMENT "Auditing KCD2MP signatures against WHGame.dll"
+if (KCD2Online_WHGAME_PATH)
+    add_custom_target(KCD2OnlineAuditInstalledGame
+        COMMAND "$<TARGET_FILE:KCD2OnlineSignatureAudit>" "${KCD2Online_WHGAME_PATH}"
+        DEPENDS KCD2OnlineSignatureAudit
+        COMMENT "Auditing KCD2Online signatures against WHGame.dll"
         VERBATIM
     )
 endif()

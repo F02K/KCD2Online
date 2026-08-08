@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the KCD2MP human Soul catalog from the supported Tables.pak."""
+"""Generate the KCD2Online human Soul catalog from the supported Tables.pak."""
 
 from __future__ import annotations
 

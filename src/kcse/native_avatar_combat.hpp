@@ -5,7 +5,7 @@
 
 #include <optional>
 
-namespace kcd2mp::npc
+namespace kcd2o::npc
 {
 	enum class weapon_class;
 }
@@ -15,7 +15,7 @@ namespace wh::entitymodule
 	class C_Human;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	// Multiplayer/native translation boundary for avatar combat visuals.
 	// Capture and remote application live here; native primitives stay in the

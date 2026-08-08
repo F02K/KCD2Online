@@ -5,7 +5,7 @@
 
 #include <array>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	namespace
 	{

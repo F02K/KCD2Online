@@ -12,7 +12,7 @@
 #include <stdexcept>
 #include <unordered_set>
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	namespace
 	{
@@ -175,8 +175,14 @@ namespace kcd2mp::server
 		    / "game_data" / "npc_world_catalog.json";
 		if (const auto *property = document["property"].as_table())
 		{
-			config.property_game_root =
-			    (*property)["game_root"].value_or(std::string{});
+			if (property->contains("game_root"))
+			{
+				throw std::runtime_error(
+				    "[property].game_root is obsolete; configure "
+				    "[property].game_data instead");
+			}
+			config.property_game_data =
+			    (*property)["game_data"].value_or(std::string{});
 		}
 		if (config.world_directory.is_relative())
 		{
@@ -190,12 +196,12 @@ namespace kcd2mp::server
 			    std::filesystem::absolute(path).parent_path()
 			    / config.starter_profile_path;
 		}
-		if (!config.property_game_root.empty()
-		    && config.property_game_root.is_relative())
+		if (!config.property_game_data.empty()
+		    && config.property_game_data.is_relative())
 		{
-			config.property_game_root =
+			config.property_game_data =
 			    std::filesystem::absolute(path).parent_path()
-			    / config.property_game_root;
+			    / config.property_game_data;
 		}
 		config.starter_profile =
 		    load_starter_profile_template(config.starter_profile_path);

@@ -18,7 +18,7 @@ rom.game_data.on_xml_parse(function)
 ### `on_cryfile_open(old_filename, new_filename)`
 
 When the game opens a CryFile (Which can be a lot of different kind of files: .pak, .xml, .cfg and so on),
-you can tell KCD2MP to instead load a certain new file instead.
+you can tell KCD2Online to instead load a certain new file instead.
 is_early_main setup/check required for some of the files.
 
 - **Parameters:**

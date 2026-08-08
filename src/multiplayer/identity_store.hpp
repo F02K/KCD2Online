@@ -6,7 +6,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	class identity_store
 	{

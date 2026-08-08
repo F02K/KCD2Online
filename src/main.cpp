@@ -29,7 +29,7 @@ namespace
 		}
 	}
 
-	bool initialize_kcd2mp(HMODULE module)
+	bool initialize_kcd2o(HMODULE module)
 	{
 		using namespace big;
 		const auto started_at = std::chrono::steady_clock::now();
@@ -39,7 +39,7 @@ namespace
 			return false;
 		}
 
-		rom::init("KCD2MP", "WHGame.dll", "rom");
+		rom::init("KCD2Online", "WHGame.dll", "rom");
 		setlocale(LC_ALL, ".utf8");
 
 		const std::filesystem::path root_folder = paths::get_project_root_folder();
@@ -47,20 +47,20 @@ namespace
 		paths::init_dump_file_path();
 		config::init_general();
 
-		// KCD2MP is currently a development fork. Keep the diagnostic console
+		// KCD2Online is currently a development fork. Keep the diagnostic console
 		// available in both Debug and Release, even if an older config disabled it.
 		config::general()
-		    .bind("Logging", "Console Enabled", true, "KCD2MP always displays its diagnostic console.")
+		    .bind("Logging", "Console Enabled", true, "KCD2Online always displays its diagnostic console.")
 		    ->set_value(true);
 
 		// Intentionally leaked: the proxy DLL remains loaded for the process lifetime.
 		new logger(rom::g_project_name, g_file_manager.get_project_file("./LogOutput.log"));
 		// Keep ROM's dump-producing top-level filter, but do not detour
 		// SetUnhandledExceptionFilter. That anti-removal detour is not required
-		// for KCD2MP and failed during startup on the supported game build.
+		// for KCD2Online and failed during startup on the supported game build.
 		new exception_handler(false, big_exception_handler);
 
-		LOG(INFO) << "KCD2MP bootstrap thread started outside DllMain.";
+		LOG(INFO) << "KCD2Online bootstrap thread started outside DllMain.";
 		LOGF(INFO, "Build (GIT SHA1): {}", version::GIT_SHA1);
 #ifdef FINAL
 		LOG(INFO) << "Build profile: Release (FINAL)";
@@ -71,7 +71,7 @@ namespace
 		memory::module whgame("WHGame.dll");
 		if (!whgame.wait_for_module(WHGAME_WAIT_TIMEOUT))
 		{
-			LOG(ERROR) << "WHGame.dll did not load within 30 seconds. KCD2MP hooks will remain disabled; the game may continue without the mod.";
+			LOG(ERROR) << "WHGame.dll did not load within 30 seconds. KCD2Online hooks will remain disabled; the game may continue without the mod.";
 			flush_logs();
 			return false;
 		}
@@ -86,7 +86,7 @@ namespace
 		{
 			LOGF(
 			    ERROR,
-			    "Unsupported WHGame.dll build. Expected TimeDateStamp=0x{:08X}, SizeOfImage=0x{:X}. KCD2MP hooks will remain disabled; the game will continue without the mod.",
+			    "Unsupported WHGame.dll build. Expected TimeDateStamp=0x{:08X}, SizeOfImage=0x{:X}. KCD2Online hooks will remain disabled; the game will continue without the mod.",
 			    SUPPORTED_WHGAME_TIMESTAMP,
 			    SUPPORTED_WHGAME_IMAGE_SIZE);
 			flush_logs();
@@ -109,7 +109,7 @@ namespace
 		{
 			LOGF(
 			    ERROR,
-			    "KCD2MP address validation failed ({}/{} signatures, {}/{} derived targets). No hooks will be enabled.",
+			    "KCD2Online address validation failed ({}/{} signatures, {}/{} derived targets). No hooks will be enabled.",
 			    init_result.signatures_resolved,
 			    init_result.signatures_requested,
 			    init_result.derived_resolved,
@@ -118,7 +118,7 @@ namespace
 			{
 				LOG(ERROR) << "  - " << error;
 			}
-			LOG(ERROR) << "The game will continue without KCD2MP hooks.";
+			LOG(ERROR) << "The game will continue without KCD2Online hooks.";
 			flush_logs();
 			return false;
 		}
@@ -145,8 +145,8 @@ namespace
 		LOG(INFO) << "Hooks enabled.";
 
 		const auto kcse_status =
-		    kcd2mp::kcse::ui_client().runtime_capability();
-		if (kcd2mp::kcse::ui_client().available())
+		    kcd2o::kcse::ui_client().runtime_capability();
+		if (kcd2o::kcse::ui_client().available())
 		{
 			LOG(INFO) << "KCSE-owned multiplayer client detected.";
 			if (!kcse_status.available)
@@ -155,7 +155,7 @@ namespace
 		else
 		{
 			LOG(INFO)
-			    << "KCD2MPKCSEClient.dll is not loaded; the UI remains "
+			    << "KCD2OnlineKCSEClient.dll is not loaded; the UI remains "
 			       "available but in-game multiplayer is disabled.";
 		}
 
@@ -166,7 +166,7 @@ namespace
 		    std::chrono::steady_clock::now() - started_at);
 		LOGF(
 		    INFO,
-		    "KCD2MP initialization completed - {}/{} signatures resolved - hooks enabled ({} ms).",
+		    "KCD2Online initialization completed - {}/{} signatures resolved - hooks enabled ({} ms).",
 		    init_result.signatures_resolved,
 		    init_result.signatures_requested,
 		    elapsed.count());
@@ -179,32 +179,32 @@ namespace
 		const auto module = static_cast<HMODULE>(parameter);
 		try
 		{
-			initialize_kcd2mp(module);
+			initialize_kcd2o(module);
 		}
 		catch (const std::exception &exception)
 		{
 			if (big::g_log)
 			{
-				LOG(ERROR) << "Unhandled exception during KCD2MP initialization: " << exception.what();
-				LOG(ERROR) << "KCD2MP hooks remain disabled; the game may continue without the mod.";
+				LOG(ERROR) << "Unhandled exception during KCD2Online initialization: " << exception.what();
+				LOG(ERROR) << "KCD2Online hooks remain disabled; the game may continue without the mod.";
 				flush_logs();
 			}
 			else
 			{
-				OutputDebugStringA("KCD2MP initialization failed before the logger was available.\n");
+				OutputDebugStringA("KCD2Online initialization failed before the logger was available.\n");
 			}
 		}
 		catch (...)
 		{
 			if (big::g_log)
 			{
-				LOG(ERROR) << "Unknown exception during KCD2MP initialization.";
-				LOG(ERROR) << "KCD2MP hooks remain disabled; the game may continue without the mod.";
+				LOG(ERROR) << "Unknown exception during KCD2Online initialization.";
+				LOG(ERROR) << "KCD2Online hooks remain disabled; the game may continue without the mod.";
 				flush_logs();
 			}
 			else
 			{
-				OutputDebugStringA("KCD2MP initialization failed with an unknown exception.\n");
+				OutputDebugStringA("KCD2Online initialization failed with an unknown exception.\n");
 			}
 		}
 		return 0;
@@ -231,7 +231,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, PVOID)
 	if (!thread)
 	{
 		// The D3D12 proxy remains usable even when mod initialization cannot start.
-		OutputDebugStringA("KCD2MP failed to create its bootstrap thread; continuing as a D3D12 proxy only.\n");
+		OutputDebugStringA("KCD2Online failed to create its bootstrap thread; continuing as a D3D12 proxy only.\n");
 		return TRUE;
 	}
 

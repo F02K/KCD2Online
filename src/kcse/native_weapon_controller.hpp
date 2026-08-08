@@ -8,7 +8,7 @@ namespace wh::entitymodule
 	class C_Human;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	// Low-level Human weapon-controller boundary. This module knows native
 	// controller slots and REL calls, but nothing about multiplayer messages.

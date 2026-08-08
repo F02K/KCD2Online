@@ -33,7 +33,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	namespace
 	{
@@ -242,7 +242,7 @@ namespace kcd2mp::kcse
 				    : nullptr;
 #ifdef _WIN32
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER("npc-entity-class.GetName.seh"))
+			__except(KCD2Online_JOIN_SEH_FILTER("npc-entity-class.GetName.seh"))
 			{
 				return nullptr;
 			}
@@ -342,7 +342,7 @@ namespace kcd2mp::kcse
 				entity->SetWorldTM(*matrix, 0);
 				return true;
 			}
-			__except(KCD2MP_JOIN_SEH_FILTER(
+			__except(KCD2Online_JOIN_SEH_FILTER(
 			    "join.entity.SetWorldTM.seh"))
 			{
 				return false;
@@ -874,7 +874,7 @@ namespace kcd2mp::kcse
 		auto *framework = CCryAction::GetInstance();
 		auto *entity = framework ? framework->GetClientEntity() : nullptr;
 		auto *context = wh::game::S_GameContext::GetInstance();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.local-player.state",
 		    std::format(
 		        "framework={} client_entity={} game_context={} "
@@ -894,7 +894,7 @@ namespace kcd2mp::kcse
 		            join_trace::current_thread_role())));
 		if (!context || !entity)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.local-player.null",
 			    std::format(
 			        "context_null={} entity_null={}",
@@ -903,7 +903,7 @@ namespace kcd2mp::kcse
 		}
 		auto *actor =
 		    context && entity ? context->GetActorById(entity->GetId()) : nullptr;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    actor ? "join.local-actor.resolved"
 		          : "join.local-actor.null",
 		    std::format(
@@ -918,18 +918,18 @@ namespace kcd2mp::kcse
 	{
 		if (!entity)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity.read-transform.skipped",
 			    "entity=nil");
 			return std::nullopt;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.entity.GetWorldTMPtr.begin",
 		    std::format("entity={}", static_cast<void *>(entity)));
 		const auto *matrix = entity->GetWorldTMPtr();
 		if (!matrix)
 		{
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity.GetWorldTMPtr.nil",
 			    std::format("entity={}", static_cast<void *>(entity)));
 			return std::nullopt;
@@ -952,7 +952,7 @@ namespace kcd2mp::kcse
 		if (!entity || !is_finite_transform(transform))
 		{
 			error = "native transform target or entity is invalid";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity.write-transform.rejected",
 			    std::format(
 			        "entity={} finite={} error=\"{}\"",
@@ -962,7 +962,7 @@ namespace kcd2mp::kcse
 			return false;
 		}
 		const auto matrix = matrix_from_transform(transform);
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.entity.SetWorldTM.begin",
 		    std::format(
 		        "entity={} position=({:.6f},{:.6f},{:.6f}) "
@@ -978,19 +978,19 @@ namespace kcd2mp::kcse
 		if (!guarded_set_world_tm(entity, &matrix))
 		{
 			error = "SEH exception in IEntity::SetWorldTM";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity.SetWorldTM.failed",
 			    error);
 			return false;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.entity.SetWorldTM.returned",
 		    std::format("entity={}", static_cast<void *>(entity)));
 		const auto verified = read_transform(entity);
 		if (!verified)
 		{
 			error = "SetWorldTM did not leave a readable matrix";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity.SetWorldTM.verify-failed",
 			    error);
 			return false;
@@ -1008,7 +1008,7 @@ namespace kcd2mp::kcse
 		if (position_error > 0.01F || dot < 0.9999F)
 		{
 			error = "SetWorldTM readback exceeded position/rotation tolerance";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity.SetWorldTM.verify-failed",
 			    std::format(
 			        "position_error={} quaternion_dot={} error=\"{}\"",
@@ -1017,7 +1017,7 @@ namespace kcd2mp::kcse
 			        error));
 			return false;
 		}
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.entity.SetWorldTM.ok",
 		    std::format(
 		        "position_error={} quaternion_dot={}",
@@ -1044,7 +1044,7 @@ namespace kcd2mp::kcse
 		const auto local = player();
 		auto *environment = SSystemGlobalEnvironment::GetInstance();
 		auto *system = environment ? environment->pEntitySystem : nullptr;
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.entity-isolation.precheck",
 		    std::format(
 		        "humans_disabled={} animals_disabled={} local_entity={} "
@@ -1057,7 +1057,7 @@ namespace kcd2mp::kcse
 		if (!local.entity || !system)
 		{
 			error = "entity isolation requires the local player and entity system";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity-isolation.failed",
 			    error);
 			return false;
@@ -1082,7 +1082,7 @@ namespace kcd2mp::kcse
 			m_human_npcs_disabled = false;
 			m_animal_npcs_disabled = false;
 			error = "entity system did not create an iterator";
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity-isolation.failed",
 			    error);
 			return false;
@@ -1105,7 +1105,7 @@ namespace kcd2mp::kcse
 		}
 		iterator->Release();
 		process_pending_entity_control();
-		KCD2MP_JOIN_TRACE(
+		KCD2Online_JOIN_TRACE(
 		    "join.entity-isolation.complete",
 		    std::format(
 		        "reported={} visited={} isolated={} pending={}",
@@ -1246,7 +1246,7 @@ namespace kcd2mp::kcse
 		join_trace::write_diagnostic(
 		    "entity-control.spawn.blocked",
 		    std::format(
-		        "class={} name=\"{}\" reason=not-kcd2mp-authorized",
+		        "class={} name=\"{}\" reason=not-kcd2o-authorized",
 		        spawn->entity_class,
 		        spawn->entity_name));
 		return false;
@@ -1522,35 +1522,12 @@ namespace kcd2mp::kcse
 		auto *entity = system->GetEntity(entity_id);
 		if (!entity && state.dynamic())
 		{
-			auto *context = wh::game::S_GameContext::GetInstance();
-			const Vec3 position(
-			    state.transform().position().x(),
-			    state.transform().position().y(),
-			    state.transform().position().z());
-			const Quat rotation(
-			    state.transform().rotation().w(),
-			    state.transform().rotation().x(),
-			    state.transform().rotation().y(),
-			    state.transform().rotation().z());
-			const Vec3 scale(1.0F, 1.0F, 1.0F);
-			const auto name = std::format("KCD2MP_Dynamic_{}", state.npc_id());
-			Offsets::IActor *spawned{};
-				if (context && context->m_pActorSystem)
-				{
-					if (state.kind() == protocol::NPC_KIND_HUMAN)
-					{
-						auto scope = authorize_human_npc_spawn(name);
-						spawned = context->m_pActorSystem->CreateActor(
-						    0, name.c_str(), state.entity_class().c_str(),
-						    &position, &rotation, &scale, 0);
-					}
-					else
-						spawned = context->m_pActorSystem->CreateActor(
-						    0, name.c_str(), state.entity_class().c_str(),
-						    &position, &rotation, &scale, 0);
-				}
-			entity = spawned ? spawned->GetEntity() : nullptr;
-			entity_id = entity ? entity->GetId() : 0;
+			// Runtime GUIDs belong to one game process and cannot identify a
+			// cross-client NPC. A plain state update is therefore never permission
+			// to create an Actor. A future server-authored spawn protocol can opt in
+			// explicitly; for now this state remains pending for local adoption.
+			error.clear();
+			return true;
 		}
 		const auto kind = classify_npc_actor(entity);
 		if (!entity || !kind || *kind != state.kind())
@@ -1938,7 +1915,7 @@ namespace kcd2mp::kcse
 			m_pending_control.try_emplace(
 			    id,
 			    pending_entity{max_actor_registration_wait_frames, true});
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity-control.deferred",
 			    std::format(
 			        "entity_id={} reason=native-combat-active",
@@ -2040,7 +2017,7 @@ namespace kcd2mp::kcse
 			// being IsPlayer(), so the ordinary Human+HasAI rule must not touch them.
 			// Suspending this proxy leaves player action transitions and
 			// player-relative MonsterLOD processing stuck.
-			KCD2MP_JOIN_TRACE(
+			KCD2Online_JOIN_TRACE(
 			    "join.entity-control.protected",
 			    std::format(
 			        "entity_id={} reason=player-scheduler-proxy",

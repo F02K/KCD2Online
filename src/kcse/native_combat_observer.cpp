@@ -2,7 +2,7 @@
 
 #include <combatmodule/C_CombatActor.h>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	native_combat_state read_combat_state(
 	    const wh::combatmodule::C_CombatActor *actor) noexcept

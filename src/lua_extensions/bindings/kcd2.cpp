@@ -134,7 +134,7 @@ namespace lua::kcd2
 			// Param: old_filename: string: old filename that should get replaced
 			// Param: new_filename: string: new filename that will replace the old one.
 			// When the game opens a CryFile (Which can be a lot of different kind of files: .pak, .xml, .cfg and so on),
-			// you can tell KCD2MP to instead load a certain new file instead.
+			// you can tell KCD2Online to instead load a certain new file instead.
 			// is_early_main setup/check required for some of the files.
 			ns["on_cryfile_open"] = [](const std::string& old_filename, const std::string& new_filename, sol::this_environment env)
 			{

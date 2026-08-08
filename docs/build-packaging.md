@@ -7,8 +7,8 @@ out/package/<profile>/
 ```
 
 The raw CMake configuration directory also contains the language files in the
-runtime-relative layout `Mods/KCD2MP/Lang/`. This applies both to builds started
-through `build.bat` and direct `cmake --build` invocations of the `KCD2MP`
+runtime-relative layout `Mods/KCD2Online/Lang/`. This applies both to builds started
+through `build.bat` and direct `cmake --build` invocations of the `KCD2Online`
 target. Translation-only changes are copied again on the next build without
 requiring the client DLL to be relinked.
 
@@ -27,20 +27,20 @@ out/package/release/
 |   |   |   |-- d3d12.pdb
 |   |   |   |-- dinput8.dll
 |   |   |   `-- dinput8.pdb
-|   |   |-- Mods/KCD2MP/KCSE/Plugins/
-|   |   |   |-- KCD2MPKCSEClient.dll
-|   |   |   `-- KCD2MPKCSEClient.pdb
-|   |   |-- Mods/KCD2MP/Lang/
+|   |   |-- Mods/KCD2Online/KCSE/Plugins/
+|   |   |   |-- KCD2OnlineKCSEClient.dll
+|   |   |   `-- KCD2OnlineKCSEClient.pdb
+|   |   |-- Mods/KCD2Online/Lang/
 |   |   |   |-- de.lang
 |   |   |   |-- en.lang
 |   |   |   `-- README.md
 |   |   `-- KCSE/addresslib/
 |   |       `-- kcd_addresslib_*.bin
-|   `-- KCD2MP-Client-v0.1.1.zip
+|   `-- KCD2Online-Client-v0.1.2.zip
 |-- server/
-|   |-- KCD2MPServer.exe
-|   |-- KCD2MPServer.pdb
-|   |-- KCD2MPGameDataGenerator.exe
+|   |-- KCD2OnlineServer.exe
+|   |-- KCD2OnlineServer.pdb
+|   |-- KCD2OnlineGameDataGenerator.exe
 |   |-- start_server.bat
 |   |-- README.txt
 |   |-- server.toml.example
@@ -55,12 +55,12 @@ out/package/release/
 |   |   |-- property_catalog_3.pb
 |   |   `-- property_catalog_4.pb
 |   |-- tools/
-|   |   |-- KCD2MPSignatureAudit.exe
-|   |   `-- KCD2MPSignatureAudit.pdb
-|   `-- KCD2MP-Server-v0.1.1.zip
+|   |   |-- KCD2OnlineSignatureAudit.exe
+|   |   `-- KCD2OnlineSignatureAudit.pdb
+|   `-- KCD2Online-Server-v0.1.2.zip
 |-- tests/
-|   |-- KCD2MP*Tests.exe
-|   `-- KCD2MP*Tests.pdb
+|   |-- KCD2Online*Tests.exe
+|   `-- KCD2Online*Tests.pdb
 `-- SHA256SUMS.txt
 ```
 
@@ -103,14 +103,19 @@ the normal deploy operation.
 
 ## Server ZIP
 
-`KCD2MP-Server-v<version>.zip` contains the dedicated server, symbols,
+`KCD2Online-Server-v<version>.zip` contains the dedicated server, symbols,
 configuration examples, `start_server.bat`, diagnostic tools, and the standalone
-`KCD2MPGameDataGenerator.exe`. It never contains `game_data`.
+`KCD2OnlineGameDataGenerator.exe`. It never contains `game_data`.
 
 Before the first server start, run the generator once on a Windows PC with KCD2
 installed. It auto-detects Steam or prompts for the game directory, audits the
 installed `WHGame.dll`, and writes `game_data` next to itself. Transfer that
 directory with the server files if the host is a different machine.
+
+The default `[property].game_data = "game_data"` setting makes the server load
+the generated `property_catalog_<level_id>.pb` on first use of a world. Runtime
+property discovery therefore does not require the original KCD2 installation
+or its `level.pak` files on the dedicated host.
 
 `start_server.bat` creates `server.toml` from `server.toml.example` when needed
 and refuses to start with a clear setup message while `game_data` is missing.

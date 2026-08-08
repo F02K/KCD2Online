@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace kcd2mp
+namespace kcd2o
 {
 	struct multiplayer_ui_settings
 	{

@@ -1,9 +1,9 @@
-# KCD2MP
+# KCD2Online
 
 Experimental multiplayer for Kingdom Come: Deliverance II.
 
 > [!WARNING]
-> KCD2MP **v0.1.1 is a prototype**, not a production-ready multiplayer mod.
+> KCD2Online **v0.1.2 is a prototype**, not a production-ready multiplayer mod.
 > Expect breaking changes, incomplete world simulation, compatibility limits,
 > and loss of multiplayer-world data while development continues. Use test
 > saves and keep backups of anything important.
@@ -12,23 +12,23 @@ Experimental multiplayer for Kingdom Come: Deliverance II.
 
 | | |
 | --- | --- |
-| Current version | **0.1.1** |
+| Current version | **0.1.2** |
 | Development stage | Prototype / technical preview |
 | Networking | Direct IP, dedicated authoritative server |
 | Platform | Windows x64 |
 | Supported game | Steam build `23914554`, game version 1.5 |
 | Supported WHGame | `1308617_856` |
 
-KCD2MP uses one project version across the client, server, build metadata, and
+KCD2Online uses one project version across the client, server, build metadata, and
 network handshake. During the prototype phase, clients and servers must run the
-exact same KCD2MP version. There is no separate user-facing "protocol version".
+exact same KCD2Online version. There is no separate user-facing "protocol version".
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 > [!CAUTION]
 > NPC synchronization is still unreliable. A known bug can cause the same NPC
 > to spawn multiple times, so NPC sync is not yet suitable for normal play.
 
-## What works in v0.1.1
+## What works in v0.1.2
 
 - Direct-IP client/server connection with authentication and reconnect support
 - Persistent server sessions and player profiles
@@ -58,13 +58,13 @@ The detailed implementation status and current limits are documented in
 
 ## Architecture
 
-KCD2MP keeps its two runtime boundaries separate:
+KCD2Online keeps its two runtime boundaries separate:
 
 - `d3d12.dll` provides the mod-loader and ImGui frontend.
 - `dinput8.dll` hosts KCSE.
-- `KCD2MPKCSEClient.dll` owns the in-game multiplayer client and native game
+- `KCD2OnlineKCSEClient.dll` owns the in-game multiplayer client and native game
   integration.
-- `KCD2MPServer.exe` is a standalone dedicated server and does not load KCD2.
+- `KCD2OnlineServer.exe` is a standalone dedicated server and does not load KCD2.
 
 The project is based on
 [KCD2ModLoader](https://github.com/xiaoxiao921/KCD2ModLoader) and
@@ -75,7 +75,7 @@ as vendor dependencies.
 
 Native engine access is capability-gated. A client join verifies the game
 build, KCSE/libKCD2 runtime, Address Library identity, required native features,
-content fingerprint, and KCD2MP version before entering the world. Runtime
+content fingerprint, and KCD2Online version before entering the world. Runtime
 objects never cross the frontend/client ABI boundary.
 
 ## Build and deploy
@@ -110,7 +110,7 @@ Every successful build also creates a clean package tree under
 `out/package/<debug|release>/`:
 
 ```text
-client/   install-ready game tree and KCD2MP-Client-v0.1.1.zip
+client/   install-ready game tree and KCD2Online-Client-v0.1.2.zip
 server/   dedicated server, configuration, data, symbols, and audit tool
 tests/    test executables and their symbols only
 SHA256SUMS.txt
@@ -137,8 +137,12 @@ Copy `server.toml.example` to `server.toml`, select the sandbox `level_id`, and
 start the server:
 
 ```powershell
-KCD2MPServer.exe server.toml
+KCD2OnlineServer.exe server.toml
 ```
+
+The default `[property].game_data = "game_data"` setting loads the generated
+property catalog for the selected level. The dedicated server never needs the
+original KCD2 installation path.
 
 The common retail world IDs are:
 
@@ -177,7 +181,7 @@ terrain. Native weapon actions are excluded until their runtime path is verified
    level. From the pause menu, an already loaded matching level is adopted.
 
 The in-game UI follows KCD2's current `g_language` setting. Editable UTF-8
-translations are installed in `<game-root>\Mods\KCD2MP\Lang\`; English is the
+translations are installed in `<game-root>\Mods\KCD2Online\Lang\`; English is the
 fallback when no file exists for the selected game language.
 
 The client waits for `NewGame`, `PreDataLoaded`, `DataLoaded`, the target
@@ -192,11 +196,11 @@ For manual deployment:
 
 1. Copy `d3d12_.dll` beside `KingdomCome.exe` and rename it to `d3d12.dll`.
 2. Copy KCSE's `dinput8.dll` beside `KingdomCome.exe`.
-3. Copy `KCD2MPKCSEClient.dll` to
-   `<game-root>\Mods\KCD2MP\KCSE\Plugins\`.
+3. Copy `KCD2OnlineKCSEClient.dll` to
+   `<game-root>\Mods\KCD2Online\KCSE\Plugins\`.
 4. Copy the matching Address Library table to
    `<game-root>\KCSE\addresslib\`.
-5. Copy `data\lang\*.lang` to `<game-root>\Mods\KCD2MP\Lang\`.
+5. Copy `data\lang\*.lang` to `<game-root>\Mods\KCD2Online\Lang\`.
 
 The default Steam binary directory is:
 
@@ -205,7 +209,7 @@ KingdomComeDeliverance2\Bin\Win64MasterMasterSteamPGO
 ```
 
 To uninstall the runtime, remove or rename `d3d12.dll`, `dinput8.dll`, and
-`Mods\KCD2MP\KCSE\Plugins\KCD2MPKCSEClient.dll`.
+`Mods\KCD2Online\KCSE\Plugins\KCD2OnlineKCSEClient.dll`.
 
 ## Diagnostics and testing
 
@@ -234,4 +238,4 @@ and full NPC/quest simulation remain manual or future work.
 The inherited modding layer also provides Lua plugin loading and hot reload,
 Dear ImGui Lua bindings, FMOD integration, ASI loading, XML merging, and debug
 inspection tools. The example plugin is in
-[`examples/plugins/KCD2MP-TestMod`](examples/plugins/KCD2MP-TestMod).
+[`examples/plugins/KCD2Online-TestMod`](examples/plugins/KCD2Online-TestMod).

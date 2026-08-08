@@ -18,7 +18,7 @@ namespace wh::rpgmodule
 	class C_Soul;
 }
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	struct native_remote_equipment_instance
 	{

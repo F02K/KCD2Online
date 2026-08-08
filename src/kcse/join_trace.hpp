@@ -9,7 +9,7 @@
 #include <excpt.h>
 #endif
 
-namespace kcd2mp::kcse::join_trace
+namespace kcd2o::kcse::join_trace
 {
 	enum class thread_role
 	{
@@ -51,13 +51,13 @@ namespace kcd2mp::kcse::join_trace
 #endif
 }
 
-#define KCD2MP_JOIN_TRACE(event, detail)                                     \
+#define KCD2Online_JOIN_TRACE(event, detail)                                     \
 	do                                                                       \
 	{                                                                        \
-		if (::kcd2mp::kcse::join_trace::active()                              \
-		    && ::kcd2mp::kcse::join_trace::diagnostics_enabled())             \
+		if (::kcd2o::kcse::join_trace::active()                              \
+		    && ::kcd2o::kcse::join_trace::diagnostics_enabled())             \
 		{                                                                      \
-			::kcd2mp::kcse::join_trace::write(                                  \
+			::kcd2o::kcse::join_trace::write(                                  \
 			    (event),                                                        \
 			    (detail),                                                       \
 			    std::source_location::current());                               \
@@ -65,8 +65,8 @@ namespace kcd2mp::kcse::join_trace
 	} while (false)
 
 #ifdef _WIN32
-#define KCD2MP_JOIN_SEH_FILTER(event)                                        \
-	::kcd2mp::kcse::join_trace::seh_filter(                                  \
+#define KCD2Online_JOIN_SEH_FILTER(event)                                        \
+	::kcd2o::kcse::join_trace::seh_filter(                                  \
 	    GetExceptionInformation(),                                           \
 	    (event),                                                             \
 	    std::source_location::current())

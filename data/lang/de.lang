@@ -1,9 +1,9 @@
-# KCD2MP Ingame-UI — Deutsch (UTF-8)
+# KCD2Online Ingame-UI — Deutsch (UTF-8)
 menu.root.multiplayer=MULTIPLAYER
 menu.root.pending=MULTIPLAYER - JOIN AUSSTEHEND
 menu.root.connected=MULTIPLAYER - VERBUNDEN
 menu.root.tooltip=Server auswählen oder direkt per Adresse verbinden
-menu.multiplayer.title=KCD2MP MULTIPLAYER
+menu.multiplayer.title=KCD2Online MULTIPLAYER
 menu.field.edit_prefix=> 
 menu.field.address=SERVER-ADRESSE: {value}
 menu.field.address.tooltip=Adresse mit Port, zum Beispiel 127.0.0.1:27020

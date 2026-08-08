@@ -10,7 +10,7 @@
 #include "npc/catalog.hpp"
 #include "server/starter_profile.hpp"
 
-namespace kcd2mp::server
+namespace kcd2o::server
 {
 	struct initial_spawn_config
 	{
@@ -27,7 +27,7 @@ namespace kcd2mp::server
 	{
 		std::string bind_address{"0.0.0.0"};
 		std::uint16_t port{27020};
-		std::string name{"KCD2MP Server"};
+		std::string name{"KCD2Online Server"};
 		std::string password;
 		std::uint32_t max_players{8};
 		std::string level_id;
@@ -37,6 +37,8 @@ namespace kcd2mp::server
 		std::uint32_t handshake_timeout_seconds{10};
 		std::uint32_t idle_timeout_seconds{15};
 		std::uint32_t reconnect_grace_seconds{30};
+		// Retained on the wire for compatibility with older clients. Current
+		// clients and servers wait for native level completion instead.
 		std::uint32_t bootstrap_timeout_seconds{180};
 		std::uint32_t profile_snapshot_interval_seconds{15};
 		double initial_time_of_day_hours{8.0};
@@ -60,9 +62,9 @@ namespace kcd2mp::server
 		// Generated from the audited retail level PAKs and shipped beside the
 		// dedicated server. Production levels use it as an NPC GUID/kind allowlist.
 		std::filesystem::path npc_world_catalog_path;
-		// Optional KCD2 installation root. When configured, the server builds the
-		// level-wide property catalog once and persists it in world_directory.
-		std::filesystem::path property_game_root;
+		// Generated dedicated-server data. When configured, the matching property
+		// catalog is imported once and persisted in world_directory.
+		std::filesystem::path property_game_data;
 		starter_profile_template starter_profile{
 		    default_starter_profile_template()};
 		std::optional<initial_spawn_config> initial_spawn;

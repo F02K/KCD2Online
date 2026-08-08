@@ -4,7 +4,7 @@
 
 int main()
 {
-	kcd2mp::runtime_handle_registry handles(7);
+	kcd2o::runtime_handle_registry handles(7);
 	const auto first = handles.allocate();
 	assert(first.epoch == 7);
 	assert(handles.valid(first));

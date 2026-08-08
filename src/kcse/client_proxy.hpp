@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace kcd2mp::kcse
+namespace kcd2o::kcse
 {
 	class ui_client_proxy
 	{
@@ -24,7 +24,7 @@ namespace kcd2mp::kcse
 		[[nodiscard]] bool request_respawn() const;
 		void set_diagnostic_logging(bool enabled) const;
 		[[nodiscard]] client_status status() const;
-		[[nodiscard]] std::vector<kcd2mp::remote_player_view>
+		[[nodiscard]] std::vector<kcd2o::remote_player_view>
 		remote_players() const;
 		[[nodiscard]] std::vector<chat_entry> chat_history() const;
 

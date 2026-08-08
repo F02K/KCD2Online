@@ -120,7 +120,7 @@ namespace big
 			static developer_console_state state;
 			ImGui::SetNextWindowSize({700.0F, 360.0F}, ImGuiCond_FirstUseEver);
 			if (!ImGui::Begin(
-			        "KCD2MP Developer Console",
+			        "KCD2Online Developer Console",
 			        &g_show_developer_console))
 			{
 				ImGui::End();
@@ -220,7 +220,7 @@ namespace big
 
 		void RenderMultiplayer()
 		{
-			auto &client = kcd2mp::kcse::ui_client();
+			auto &client = kcd2o::kcse::ui_client();
 			if (!g_show_multiplayer)
 			{
 				return;
@@ -230,8 +230,8 @@ namespace big
 			    "Multiplayer",
 			    "Diagnostic Logging",
 			    false,
-			    "Write verbose KCD2MP join and performance diagnostics.");
-			auto& preferences = kcd2mp::ui_settings();
+			    "Write verbose KCD2Online join and performance diagnostics.");
+			auto& preferences = kcd2o::ui_settings();
 			auto& address = preferences.address;
 			auto& display_name = preferences.display_name;
 			bool diagnostic_logging =
@@ -243,14 +243,14 @@ namespace big
 			static std::string npc_catalog_filter;
 
 			ImGui::SetNextWindowSize({520.0F, 560.0F}, ImGuiCond_FirstUseEver);
-			if (!ImGui::Begin("KCD2MP Multiplayer", &g_show_multiplayer))
+			if (!ImGui::Begin("KCD2Online Multiplayer", &g_show_multiplayer))
 			{
 				ImGui::End();
 				return;
 			}
 
 			auto status = client.status();
-			ImGui::Text("Status: %s", kcd2mp::to_string(status.state));
+			ImGui::Text("Status: %s", kcd2o::to_string(status.state));
 			if (!status.server_name.empty())
 			{
 				ImGui::SameLine();
@@ -259,7 +259,7 @@ namespace big
 			const auto sandbox = client.runtime_capability();
 			const auto joinable = client.can_start_join();
 			const bool disconnected =
-			    status.state == kcd2mp::client_state::disconnected;
+			    status.state == kcd2o::client_state::disconnected;
 			ImGui::Text(
 			    "Multiplayer runtime: %s",
 			    sandbox.available ? "ready" :
@@ -308,7 +308,7 @@ namespace big
 			{
 				ImGui::SetTooltip(
 				    "Writes verbose join and performance data to "
-				    "KCD2MP-join.log. Native crash records remain enabled.");
+				    "KCD2Online-join.log. Native crash records remain enabled.");
 			}
 
 			ImGui::BeginDisabled(!disconnected);
@@ -330,7 +330,7 @@ namespace big
 			ImGui::BeginDisabled(!disconnected || !joinable);
 			if (ImGui::Button("Connect"))
 			{
-				kcd2mp::client_options options;
+				kcd2o::client_options options;
 				options.address = address;
 				options.display_name = display_name;
 				options.password = password;
@@ -358,14 +358,14 @@ namespace big
 			    "You: %llu | Remote players: %zu",
 			    static_cast<unsigned long long>(status.local_player_id),
 			    players.size());
-			if (status.state == kcd2mp::client_state::connected
+			if (status.state == kcd2o::client_state::connected
 			    && status.avatar_policy.allowed_archetype_ids_size() != 0)
 			{
 				const char* selected_id = status.avatar_archetype_id.empty()
 				    ? status.avatar_policy.default_archetype_id().c_str()
 				    : status.avatar_archetype_id.c_str();
 				const auto *selected_entry =
-				    kcd2mp::npc::runtime_catalog().find(selected_id);
+				    kcd2o::npc::runtime_catalog().find(selected_id);
 				const auto selected_label = selected_entry
 				    ? std::format(
 				          "{} ({})",
@@ -382,7 +382,7 @@ namespace big
 						const bool active =
 						    archetype == status.avatar_archetype_id;
 						const auto *entry =
-						    kcd2mp::npc::runtime_catalog().find(archetype);
+						    kcd2o::npc::runtime_catalog().find(archetype);
 						const auto label = entry
 						    ? std::format(
 						          "{} ({})##{}",
@@ -412,7 +412,7 @@ namespace big
 			}
 			if (ImGui::CollapsingHeader("NPC catalog"))
 			{
-				const auto &catalog = kcd2mp::npc::runtime_catalog();
+				const auto &catalog = kcd2o::npc::runtime_catalog();
 				ImGui::InputTextWithHint(
 				    "##NpcCatalogFilter",
 				    "Search name, Character-ID or Soul UUID",
@@ -492,7 +492,7 @@ namespace big
 					ImGui::TextUnformatted(player.connected ? "online" : "reconnecting");
 					ImGui::TableNextColumn();
 					ImGui::TextUnformatted(
-					    kcd2mp::protocol::MovementMode_Name(player.movement_mode).c_str());
+					    kcd2o::protocol::MovementMode_Name(player.movement_mode).c_str());
 				}
 				ImGui::EndTable();
 			}
@@ -510,7 +510,7 @@ namespace big
 			}
 			ImGui::EndChild();
 			ImGui::BeginDisabled(
-			    status.state != kcd2mp::client_state::connected);
+			    status.state != kcd2o::client_state::connected);
 			const bool submit = ImGui::InputText(
 			    "##ChatInput",
 			    &chat_text,
@@ -1498,16 +1498,16 @@ namespace big
 		// close. Keep g_show_multiplayer unchanged so reopening the GUI with its
 		// hotkey shows the active session again.
 		static auto previous_multiplayer_state =
-		    kcd2mp::client_state::disconnected;
+		    kcd2o::client_state::disconnected;
 		static bool developer_console_was_open{};
 		const auto multiplayer_state =
-		    kcd2mp::kcse::ui_client().status().state;
+		    kcd2o::kcse::ui_client().status().state;
 		const bool developer_console_just_closed =
 		    developer_console_was_open && !g_show_developer_console;
 		if (m_is_open
-		    && multiplayer_state == kcd2mp::client_state::connected
+		    && multiplayer_state == kcd2o::client_state::connected
 		    && ((previous_multiplayer_state
-		             != kcd2mp::client_state::connected
+		             != kcd2o::client_state::connected
 		         && !g_show_developer_console)
 		        || developer_console_just_closed))
 		{
@@ -1523,7 +1523,7 @@ namespace big
 			if (!onboarding_open)
 			{
 				toggle(true);
-				ImGui::OpenPopup("Welcome to KCD2MP");
+				ImGui::OpenPopup("Welcome to KCD2Online");
 				onboarding_open = true;
 			}
 
@@ -1540,7 +1540,7 @@ namespace big
 			}
 			ImGui::SetNextWindowPos(window_position, ImGuiCond_Always);
 
-			if (ImGui::BeginPopupModal("Welcome to KCD2MP"))
+			if (ImGui::BeginPopupModal("Welcome to KCD2Online"))
 			{
 				//ImGui::SeparatorText("Change the GUI opening key if you wish");
 				if (ImGui::Hotkey("Open GUI Keybind", g_gui_toggle))
@@ -1780,7 +1780,7 @@ namespace big
 
 				if (ImGui::BeginMenu("Log"))
 				{
-					ImGui::ConfigBind(ImGui::Checkbox, "Output to the KCD2MP log\nthe vanilla game log (kcd.log)", g_hook_log_write_enabled);
+					ImGui::ConfigBind(ImGui::Checkbox, "Output to the KCD2Online log\nthe vanilla game log (kcd.log)", g_hook_log_write_enabled);
 
 					ImGui::EndMenu();
 				}

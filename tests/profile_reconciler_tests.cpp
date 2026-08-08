@@ -8,7 +8,7 @@
 
 namespace
 {
-	using namespace kcd2mp;
+	using namespace kcd2o;
 
 	class fake_backend final : public profile_backend
 	{
@@ -173,7 +173,7 @@ namespace
 
 int main()
 {
-	using namespace kcd2mp;
+	using namespace kcd2o;
 	auto baseline = server::instantiate_starter_profile(
 	    server::default_starter_profile_template(),
 	    1,

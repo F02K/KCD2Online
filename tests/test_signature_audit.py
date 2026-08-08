@@ -69,9 +69,9 @@ class SignatureArchitectureTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("add_library(KCD2MPSignatureCore STATIC", cmake)
-        self.assertIn("target_link_libraries(KCD2MPSignatureCore PUBLIC Zydis)", cmake)
-        self.assertIn("add_executable(KCD2MPSignatureAudit", cmake)
+        self.assertIn("add_library(KCD2OnlineSignatureCore STATIC", cmake)
+        self.assertIn("target_link_libraries(KCD2OnlineSignatureCore PUBLIC Zydis)", cmake)
+        self.assertIn("add_executable(KCD2OnlineSignatureAudit", cmake)
         self.assertIn("ZydisDecoderDecodeFull", core)
         self.assertIn("resolve_all(*image)", audit)
         self.assertFalse((PROJECT_ROOT / "tools" / "signature_audit.py").exists())
@@ -212,6 +212,14 @@ class StartupSafetyTests(unittest.TestCase):
         unload = runtime[begin:]
         self.assertIn('execute_console_command("unload", true)', unload)
         self.assertNotIn("framework->EndGameContext()", unload)
+        safe_queue = unload.index("void native_runtime::queue_native_unload_if_safe")
+        load_gate = unload.index("if (!level_load_complete)", safe_queue)
+        unload_command = unload.index(
+            'execute_console_command("unload", true)', load_gate
+        )
+        self.assertLess(load_gate, unload_command)
+        self.assertNotIn("m_world_start_deadline", runtime)
+        self.assertIn("system_global_state_running", runtime)
         self.assertIn("open_main_menu_if_pending();", runtime)
         self.assertIn("return changed && !unload_transition;", runtime)
 
@@ -266,7 +274,7 @@ class StartupSafetyTests(unittest.TestCase):
         self.assertIn("m_isolated", header)
         self.assertIn("actor_preserved=true", source)
 
-    def test_human_npc_spawns_require_exact_kcd2mp_authorization(self) -> None:
+    def test_human_npc_spawns_require_exact_kcd2o_authorization(self) -> None:
         source = (
             PROJECT_ROOT / "src" / "kcse" / "native_entity_backend.cpp"
         ).read_text(encoding="utf-8")
@@ -360,10 +368,10 @@ class StartupSafetyTests(unittest.TestCase):
 
         self.assertIn("bool m_manual_disconnect_pending{};", header)
         self.assertIn(
-            "client_status.state == kcd2mp::client_state::closing", plugin
+            "client_status.state == kcd2o::client_state::closing", plugin
         )
         self.assertIn(
-            "client_status.state == kcd2mp::client_state::connected\n"
+            "client_status.state == kcd2o::client_state::connected\n"
             "\t\t    && sandbox_active",
             plugin,
         )

@@ -12,7 +12,7 @@ int main()
 	assert(normalize_language("English") == "en");
 	assert(normalize_language("Czech") == "cs");
 
-	const auto directory = std::filesystem::path(KCD2MP_SOURCE_DIR)
+	const auto directory = std::filesystem::path(KCD2Online_SOURCE_DIR)
 	    / "data" / "lang";
 	localization_catalog catalog;
 	std::string error;

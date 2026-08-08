@@ -7,7 +7,7 @@
 
 int main()
 {
-	using namespace kcd2mp;
+	using namespace kcd2o;
 	using payload = protocol::Envelope::PayloadCase;
 
 	constexpr std::array states{
@@ -96,6 +96,12 @@ int main()
 	assert(is_server_message_allowed(
 	    client_state::connected,
 	    payload::kWorldSnapshot));
+	assert(is_server_message_allowed(
+	    client_state::connected,
+	    payload::kServerNpcMotion));
+	assert(is_server_message_allowed(
+	    client_state::connected,
+	    payload::kServerNpcGameplayUpdate));
 	assert(!is_server_message_allowed(
 	    client_state::authenticating,
 	    payload::kWorldSnapshot));

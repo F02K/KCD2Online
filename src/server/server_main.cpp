@@ -42,10 +42,10 @@ namespace
 		       "revoke <actor_player_id|system> <assignment_id>\n";
 	}
 
-	std::optional<kcd2mp::protocol::PropertyRole> property_role(
+	std::optional<kcd2o::protocol::PropertyRole> property_role(
 	    std::string_view value)
 	{
-		using namespace kcd2mp::protocol;
+		using namespace kcd2o::protocol;
 		if (value == "steward")
 			return PROPERTY_ROLE_STEWARD;
 		if (value == "resident")
@@ -59,17 +59,17 @@ namespace
 		return std::nullopt;
 	}
 
-	int close_reason(kcd2mp::server::close_kind kind)
+	int close_reason(kcd2o::server::close_kind kind)
 	{
-		using kcd2mp::server::close_kind;
+		using kcd2o::server::close_kind;
 		switch (kind)
 		{
 		case close_kind::reject:
-			return kcd2mp::net::server_rejected_reason;
+			return kcd2o::net::server_rejected_reason;
 		case close_kind::shutdown:
-			return kcd2mp::net::server_shutdown_reason;
+			return kcd2o::net::server_shutdown_reason;
 		case close_kind::kick:
-			return kcd2mp::net::server_kicked_reason;
+			return kcd2o::net::server_kicked_reason;
 		case close_kind::none:
 			break;
 		}
@@ -85,9 +85,9 @@ int main(int argc, char **argv)
 		const auto config_path = argc > 1
 		    ? std::filesystem::path(argv[1])
 		    : std::filesystem::path("server.toml");
-		const auto config = kcd2mp::server::load_server_config(config_path);
-		kcd2mp::net::runtime network_runtime;
-		kcd2mp::server::server_core core(config);
+		const auto config = kcd2o::server::load_server_config(config_path);
+		kcd2o::net::runtime network_runtime;
+		kcd2o::server::server_core core(config);
 
 		auto console = std::make_shared<command_queue>();
 		std::thread(
@@ -108,19 +108,19 @@ int main(int argc, char **argv)
 
 		const auto now = []
 		{
-			return kcd2mp::server::clock::now();
+			return kcd2o::server::clock::now();
 		};
 
-		kcd2mp::net::server_transport transport({
+		kcd2o::net::server_transport transport({
 		    .connected =
-		        [&](kcd2mp::connection_id connection)
+		        [&](kcd2o::connection_id connection)
 		        {
 			        std::cout << "connection " << connection << " accepted from "
 			                  << transport.connection_description(connection) << '\n';
 			        core.on_transport_connected(connection, now());
 		        },
 		    .disconnected =
-		        [&](kcd2mp::connection_id connection,
+		        [&](kcd2o::connection_id connection,
 		            bool allow_reconnect,
 		            std::string reason)
 		        {
@@ -133,18 +133,18 @@ int main(int argc, char **argv)
 			            now());
 		        },
 		    .message =
-		        [&](kcd2mp::connection_id connection,
+		        [&](kcd2o::connection_id connection,
 		            std::span<const std::byte> bytes)
 		        {
 			        std::string error;
-			        const auto envelope = kcd2mp::decode(bytes, &error);
+			        const auto envelope = kcd2o::decode(bytes, &error);
 			        if (!envelope)
 			        {
 				        std::cerr << "connection " << connection
 				                  << " sent malformed data: " << error << '\n';
 				        transport.close(
 				            connection,
-				            kcd2mp::net::server_rejected_reason,
+				            kcd2o::net::server_rejected_reason,
 				            "malformed message",
 				            false);
 				        return;
@@ -153,7 +153,7 @@ int main(int argc, char **argv)
 		        }});
 
 		transport.listen(config.bind_address, config.port);
-		std::cout << config.name << " (KCD2MP " << kcd2mp::kcd2mp_version
+		std::cout << config.name << " (KCD2Online " << kcd2o::kcd2o_version
 		          << ", prototype) listening on " << config.bind_address << ':'
 		          << config.port << " for level " << config.level_id << '\n';
 		print_help();
@@ -161,7 +161,7 @@ int main(int argc, char **argv)
 		bool running = true;
 		const auto tick_duration =
 		    std::chrono::duration<double>(1.0 / config.tick_rate);
-		auto next_tick = kcd2mp::server::clock::now();
+		auto next_tick = kcd2o::server::clock::now();
 		while (running)
 		{
 			transport.poll();
@@ -272,7 +272,7 @@ int main(int argc, char **argv)
 					else if (action == "owner")
 					{
 						std::string property_id;
-						kcd2mp::player_id target{};
+						kcd2o::player_id target{};
 						input >> property_id >> target;
 						std::string error;
 						if (property_id.empty() || target == 0
@@ -284,8 +284,8 @@ int main(int argc, char **argv)
 					}
 					else if (action == "grant")
 					{
-						kcd2mp::player_id actor{};
-						kcd2mp::player_id target{};
+						kcd2o::player_id actor{};
+						kcd2o::player_id target{};
 						std::string property_id;
 						std::string role_name;
 						std::uint64_t minutes{};
@@ -324,7 +324,7 @@ int main(int argc, char **argv)
 						else
 						{
 							std::istringstream actor_input(actor);
-							kcd2mp::player_id actor_id{};
+							kcd2o::player_id actor_id{};
 							if (actor_input >> actor_id)
 								revoked = core.revoke_property_role(
 								    actor_id, assignment, error);
@@ -341,7 +341,7 @@ int main(int argc, char **argv)
 				}
 				else if (command == "kick")
 				{
-					kcd2mp::player_id id{};
+					kcd2o::player_id id{};
 					input >> id;
 					std::string reason;
 					std::getline(input >> std::ws, reason);
@@ -379,7 +379,7 @@ int main(int argc, char **argv)
 					}
 					else if (action == "remove")
 					{
-						kcd2mp::player_id id{};
+						kcd2o::player_id id{};
 						input >> id;
 						if (id == 0 || !core.remove_dummy(id, now()))
 						{
@@ -400,7 +400,7 @@ int main(int argc, char **argv)
 				else if (command == "profile")
 				{
 					std::string action;
-					kcd2mp::player_id id{};
+					kcd2o::player_id id{};
 					input >> action >> id;
 					if (action != "claim" || id == 0)
 					{
@@ -544,7 +544,7 @@ int main(int argc, char **argv)
 			{
 				core.tick(tick_now);
 				next_tick = tick_now
-				    + std::chrono::duration_cast<kcd2mp::server::clock::duration>(
+				    + std::chrono::duration_cast<kcd2o::server::clock::duration>(
 				        tick_duration);
 			}
 
@@ -552,19 +552,46 @@ int main(int argc, char **argv)
 			{
 				std::string error;
 				const auto encoded =
-				    kcd2mp::encode(outbound.envelope, outbound.delivery, &error);
-				if (!encoded
-				    || !transport.send(
-				        outbound.connection,
-				        encoded->bytes,
-				        outbound.delivery,
-				        &error))
+				    kcd2o::encode(outbound.envelope, outbound.delivery, &error);
+				bool sent = false;
+				bool congested = false;
+				if (encoded)
+				{
+					const auto lane = kcd2o::lane_for(outbound.envelope);
+					constexpr std::size_t unreliable_queue_limit = 96 * 1024;
+					const auto pending =
+					    transport.pending_send_bytes(outbound.connection, lane);
+					congested = outbound.delivery
+					        == kcd2o::reliability::unreliable
+					    && pending && *pending >= unreliable_queue_limit;
+					if (!congested)
+						sent = transport.send(
+						    outbound.connection,
+						    encoded->bytes,
+						    outbound.delivery,
+						    lane,
+						    &error,
+						    &congested);
+				}
+				if (!encoded)
+					std::cerr << "encode for connection " << outbound.connection
+					          << " failed: " << error << '\n';
+				else if (!sent
+				    && !(congested
+				        && outbound.delivery
+				            == kcd2o::reliability::unreliable))
 				{
 					std::cerr << "send to connection " << outbound.connection
 					          << " failed: " << error << '\n';
+					if (outbound.delivery == kcd2o::reliability::reliable)
+						transport.close(
+						    outbound.connection,
+						    kcd2o::net::server_kicked_reason,
+						    "reliable send failed",
+						    false);
 				}
 				if (outbound.close_after_send
-				    != kcd2mp::server::close_kind::none)
+				    != kcd2o::server::close_kind::none)
 				{
 					transport.close(
 					    outbound.connection,
@@ -580,7 +607,7 @@ int main(int argc, char **argv)
 	}
 	catch (const std::exception &exception)
 	{
-		std::cerr << "KCD2MPServer fatal error: " << exception.what() << '\n';
+		std::cerr << "KCD2OnlineServer fatal error: " << exception.what() << '\n';
 		return 1;
 	}
 }
