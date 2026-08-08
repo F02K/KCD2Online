@@ -15,6 +15,7 @@ from unittest import mock
 from tools.build_tui.core import (
     BUILD_PROFILES,
     GAME_BIN_RELATIVE,
+    LEGACY_CLIENT_PLUGIN,
     AUDIT_TARGET,
     BuildEnvironment,
     BuildResult,
@@ -387,6 +388,20 @@ class DeploymentTests(unittest.TestCase):
 
             with self.assertRaisesRegex(BuildToolError, "is running"):
                 deploy_artifacts(result, game_root, lambda: True)
+
+    def test_rejects_legacy_client(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            result = self._result(artifacts)
+            game_root = _create_game_root(root / "game")
+            legacy_client = game_root / LEGACY_CLIENT_PLUGIN
+            legacy_client.parent.mkdir(parents=True)
+            legacy_client.write_bytes(b"legacy")
+
+            with self.assertRaisesRegex(BuildToolError, "legacy multiplayer KCSE"):
+                deploy_artifacts(result, game_root, lambda: False)
 
     def test_reports_locked_destination(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

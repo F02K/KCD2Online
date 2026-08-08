@@ -51,11 +51,11 @@ namespace kcd2o::kcse
 		    | 0x02000000 // VF_CHEAT_NOCHECK
 		    | 0x40000000; // VF_SYSSPEC_OVERWRITE
 
-		// KCD2's CSystem state sequence ends in LEVEL_LOAD_COMPLETE (12) and
-		// RUNNING (13). Player/Actor objects become visible several seconds before
-		// RUNNING while character and object-layer jobs are still active, so they
-		// are not a sufficient level-readiness signal on their own.
-		constexpr std::uint32_t system_global_state_running = 13;
+		// KCD2 keeps CSystem in LEVEL_LOAD_COMPLETE (13) once the native world is
+		// ready. Player/Actor objects become visible several seconds before that
+		// while character and object-layer jobs are still active, so they are not a
+		// sufficient level-readiness signal on their own.
+		constexpr std::uint32_t system_global_state_level_load_complete = 13;
 
 		bool read_system_global_state(std::uint32_t &state) noexcept
 		{
@@ -66,9 +66,10 @@ namespace kcd2o::kcse
 			__try
 			{
 #endif
-				// KCD2 ISystem slot 202 is the verified GetSystemGlobalState
-				// getter (mov eax,[rcx+0x2BAC]; ret) on release_1_5 build 15693.
-				state = environment->pSystem->_vf202();
+				// KCD2 ISystem slot 197 is the verified system-state getter
+				// (mov eax,[rcx+0x2AE0]; ret) on release 1.5.6. Slot 202 reads
+				// the unrelated random-seed field at +0x2BAC.
+				state = environment->pSystem->_vf197();
 				return true;
 #ifdef _WIN32
 			}
@@ -1599,7 +1600,7 @@ namespace kcd2o::kcse
 		{
 			set_world_start_stage(
 			    world_start_stage::waiting_for_level,
-			    "Target level is present; waiting for the engine to reach RUNNING after LEVEL_LOAD_COMPLETE.");
+			    "Target level is present; waiting for the engine to report LEVEL_LOAD_COMPLETE.");
 			return;
 		}
 		if (!player_ready || !transition_safe)
@@ -2294,7 +2295,8 @@ namespace kcd2o::kcse
 		const auto system_state_available =
 		    read_system_global_state(system_global_state);
 		const auto level_load_complete = system_state_available
-		    && system_global_state == system_global_state_running;
+		    && system_global_state
+		        == system_global_state_level_load_complete;
 
 		auto *framework = CCryAction::GetInstance();
 		const auto native_player = m_entities.player();
@@ -2760,7 +2762,7 @@ namespace kcd2o::kcse
 			{
 				KCD2Online_JOIN_TRACE(
 				    "join.sandbox.unload.deferred",
-				    "Native unload is waiting for the engine to reach RUNNING after LEVEL_LOAD_COMPLETE.");
+				    "Native unload is waiting for the engine to report LEVEL_LOAD_COMPLETE.");
 			}
 			return;
 		}

@@ -37,6 +37,14 @@ ADDRESS_LIBRARY_GLOB = "kcd_addresslib_*.bin"
 ADDRESS_LIBRARY_HEADER = struct.Struct("<4sIII")
 ADDRESS_LIBRARY_RECORD = struct.Struct("<II")
 CLIENT_FALLBACK_LANGUAGE_FILE = "en.lang"
+LEGACY_MOD_NAME = "KCD2" + "MP"
+LEGACY_CLIENT_PLUGIN = (
+    Path("Mods")
+    / LEGACY_MOD_NAME
+    / "KCSE"
+    / "Plugins"
+    / (LEGACY_MOD_NAME + "KCSEClient.dll")
+)
 ADDRESS_LIBRARY_NAME = re.compile(
     r"^kcd_addresslib_(steam|gog|epic)_(.+)\.bin$", re.IGNORECASE
 )
@@ -1373,6 +1381,14 @@ def deploy_artifacts(
     if process_checker():
         raise BuildToolError(
             "{} is running. Close the game before deploying.".format(GAME_EXECUTABLE)
+        )
+    legacy_client = normalized_root / LEGACY_CLIENT_PLUGIN
+    if legacy_client.is_file():
+        raise BuildToolError(
+            "A legacy multiplayer KCSE client is still installed. Move or "
+            "remove the former mod directory before deploying KCD2Online; "
+            "loading both KCSE clients can crash during player lifecycle "
+            "transitions."
         )
     targets = tuple((source, normalized_root / relative) for source, relative in layout)
     temporary_paths: List[Path] = []
