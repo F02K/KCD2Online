@@ -105,7 +105,7 @@ int main()
 	const auto decoded = decode(encoded->bytes, &error);
 	assert(decoded);
 	assert(decoded->client_hello().display_name() == "Henry");
-	assert(decoded->client_hello().version() == "0.1.2");
+	assert(decoded->client_hello().version() == "0.1.3");
 	auto incompatible = envelope;
 	incompatible.mutable_client_hello()->set_version("0.0.8");
 	assert(encode(incompatible, reliability::reliable, &error));
@@ -268,22 +268,20 @@ int main()
 	    static_cast<protocol::MovementMode>(999));
 	assert(!encode(invalid_enum, reliability::reliable, &error));
 
-	protocol::Envelope too_many_players;
-	auto *world = too_many_players.mutable_world_snapshot();
-	*world->mutable_environment() = environment();
-	for (std::size_t index = 0; index < max_players + 1; ++index)
-	{
-		auto *player = world->add_players();
-		player->set_player_id(index + 1);
-		player->set_display_name("Player" + std::to_string(index));
-		player->set_movement_mode(protocol::MOVEMENT_MODE_IDLE);
-	}
-	assert(!encode(too_many_players, reliability::unreliable, &error));
-
 	protocol::Envelope authentication;
 	auto *credentials = authentication.mutable_client_authenticate();
 	credentials->set_identity_token("token");
 	credentials->set_enroll(true);
+	assert(!encode(authentication, reliability::reliable, &error));
+	credentials->clear_identity_token();
+	credentials->set_enroll(false);
+	credentials->set_access_token("central-access-token");
+	assert(encode(authentication, reliability::reliable, &error));
+	credentials->set_identity_token("token");
+	assert(!encode(authentication, reliability::reliable, &error));
+	credentials->clear_identity_token();
+	credentials->set_access_token(
+	    std::string(max_access_token_size + 1, 'a'));
 	assert(!encode(authentication, reliability::reliable, &error));
 
 	protocol::Envelope profile_envelope;
@@ -576,7 +574,7 @@ int main()
 	    valid_environment;
 	assert(!encode(environment_update, reliability::reliable, &error));
 
-	assert(kcd2o_version == "0.1.2");
+	assert(kcd2o_version == "0.1.3");
 	auto unknown_address_library = *runtime;
 	unknown_address_library.set_address_library_sha256(std::string(64, '0'));
 	assert(is_valid_address_library_identity(unknown_address_library));

@@ -499,7 +499,9 @@ namespace
 			    || !valid_text(request->display_name)
 			    || !valid_text(request->password)
 			    || !valid_text(request->content_hash)
-			    || !valid_text(request->claim_code) || !g_client)
+			    || !valid_text(request->claim_code)
+			    || !valid_text(request->server_id)
+			    || !valid_text(request->account_service_url) || !g_client)
 			{
 				const auto trace_id =
 				    kcd2o::kcse::join_trace::begin_join(
@@ -535,6 +537,8 @@ namespace
 			options.password = request->password;
 			options.content_hash = request->content_hash;
 			options.claim_code = request->claim_code;
+			options.server_id = request->server_id;
+			options.account_service_url = request->account_service_url;
 			return g_client->connect(std::move(options)) ? 1U : 0U;
 		}
 		catch (const std::exception &exception)

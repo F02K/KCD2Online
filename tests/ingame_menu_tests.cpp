@@ -29,6 +29,15 @@ int main()
 	missing_selection.selected_button = "missing";
 	assert(!missing_selection.valid());
 
+	auto information = menu;
+	information.information = information_panel{
+	    "ACCOUNT INFORMATION",
+	    "A readable block of information that is independent of buttons.",
+	    "SCROLL WITH THE MOUSE WHEEL"};
+	assert(information.valid());
+	information.information->body.clear();
+	assert(!information.valid());
+
 	page empty;
 	empty.title = "EMPTY";
 	assert(!empty.valid());

@@ -3,7 +3,7 @@
 Experimental multiplayer for Kingdom Come: Deliverance II.
 
 > [!WARNING]
-> KCD2Online **v0.1.2 is a prototype**, not a production-ready multiplayer mod.
+> KCD2Online **v0.1.3 is a prototype**, not a production-ready multiplayer mod.
 > Expect breaking changes, incomplete world simulation, compatibility limits,
 > and loss of multiplayer-world data while development continues. Use test
 > saves and keep backups of anything important.
@@ -12,7 +12,7 @@ Experimental multiplayer for Kingdom Come: Deliverance II.
 
 | | |
 | --- | --- |
-| Current version | **0.1.2** |
+| Current version | **0.1.3** |
 | Development stage | Prototype / technical preview |
 | Networking | Direct IP, dedicated authoritative server |
 | Platform | Windows x64 |
@@ -28,9 +28,11 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 > NPC synchronization is still unreliable. A known bug can cause the same NPC
 > to spawn multiple times, so NPC sync is not yet suitable for normal play.
 
-## What works in v0.1.2
+## What works in v0.1.3
 
 - Direct-IP client/server connection with authentication and reconnect support
+- Native main-menu onboarding for the anonymous KCD2Online account service,
+  with explicit consent and encrypted local credentials
 - Persistent server sessions and player profiles
 - Remote-player spawning, movement, appearance, equipment, and weapon state
 - Native inventory and equipment reconciliation with rollback
@@ -54,7 +56,9 @@ sync uses high-level intent and optional locomotion targets rather than copying
 engine-private behavior-tree pointers.
 
 The detailed implementation status and current limits are documented in
-[docs/multiplayer.md](docs/multiplayer.md).
+[docs/multiplayer.md](docs/multiplayer.md). The account consent, storage, and
+current authentication boundary are described in
+[docs/account-service.md](docs/account-service.md).
 
 ## Architecture
 
@@ -110,7 +114,7 @@ Every successful build also creates a clean package tree under
 `out/package/<debug|release>/`:
 
 ```text
-client/   install-ready game tree and KCD2Online-Client-v0.1.2.zip
+client/   install-ready game tree and KCD2Online-Client-v0.1.3.zip
 server/   dedicated server, configuration, data, symbols, and audit tool
 tests/    test executables and their symbols only
 SHA256SUMS.txt
@@ -133,8 +137,8 @@ Windows can replace the runtime DLLs.
 
 ## Dedicated server
 
-Copy `server.toml.example` to `server.toml`, select the sandbox `level_id`, and
-start the server:
+Copy `server.toml.example` to `server.toml`, select the sandbox `level_id`, set
+the externally reachable `[auth].public_address`, then start the server:
 
 ```powershell
 KCD2OnlineServer.exe server.toml
@@ -152,6 +156,12 @@ The common retail world IDs are:
 
 The server listens on UDP port `27020` by default. Allow and forward that port
 only when hosting outside the LAN.
+
+On its first start the server registers itself and writes its generated stable
+ID and API key to `server-identity.json`. Keep that file with the server data.
+It then publishes a browser heartbeat every 30 seconds. Only enabled/public
+registrations with a fresh heartbeat are listed. Login tokens are bound to the
+stable backend server ID and introspected before a player profile is loaded.
 
 Persistent session data, player profiles, synchronized world objects, and
 dropped items are stored below `world_directory`. Writes use temporary sibling
@@ -173,8 +183,9 @@ terrain. Native weapon actions are excluded until their runtime path is verified
 
 ## Joining from the game
 
-1. Start KCD2 and choose **Multiplayer** in the main menu or pause menu.
-2. Select **Server**, **Name**, or **Password** to edit the value. Confirm with
+1. Start KCD2 and choose **Multiplayer** in the main menu or pause menu. On the
+   first visit, enable the anonymous KCD2Online identity or decline online play.
+2. Select **Server**, **Server player name**, or **Password** to edit the value. Confirm with
    Enter, cancel with Escape, and paste with Ctrl+V.
 3. Choose **Connect**. No savegame is required: from the title screen the
    server bootstrap starts KCD2's native New Game path directly in the configured

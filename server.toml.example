@@ -23,6 +23,15 @@ movement_tolerance_m = 2.0
 world_directory = "world"
 starter_profile = "starter_profile.toml"
 
+[auth]
+enabled = true
+service_url = "https://api.kingdom-online.cc"
+# Created automatically on first start. Keep this file to retain the stable ID.
+identity_file = "server-identity.json"
+# Public UDP endpoint advertised by the browser. This is the only network value
+# a community host must set; players never enter it themselves.
+public_address = ""
+
 [property]
 # Directory produced by KCD2OnlineGameDataGenerator.exe. On the first start of a
 # world, the server imports property_catalog_<level_id>.pb and keeps a copy in

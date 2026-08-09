@@ -81,6 +81,32 @@ namespace kcd2o::server
 		config.name = (*server)["name"].value_or(config.name);
 		config.password = (*server)["password"].value_or(std::string{});
 		config.max_players = checked_integer(*server, "max_players", config.max_players);
+		if (const auto *auth = document["auth"].as_table())
+		{
+			config.account_auth_enabled = (*auth)["enabled"].value_or(false);
+			config.account_service_url = (*auth)["service_url"].value_or(
+			    config.account_service_url);
+			config.account_server_id = (*auth)["server_id"].value_or(std::string{});
+			config.public_address = (*auth)["public_address"].value_or(std::string{});
+			config.account_identity_file = (*auth)["identity_file"].value_or(
+			    config.account_identity_file.string());
+			if (const auto key = (*auth)["server_key"].value<std::string>())
+				config.account_server_key = *key;
+			if (const auto key_file = (*auth)["server_key_file"].value<std::string>())
+			{
+				auto resolved = std::filesystem::path(*key_file);
+				if (resolved.is_relative())
+					resolved = std::filesystem::absolute(path).parent_path() / resolved;
+				std::ifstream input(resolved);
+				std::getline(input, config.account_server_key);
+				if (config.account_server_key.empty())
+					throw std::runtime_error("could not read [auth].server_key_file");
+			}
+		}
+		if (config.account_identity_file.is_relative())
+			config.account_identity_file =
+			    std::filesystem::absolute(path).parent_path()
+			    / config.account_identity_file;
 		config.level_id = (*server)["level_id"].value_or(std::string{});
 		config.required_content_hash =
 		    (*server)["required_content_hash"].value_or(std::string{});
@@ -276,9 +302,21 @@ namespace kcd2o::server
 		{
 			throw std::runtime_error("server name must contain 1 to 64 bytes");
 		}
-		if (config.max_players == 0 || config.max_players > 8)
+		if (config.max_players == 0)
 		{
-			throw std::runtime_error("max_players must be between 1 and 8");
+			throw std::runtime_error("max_players must be at least 1");
+		}
+		if (config.account_auth_enabled
+		    && (config.account_service_url.empty()
+		        || config.account_server_id.size() > 64
+		        || config.account_server_key.size() > 128
+		        || config.account_server_id.empty() != config.account_server_key.empty()
+		        || config.account_identity_file.empty()
+		        || config.public_address.empty()
+		        || config.public_address.size() > 256))
+		{
+			throw std::runtime_error(
+			    "enabled [auth] requires service_url, identity_file, and public_address; explicit server_id and key must be provided together");
 		}
 		if (config.level_id.empty() || config.level_id.size() > 128)
 		{

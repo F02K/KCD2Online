@@ -90,6 +90,21 @@ int main()
 	assert(is_server_message_allowed(
 	    client_state::applying_profile,
 	    payload::kServerAccepted));
+	assert(is_server_message_early_before_accept(
+	    client_state::applying_profile,
+	    payload::kWorldSnapshot));
+	assert(is_server_message_early_before_accept(
+	    client_state::applying_profile,
+	    payload::kChatBroadcast));
+	assert(!is_server_message_early_before_accept(
+	    client_state::applying_profile,
+	    payload::kServerAccepted));
+	assert(!is_server_message_early_before_accept(
+	    client_state::applying_profile,
+	    payload::kServerEntityControl));
+	assert(!is_server_message_early_before_accept(
+	    client_state::authenticating,
+	    payload::kWorldSnapshot));
 	assert(!is_server_message_allowed(
 	    client_state::loading_sandbox,
 	    payload::kServerAccepted));

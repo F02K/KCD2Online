@@ -87,6 +87,8 @@ namespace kcd2o::kcse
 		copy_text(request.password, options.password);
 		copy_text(request.content_hash, options.content_hash);
 		copy_text(request.claim_code, options.claim_code);
+		copy_text(request.server_id, options.server_id);
+		copy_text(request.account_service_url, options.account_service_url);
 		return api->connect(&request) != 0;
 	}
 

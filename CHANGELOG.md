@@ -8,6 +8,43 @@ changes. Client and server versions must match exactly.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-09
+
+### Added
+
+- Added native main-menu onboarding for the autonomous KCD2Online account
+  service, with explicit consent, device-bound registration, and Windows
+  DPAPI-protected local credentials.
+- Added a public in-game server browser backed by the KCD2Online service. Server
+  favorites and per-server passwords remain encrypted local client preferences.
+- Added autonomous dedicated-server registration, persistent server identities,
+  periodic browser heartbeats, central access-token introspection, and operator
+  controls for hiding or disabling individual servers.
+
+### Changed
+
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.3`.
+- Replaced manual direct-IP joining in the native menu with browser-selected,
+  uniquely identified servers while retaining player-selected in-game names and
+  optional server passwords.
+- Removed the artificial 8- and 1024-player limits. A server now accepts any
+  configured `max_players` value of at least one and remains responsible for its
+  own practical capacity.
+
+### Fixed
+
+- Accepted central KCD2Online access tokens as a valid, mutually exclusive
+  `ClientAuthenticate` credential and applied the backend's 8192-byte token
+  limit on both client and server protocol validation.
+- Prevented realtime player/NPC snapshots and chat traffic on independent lanes
+  from aborting a join when they overtake the reliable `ServerAccepted` message.
+- Displayed detailed multiplayer connection errors in the native information
+  panel and included the offending message and client phase in protocol-close
+  reasons.
+- Decoded escaped line breaks in localized native-UI text so server details and
+  other multiline information panels render real new lines instead of `\\n`.
+
 ## [0.1.2] - 2026-08-09
 
 ### Added

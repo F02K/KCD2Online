@@ -24,8 +24,8 @@ namespace kcd2o
 	constexpr std::uint32_t supported_kcse_game_version = 0x01050600;
 	constexpr std::uint32_t supported_kcse_release_index = 1;
 	constexpr std::size_t max_application_message_size = 64 * 1024;
-	constexpr std::size_t max_players = 8;
 	constexpr std::size_t max_display_name_codepoints = 32;
+	constexpr std::size_t max_access_token_size = 8192;
 	constexpr std::size_t min_display_name_codepoints = 3;
 	constexpr std::size_t max_chat_codepoints = 256;
 	constexpr std::size_t max_avatar_equipment_items = 32;

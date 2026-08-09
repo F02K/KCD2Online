@@ -26,6 +26,8 @@ namespace big::ingame_ui
 		[[nodiscard]] std::uint8_t mode() const noexcept;
 		[[nodiscard]] bool append_button(const button &value) const;
 		[[nodiscard]] bool show(const page &value) const;
+		[[nodiscard]] bool scroll_information(int lines) const;
+		void clear_information() const;
 		void close() const;
 		[[nodiscard]] bool open_root() const;
 
@@ -33,6 +35,8 @@ namespace big::ingame_ui
 		[[nodiscard]] bool call(
 		    const char *function,
 		    const SUIArguments &arguments) const;
+		[[nodiscard]] bool show_information(
+		    const information_panel &value) const;
 
 		void *m_menu{};
 		Offsets::IUIElement *m_element{};

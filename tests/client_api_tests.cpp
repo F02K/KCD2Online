@@ -65,7 +65,7 @@ int main()
 	static_assert(std::is_trivially_copyable_v<client_api>);
 #ifdef _WIN64
 	static_assert(sizeof(fixed_string) == 64);
-	static_assert(sizeof(connect_request) == 516);
+	static_assert(sizeof(connect_request) == 836);
 	static_assert(sizeof(runtime_status) == 424);
 	static_assert(sizeof(client_status_view) == 688);
 	static_assert(sizeof(remote_player_view) == 80);
@@ -91,10 +91,10 @@ int main()
 	    archetypes,
 	    diagnostic_logging};
 	assert(compatible(&valid));
-	static_assert(kcd2o::kcd2o_version == "0.1.2");
+	static_assert(kcd2o::kcd2o_version == "0.1.3");
 	static_assert(kcd2o::kcd2o_version_major == 0);
 	static_assert(kcd2o::kcd2o_version_minor == 1);
-	static_assert(kcd2o::kcd2o_version_patch == 2);
+	static_assert(kcd2o::kcd2o_version_patch == 3);
 
 	auto wrong_version = valid;
 	++wrong_version.version_patch;

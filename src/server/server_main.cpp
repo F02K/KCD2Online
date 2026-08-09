@@ -2,9 +2,11 @@
 #include "multiplayer/protocol.hpp"
 #include "server/server_config.hpp"
 #include "server/server_core.hpp"
+#include "server/backend_client.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <filesystem>
 #include <iostream>
@@ -85,9 +87,51 @@ int main(int argc, char **argv)
 		const auto config_path = argc > 1
 		    ? std::filesystem::path(argv[1])
 		    : std::filesystem::path("server.toml");
-		const auto config = kcd2o::server::load_server_config(config_path);
+		auto config = kcd2o::server::load_server_config(config_path);
 		kcd2o::net::runtime network_runtime;
-		kcd2o::server::server_core core(config);
+		std::unique_ptr<kcd2o::server::backend_client> backend;
+		if (config.account_auth_enabled)
+		{
+			if (config.account_server_id.empty())
+			{
+				auto credentials =
+				    kcd2o::server::load_server_credentials(
+				        config.account_identity_file);
+				if (!credentials)
+				{
+					std::cout << "registering this dedicated server with KCD2Online...\n";
+					kcd2o::server::backend_client registrar(
+					    config.account_service_url, {}, {});
+					credentials = registrar.register_server(
+					    {config.name,
+					     config.public_address,
+					     std::string(kcd2o::kcd2o_version),
+					     0,
+					     config.max_players,
+					     !config.password.empty(),
+					     config.level_id});
+					kcd2o::server::save_server_credentials(
+					    config.account_identity_file,
+					    *credentials);
+					std::cout << "registered as " << credentials->id
+					          << "; identity saved to "
+					          << config.account_identity_file.string() << '\n';
+				}
+				config.account_server_id = credentials->id;
+				config.account_server_key = credentials->api_key;
+			}
+			backend = std::make_unique<kcd2o::server::backend_client>(
+			    config.account_service_url,
+			    config.account_server_id,
+			    config.account_server_key);
+		}
+		kcd2o::server::server_core core(
+		    config,
+		    {},
+		    [&](std::string_view token, std::string &error)
+		    {
+			    return backend ? backend->introspect(token, error) : std::nullopt;
+		    });
 
 		auto console = std::make_shared<command_queue>();
 		std::thread(
@@ -157,6 +201,33 @@ int main(int argc, char **argv)
 		          << ", prototype) listening on " << config.bind_address << ':'
 		          << config.port << " for level " << config.level_id << '\n';
 		print_help();
+		std::atomic<std::uint64_t> published_player_count{};
+		std::jthread heartbeat_worker;
+		if (backend)
+		{
+			heartbeat_worker = std::jthread(
+			    [&](std::stop_token stop)
+			    {
+				    std::mutex wait_mutex;
+				    std::condition_variable_any wait_condition;
+				    do
+				    {
+					    std::string error;
+					    if (!backend->heartbeat(
+					            {config.name,
+					             config.public_address,
+					             std::string(kcd2o::kcd2o_version),
+					             published_player_count.load(std::memory_order_relaxed),
+					             config.max_players,
+					             !config.password.empty(),
+					             config.level_id},
+					            error))
+						    std::cerr << "server browser heartbeat failed: " << error << '\n';
+					    std::unique_lock lock(wait_mutex);
+					    (void)wait_condition.wait_for(lock, stop, 30s, [] { return false; });
+				    } while (!stop.stop_requested());
+			    });
+		}
 
 		bool running = true;
 		const auto tick_duration =
@@ -540,6 +611,9 @@ int main(int argc, char **argv)
 			}
 
 			const auto tick_now = now();
+			published_player_count.store(
+			    static_cast<std::uint64_t>(core.players().size()),
+			    std::memory_order_relaxed);
 			if (tick_now >= next_tick)
 			{
 				core.tick(tick_now);

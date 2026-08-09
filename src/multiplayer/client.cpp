@@ -1,4 +1,7 @@
 #include "multiplayer/client.hpp"
+
+#include "account/account_api.hpp"
+#include "account/account_store.hpp"
 #include "multiplayer/avatar_visual.hpp"
 #include "multiplayer/client_message_gate.hpp"
 #include "multiplayer/world_catalog.hpp"
@@ -1103,6 +1106,18 @@ namespace kcd2o
 						        std::scoped_lock lock(m_state_mutex);
 						        receive_state = m_status.state;
 					        }
+					        if (is_server_message_early_before_accept(
+					                receive_state,
+					                envelope->payload_case()))
+					        {
+						        KCD2Online_JOIN_TRACE(
+						            "join.protocol.early-message-dropped",
+						            std::format(
+						                "message={} state={}",
+						                message_kind,
+						                state_name(receive_state)));
+						        return;
+					        }
 					        if (!is_server_message_allowed(
 					                receive_state,
 					                envelope->payload_case()))
@@ -1117,8 +1132,7 @@ namespace kcd2o
 						        set_state(client_state::closing, violation);
 						        if (transport)
 						        {
-							        transport->abort_connection(
-							            "server message was invalid for client phase");
+							        transport->abort_connection(violation);
 						        }
 						        return;
 					        }
@@ -1194,10 +1208,35 @@ namespace kcd2o
 								        return;
 							        }
 						        }
-						        protocol::Envelope authentication;
-						        auto *message =
-						            authentication.mutable_client_authenticate();
-						        if (!options.claim_code.empty())
+					        protocol::Envelope authentication;
+					        auto *message =
+					            authentication.mutable_client_authenticate();
+					        if (challenge.central_auth_required())
+					        {
+						        if ((!options.server_id.empty()
+						                && options.server_id != server_id)
+						            || options.account_service_url.empty())
+						        {
+							        set_state(client_state::disconnected, "server identity does not match the selected browser entry");
+							        if (transport) transport->abort_connection("server identity mismatch");
+							        return;
+						        }
+						        try
+						        {
+							        account::account_store account_store;
+							        account::account_api account_api(options.account_service_url);
+							        const auto login = account_api.login(account_store.value(), server_id);
+							        message->set_access_token(login.access_token);
+						        }
+						        catch (const std::exception &exception)
+						        {
+							        set_state(client_state::disconnected, std::string("KCD2Online login failed: ") + exception.what());
+							        if (transport) transport->abort_connection("KCD2Online login failed");
+							        return;
+						        }
+						        KCD2Online_JOIN_TRACE("join.handshake.auth.method", "central-account-token");
+					        }
+					        else if (!options.claim_code.empty())
 						        {
 							        message->set_claim_code(options.claim_code);
 							        KCD2Online_JOIN_TRACE(

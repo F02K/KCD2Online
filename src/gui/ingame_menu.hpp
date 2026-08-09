@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -19,6 +20,18 @@ namespace big::ingame_ui
 		int container{};
 	};
 
+	struct information_panel
+	{
+		std::string title;
+		std::string body;
+		std::string scroll_hint;
+
+		[[nodiscard]] bool valid() const noexcept
+		{
+			return !title.empty() && !body.empty();
+		}
+	};
+
 	struct page
 	{
 		std::uint8_t id{};
@@ -28,6 +41,7 @@ namespace big::ingame_ui
 		int style{248};
 		std::string title;
 		std::vector<button> buttons;
+		std::optional<information_panel> information;
 		std::string selected_button;
 		bool finalize{true};
 
@@ -66,8 +80,9 @@ namespace big::ingame_ui
 				if (value.id.empty() || !ids.insert(value.id).second)
 					return false;
 			}
-			return selected_button.empty()
-			    || find_button(selected_button) != nullptr;
+			return (!information || information->valid())
+			    && (selected_button.empty()
+			        || find_button(selected_button) != nullptr);
 		}
 	};
 }

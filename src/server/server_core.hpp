@@ -54,10 +54,14 @@ namespace kcd2o::server
 	{
 	public:
 		using token_generator = std::function<std::string()>;
+		using account_authenticator = std::function<std::optional<std::string>(
+		    std::string_view,
+		    std::string &)>;
 
 		explicit server_core(
 		    server_config config,
-		    token_generator generate_token = {});
+		    token_generator generate_token = {},
+		    account_authenticator authenticate_account = {});
 
 		void on_transport_connected(connection_id connection, time_point now);
 		void on_transport_disconnected(
@@ -307,6 +311,7 @@ namespace kcd2o::server
 
 		server_config m_config;
 		token_generator m_generate_token;
+		account_authenticator m_authenticate_account;
 		world_store m_store;
 		npc_registry m_npcs;
 		property::service m_properties;

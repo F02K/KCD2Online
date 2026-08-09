@@ -28,6 +28,8 @@ namespace kcd2o
 		std::string password;
 		std::string content_hash;
 		std::string claim_code;
+		std::string server_id;
+		std::string account_service_url{"https://api.kingdom-online.cc"};
 	};
 
 	struct chat_entry

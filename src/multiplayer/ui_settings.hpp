@@ -8,6 +8,7 @@ namespace kcd2o
 	{
 		std::string address;
 		std::string display_name;
+		std::string account_service_url;
 
 		void persist_address() const;
 		void persist_display_name() const;

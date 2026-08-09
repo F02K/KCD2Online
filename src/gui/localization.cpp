@@ -80,6 +80,34 @@ namespace big::ingame_ui
 			return true;
 		}
 
+		std::string decode_escapes(std::string_view value)
+		{
+			std::string result;
+			result.reserve(value.size());
+			for (std::size_t index{}; index < value.size(); ++index)
+			{
+				if (value[index] != '\\' || index + 1 >= value.size())
+				{
+					result.push_back(value[index]);
+					continue;
+				}
+				const auto escaped = value[index + 1];
+				switch (escaped)
+				{
+				case 'n': result.push_back('\n'); break;
+				case 'r': result.push_back('\r'); break;
+				case 't': result.push_back('\t'); break;
+				case '\\': result.push_back('\\'); break;
+				default:
+					result.push_back('\\');
+					result.push_back(escaped);
+					break;
+				}
+				++index;
+			}
+			return result;
+		}
+
 		bool load_file(
 		    const std::filesystem::path &path,
 		    std::unordered_map<std::string, std::string> &target,
@@ -124,7 +152,7 @@ namespace big::ingame_ui
 					    + ": expected key=value";
 					return false;
 				}
-				if (!target.emplace(key, value).second)
+				if (!target.emplace(key, decode_escapes(value)).second)
 				{
 					error = path.string() + ":" + std::to_string(line_number)
 					    + ": duplicate key " + std::string(key);

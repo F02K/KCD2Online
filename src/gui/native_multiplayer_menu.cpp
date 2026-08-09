@@ -1,5 +1,7 @@
 #include "gui/native_multiplayer_menu.hpp"
 
+#include "account/account_service.hpp"
+#include "account/server_directory.hpp"
 #include "gui/native_ingame_menu_api.hpp"
 #include "gui/native_ui_localization.hpp"
 
@@ -13,6 +15,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <initializer_list>
 #include <mutex>
 #include <utility>
 
@@ -24,10 +28,10 @@ namespace big::native_multiplayer_menu
 		constexpr std::uint8_t root_ingame_page = 2;
 		constexpr std::uint8_t custom_multiplayer_page = 0xFE;
 		constexpr std::uint8_t custom_death_page = 0xFD;
+		constexpr std::uint8_t custom_account_page = 0xFC;
 
 		constexpr std::string_view multiplayer_button =
 		    "KCD2Online.Multiplayer";
-		constexpr std::string_view address_button = "KCD2Online.Address";
 		constexpr std::string_view name_button = "KCD2Online.Name";
 		constexpr std::string_view password_button = "KCD2Online.Password";
 		constexpr std::string_view connect_button = "KCD2Online.Connect";
@@ -37,11 +41,22 @@ namespace big::native_multiplayer_menu
 		constexpr std::string_view status_button = "KCD2Online.Status";
 		constexpr std::string_view back_button = "KCD2Online.Back";
 		constexpr std::string_view respawn_button = "KCD2Online.Respawn";
+		constexpr std::string_view account_button = "KCD2Online.Account";
+		constexpr std::string_view account_accept_button = "KCD2Online.Account.Accept";
+		constexpr std::string_view account_decline_button = "KCD2Online.Account.Decline";
+		constexpr std::string_view account_retry_button = "KCD2Online.Account.Retry";
+		constexpr std::string_view account_continue_button = "KCD2Online.Account.Continue";
+		constexpr std::string_view account_details_button = "KCD2Online.Account.Details";
+		constexpr std::string_view account_copy_button = "KCD2Online.Account.Copy";
+		constexpr std::string_view account_disable_button = "KCD2Online.Account.Disable";
+		constexpr std::string_view refresh_button = "KCD2Online.Servers.Refresh";
+		constexpr std::string_view favorite_button = "KCD2Online.Server.Favorite";
+		constexpr std::string_view browser_back_button = "KCD2Online.Server.Back";
+		constexpr std::string_view server_button_prefix = "KCD2Online.Server.Select.";
 
 		enum class edit_field
 		{
 			none,
-			address,
 			name,
 			password,
 		};
@@ -97,6 +112,53 @@ namespace big::native_multiplayer_menu
 			const std::wstring value(text);
 			GlobalUnlock(handle);
 			return narrow_utf8(value);
+		}
+
+		bool set_clipboard_text(std::string_view text)
+		{
+			const auto length = MultiByteToWideChar(
+			    CP_UTF8,
+			    MB_ERR_INVALID_CHARS,
+			    text.data(),
+			    static_cast<int>(text.size()),
+			    nullptr,
+			    0);
+			if (length <= 0 || !OpenClipboard(nullptr))
+				return false;
+			struct clipboard_guard
+			{
+				~clipboard_guard()
+				{
+					CloseClipboard();
+				}
+			} guard;
+			if (!EmptyClipboard())
+				return false;
+			const auto bytes = static_cast<SIZE_T>(length + 1) * sizeof(wchar_t);
+			const auto handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
+			if (!handle)
+				return false;
+			auto *target = static_cast<wchar_t *>(GlobalLock(handle));
+			if (!target)
+			{
+				GlobalFree(handle);
+				return false;
+			}
+			MultiByteToWideChar(
+			    CP_UTF8,
+			    MB_ERR_INVALID_CHARS,
+			    text.data(),
+			    static_cast<int>(text.size()),
+			    target,
+			    length);
+			target[length] = L'\0';
+			GlobalUnlock(handle);
+			if (!SetClipboardData(CF_UNICODETEXT, handle))
+			{
+				GlobalFree(handle);
+				return false;
+			}
+			return true;
 		}
 
 		void erase_last_utf8_character(std::string &text)
@@ -178,16 +240,22 @@ namespace big::native_multiplayer_menu
 			Offsets::IUIElement *element{};
 			bool listener_attached{};
 			bool page_open{};
+			bool account_page_open{};
 			bool death_page_open{};
+			bool account_details{};
 			bool rebuild_requested{};
 			bool pending_join{};
 			edit_field editing{edit_field::none};
 			std::string edit_original;
 			std::string password;
+			std::string selected_server_id;
 			std::string queued_button;
 			std::string local_feedback_key;
 			std::string last_status_text;
 			std::string presented_error;
+			std::uint64_t last_account_revision{};
+			std::uint64_t last_directory_revision{};
+			bool directory_started{};
 			std::chrono::steady_clock::time_point next_status_poll;
 		};
 
@@ -241,7 +309,6 @@ namespace big::native_multiplayer_menu
 			auto &settings = kcd2o::ui_settings();
 			switch (value.editing)
 			{
-			case edit_field::address: return settings.address;
 			case edit_field::name: return settings.display_name;
 			case edit_field::password: return value.password;
 			case edit_field::none: break;
@@ -252,27 +319,180 @@ namespace big::native_multiplayer_menu
 		void persist_edit(edit_field field)
 		{
 			auto &settings = kcd2o::ui_settings();
-			if (field == edit_field::address)
-				settings.persist_address();
-			else if (field == edit_field::name)
+			if (field == edit_field::name)
 				settings.persist_display_name();
+		}
+
+		std::string short_account_id(std::string_view account_id)
+		{
+			if (account_id.size() <= 18)
+				return std::string(account_id);
+			return std::string(account_id.substr(0, 8)) + "..."
+			    + std::string(account_id.substr(account_id.size() - 4));
+		}
+
+		std::string paragraphs(
+		    std::initializer_list<std::string> values)
+		{
+			std::string result;
+			for (const auto &value : values)
+			{
+				if (value.empty())
+					continue;
+				if (!result.empty())
+					result += "\n\n";
+				result += value;
+			}
+			return result;
+		}
+
+		void show_account_page()
+		{
+			auto &value = menu_state();
+			void *menu{};
+			bool details{};
+			{
+				std::scoped_lock lock(value.mutex);
+				menu = value.menu;
+				details = value.account_details;
+				value.page_open = false;
+				value.death_page_open = false;
+				value.rebuild_requested = false;
+			}
+			ingame_ui::native_menu_api api(menu);
+			const auto account = kcd2o::account::service().status();
+			{
+				std::scoped_lock lock(value.mutex);
+				value.account_page_open = api.available();
+				value.last_account_revision = account.revision;
+			}
+			if (!api.available())
+				return;
+
+			ingame_ui::page page;
+			page.id = custom_account_page;
+			page.height = 420;
+			page.visible_rows = 9;
+			page.title = ingame_ui::localized("account.title");
+			const auto scroll_hint =
+			    ingame_ui::localized("account.info.scroll_hint");
+
+			if (details)
+			{
+				page.information = ingame_ui::information_panel{
+				    ingame_ui::localized("account.info.details_title"),
+				    paragraphs({
+				        ingame_ui::localized("account.info.identity"),
+				        ingame_ui::localized("account.info.no_profile"),
+				        ingame_ui::localized("account.info.device"),
+				        ingame_ui::localized("account.info.required")}),
+				    scroll_hint};
+				page.add_button(std::string(account_details_button), ingame_ui::localized("account.action.details_back"));
+				page.add_button(std::string(back_button), ingame_ui::localized("menu.action.back"), false, 1);
+				page.selected_button = account_details_button;
+				(void)api.show(page);
+				return;
+			}
+
+			using kcd2o::account::account_state;
+			switch (account.state)
+			{
+			case account_state::undecided:
+				page.information = ingame_ui::information_panel{
+				    ingame_ui::localized("account.info.setup_title"),
+				    paragraphs({
+				        ingame_ui::localized("account.info.intro"),
+				        ingame_ui::localized("account.info.no_profile"),
+				        ingame_ui::localized("account.info.consent")}),
+				    scroll_hint};
+				page.add_button(std::string(account_accept_button), ingame_ui::localized("account.action.accept"));
+				page.add_button(std::string(account_decline_button), ingame_ui::localized("account.action.decline"));
+				page.selected_button = account_accept_button;
+				break;
+			case account_state::declined:
+				page.information = ingame_ui::information_panel{
+				    ingame_ui::localized("account.info.disabled_title"),
+				    paragraphs({
+				        ingame_ui::localized("account.status.disabled"),
+				        ingame_ui::localized("account.info.consent")}),
+				    scroll_hint};
+				page.add_button(std::string(account_accept_button), ingame_ui::localized("account.action.enable"));
+				page.selected_button = account_accept_button;
+				break;
+			case account_state::registering:
+				page.information = ingame_ui::information_panel{
+				    ingame_ui::localized("account.info.registering_title"),
+				    ingame_ui::localized("account.status.registering"),
+				    scroll_hint};
+				break;
+			case account_state::ready:
+				page.information = ingame_ui::information_panel{
+				    ingame_ui::localized("account.info.ready_title"),
+				    paragraphs({
+				        ingame_ui::localized("account.status.ready"),
+				        ingame_ui::localized(
+				            "account.id", {{"id", account.account_id}})}),
+				    scroll_hint};
+				page.add_button(
+				    std::string(account_copy_button),
+				    ingame_ui::localized("account.action.copy"),
+				    false,
+				    0,
+				    ingame_ui::localized("account.action.copy_tooltip"));
+				page.add_button(std::string(account_continue_button), ingame_ui::localized("account.action.continue"));
+				page.add_button(std::string(account_disable_button), ingame_ui::localized("account.action.disable"));
+				page.selected_button = account_continue_button;
+				break;
+			case account_state::error:
+				page.information = ingame_ui::information_panel{
+				    ingame_ui::localized("account.info.error_title"),
+				    ingame_ui::localized(
+				        account.error_key.empty()
+				            ? "account.error.service"
+				            : account.error_key),
+				    scroll_hint};
+				page.add_button(std::string(account_retry_button), ingame_ui::localized("account.action.retry"));
+				page.add_button(std::string(account_decline_button), ingame_ui::localized("account.action.decline"));
+				page.selected_button = account_retry_button;
+				break;
+			}
+
+			if (account.state != account_state::registering)
+				page.add_button(std::string(account_details_button), ingame_ui::localized("account.action.details"));
+			page.add_button(std::string(back_button), ingame_ui::localized("menu.action.back"), false, 1);
+			if (page.selected_button.empty())
+				page.selected_button = back_button;
+			(void)api.show(page);
 		}
 
 		void show_multiplayer_page()
 		{
+			if (!kcd2o::account::service().status().multiplayer_enabled())
+			{
+				show_account_page();
+				return;
+			}
 			auto &value = menu_state();
 			void *menu{};
 			edit_field editing{};
 			bool pending_join{};
+			bool start_directory{};
 			std::string password;
+			std::string selected_id;
 			{
 				std::scoped_lock lock(value.mutex);
 				menu = value.menu;
 				editing = value.editing;
 				pending_join = value.pending_join;
 				password = value.password;
+				selected_id = value.selected_server_id;
+				start_directory = !value.directory_started;
+				value.directory_started = true;
+				value.account_page_open = false;
 				value.rebuild_requested = false;
 			}
+			if (start_directory)
+				kcd2o::account::directory().refresh(kcd2o::ui_settings().account_service_url);
 			ingame_ui::native_menu_api api(menu);
 			{
 				std::scoped_lock lock(value.mutex);
@@ -282,6 +502,11 @@ namespace big::native_multiplayer_menu
 				return;
 
 			const auto status = kcd2o::kcse::ui_client().status();
+			const auto directory = kcd2o::account::directory().snapshot();
+			const auto selected = std::ranges::find_if(
+			    directory.servers,
+			    [&](const kcd2o::account::public_server &server)
+			    { return server.id == selected_id; });
 			ingame_ui::page page;
 			page.id = custom_multiplayer_page;
 			page.title = status.error.empty()
@@ -293,14 +518,7 @@ namespace big::native_multiplayer_menu
 			    || status.state != kcd2o::client_state::disconnected;
 			const auto edit_prefix =
 			    ingame_ui::localized("menu.field.edit_prefix") + " ";
-			page.add_button(
-			    std::string(address_button),
-			    (editing == edit_field::address ? edit_prefix : std::string{})
-			        + ingame_ui::localized(
-			            "menu.field.address", {{"value", settings.address}}),
-			    settings_locked,
-			    0,
-			    ingame_ui::localized("menu.field.address.tooltip"));
+			const auto account = kcd2o::account::service().status();
 			page.add_button(
 			    std::string(name_button),
 			    (editing == edit_field::name ? edit_prefix : std::string{})
@@ -309,38 +527,82 @@ namespace big::native_multiplayer_menu
 			    settings_locked,
 			    0,
 			    ingame_ui::localized("menu.field.name.tooltip"));
-			const auto password_text = password.empty()
-			    ? ingame_ui::localized("menu.field.password.empty")
-			    : std::string(password.size(), '*');
-			page.add_button(
-			    std::string(password_button),
-			    (editing == edit_field::password ? edit_prefix : std::string{})
-			        + ingame_ui::localized(
-			            "menu.field.password", {{"value", password_text}}),
-			    settings_locked,
-			    0,
-			    ingame_ui::localized("menu.field.password.tooltip"));
-
-			if (pending_join)
+			if (!status.error.empty())
 			{
-				page.add_button(
-				    std::string(cancel_pending_button),
-				    ingame_ui::localized("menu.action.cancel_pending"));
+				page.information = ingame_ui::information_panel{
+				    "Multiplayer connection failed",
+				    status.error,
+				    ingame_ui::localized("account.info.scroll_hint")};
+				page.add_button(std::string(account_button), ingame_ui::localized("account.summary", {{"id", short_account_id(account.account_id)}}));
+				page.add_button(std::string(refresh_button), ingame_ui::localized("browser.action.refresh"), directory.loading);
+				for (const auto &server : directory.servers)
+				{
+					const auto label = std::string(kcd2o::account::directory().favorite(server.id) ? "* " : "")
+					    + server.name + "  " + std::to_string(server.player_count) + "/" + std::to_string(server.max_players)
+					    + (server.password_protected ? " [LOCK]" : "");
+					page.add_button(std::string(server_button_prefix) + server.id, label, server.player_count >= server.max_players);
+				}
 			}
-			else if (status.state == kcd2o::client_state::disconnected)
+			else if (selected != directory.servers.end())
 			{
-				page.add_button(
-				    std::string(connect_button),
+				const auto &server = *selected;
+				page.information = ingame_ui::information_panel{
+				    server.name,
+				    ingame_ui::localized("browser.details", {
+				        {"players", std::to_string(server.player_count)},
+				        {"max", std::to_string(server.max_players)},
+				        {"level", server.level_id},
+				        {"version", server.version},
+				        {"id", server.id},
+				        {"password", server.password_protected
+				            ? ingame_ui::localized("browser.password.yes")
+				            : ingame_ui::localized("browser.password.no")}}),
+				    ingame_ui::localized("account.info.scroll_hint")};
+				if (server.password_protected)
+				{
+					const auto stored = kcd2o::account::directory().password(server.id);
+					if (password.empty() && stored)
+						password = *stored;
+					const auto password_text = password.empty()
+					    ? ingame_ui::localized("menu.field.password.empty")
+					    : std::string(password.size(), '*');
+					page.add_button(std::string(password_button),
+					    (editing == edit_field::password ? edit_prefix : std::string{})
+					        + ingame_ui::localized("menu.field.password", {{"value", password_text}}),
+					    settings_locked);
+				}
+				page.add_button(std::string(connect_button),
 				    ingame_ui::localized("menu.action.connect"),
-				    settings.address.empty() || settings.display_name.empty(),
-				    0,
-				    ingame_ui::localized("menu.action.connect.tooltip"));
+				    settings_locked || settings.display_name.empty()
+				        || (server.password_protected && password.empty()));
+				page.add_button(std::string(favorite_button),
+				    ingame_ui::localized(kcd2o::account::directory().favorite(server.id)
+				        ? "browser.action.unfavorite" : "browser.action.favorite"));
+				page.add_button(std::string(browser_back_button), ingame_ui::localized("browser.action.back"), false, 1);
+			}
+			else if (status.state != kcd2o::client_state::disconnected)
+			{
+				page.information = ingame_ui::information_panel{ingame_ui::localized("browser.title"), client_state_text(status), {}};
+				page.add_button(std::string(disconnect_button), ingame_ui::localized("menu.action.disconnect"));
 			}
 			else
 			{
-				page.add_button(
-				    std::string(disconnect_button),
-				    ingame_ui::localized("menu.action.disconnect"));
+				page.information = ingame_ui::information_panel{
+				    ingame_ui::localized("browser.title"),
+				    directory.loading ? ingame_ui::localized("browser.loading")
+				        : !directory.error.empty() ? directory.error
+				        : directory.servers.empty() ? ingame_ui::localized("browser.empty")
+				        : ingame_ui::localized("browser.info", {{"count", std::to_string(directory.servers.size())}}),
+				    ingame_ui::localized("account.info.scroll_hint")};
+				page.add_button(std::string(account_button), ingame_ui::localized("account.summary", {{"id", short_account_id(account.account_id)}}));
+				page.add_button(std::string(refresh_button), ingame_ui::localized("browser.action.refresh"), directory.loading);
+				for (const auto &server : directory.servers)
+				{
+					const auto label = std::string(kcd2o::account::directory().favorite(server.id) ? "* " : "")
+					    + server.name + "  " + std::to_string(server.player_count) + "/" + std::to_string(server.max_players)
+					    + (server.password_protected ? " [LOCK]" : "");
+					page.add_button(std::string(server_button_prefix) + server.id, label, server.player_count >= server.max_players);
+				}
 			}
 			std::string local_feedback_key;
 			{
@@ -352,12 +614,8 @@ namespace big::native_multiplayer_menu
 			    : !local_feedback_key.empty()
 			    ? ingame_ui::localized(local_feedback_key)
 			    : client_state_text(status);
-			page.add_button(
-			    std::string(status_button),
-			    status_text,
-			    true,
-			    0,
-			    status_text);
+			if (pending_join)
+				page.add_button(std::string(cancel_pending_button), ingame_ui::localized("menu.action.cancel_pending"));
 			page.add_button(
 			    std::string(back_button),
 			    ingame_ui::localized("menu.action.back"),
@@ -366,9 +624,6 @@ namespace big::native_multiplayer_menu
 
 			switch (editing)
 			{
-			case edit_field::address:
-				page.selected_button = address_button;
-				break;
 			case edit_field::name:
 				page.selected_button = name_button;
 				break;
@@ -376,17 +631,18 @@ namespace big::native_multiplayer_menu
 				page.selected_button = password_button;
 				break;
 			case edit_field::none:
-				page.selected_button = pending_join
-				    ? cancel_pending_button
-				    : status.state == kcd2o::client_state::disconnected
-				    ? address_button
-				    : disconnect_button;
+				page.selected_button = pending_join ? cancel_pending_button
+				    : status.state != kcd2o::client_state::disconnected ? disconnect_button
+				    : !status.error.empty() ? refresh_button
+				    : selected != directory.servers.end() ? connect_button
+				    : refresh_button;
 				break;
 			}
 			(void)api.show(page);
 			{
 				std::scoped_lock lock(value.mutex);
 				value.last_status_text = status_text;
+				value.last_directory_revision = directory.revision;
 				value.next_status_poll =
 				    std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
 			}
@@ -400,6 +656,7 @@ namespace big::native_multiplayer_menu
 				std::scoped_lock lock(value.mutex);
 				menu = value.menu;
 				value.page_open = false;
+				value.account_page_open = false;
 				value.rebuild_requested = false;
 			}
 			ingame_ui::native_menu_api api(menu);
@@ -440,6 +697,7 @@ namespace big::native_multiplayer_menu
 				std::scoped_lock lock(value.mutex);
 				menu = value.menu;
 				value.page_open = false;
+				value.account_page_open = false;
 				value.death_page_open = false;
 				value.rebuild_requested = false;
 			}
@@ -462,6 +720,8 @@ namespace big::native_multiplayer_menu
 				return;
 			std::scoped_lock lock(value.mutex);
 			value.page_open = false;
+			value.account_page_open = false;
+			value.account_details = false;
 			value.editing = edit_field::none;
 			value.rebuild_requested = false;
 		}
@@ -478,24 +738,43 @@ namespace big::native_multiplayer_menu
 
 		void connect_or_defer()
 		{
+			if (!kcd2o::account::service().status().multiplayer_enabled())
+			{
+				show_account_page();
+				return;
+			}
 			auto &value = menu_state();
 			kcd2o::client_options options;
+			std::string selected_id;
 			{
 				std::scoped_lock lock(value.mutex);
 				auto &settings = kcd2o::ui_settings();
-				settings.persist_address();
 				settings.persist_display_name();
-				options.address = settings.address;
 				options.display_name = settings.display_name;
 				options.password = value.password;
+				options.account_service_url = settings.account_service_url;
+				selected_id = value.selected_server_id;
 			}
-
-			if (options.address.empty() || options.display_name.empty())
+			const auto directory = kcd2o::account::directory().snapshot();
+			const auto selected = std::ranges::find_if(directory.servers,
+			    [&](const kcd2o::account::public_server &server) { return server.id == selected_id; });
+			if (selected == directory.servers.end() || options.display_name.empty())
 			{
 				std::scoped_lock lock(value.mutex);
 				value.local_feedback_key = "menu.feedback.required";
 				value.rebuild_requested = true;
 				return;
+			}
+			options.address = selected->address;
+			options.server_id = selected->id;
+			if (selected->password_protected)
+			{
+				if (options.password.empty())
+				{
+					begin_edit(edit_field::password);
+					return;
+				}
+				kcd2o::account::directory().set_password(selected->id, options.password);
 			}
 
 			if (kcd2o::kcse::ui_client().can_start_join())
@@ -504,6 +783,7 @@ namespace big::native_multiplayer_menu
 				std::scoped_lock lock(value.mutex);
 				if (started)
 				{
+					value.selected_server_id.clear();
 					value.password.clear();
 					value.local_feedback_key.clear();
 				}
@@ -527,11 +807,58 @@ namespace big::native_multiplayer_menu
 		{
 			if (button == multiplayer_button)
 			{
+				kcd2o::account::directory().refresh(
+				    kcd2o::ui_settings().account_service_url);
 				show_multiplayer_page();
 			}
-			else if (button == address_button)
+			else if (button == account_button)
 			{
-				begin_edit(edit_field::address);
+				show_account_page();
+			}
+			else if (button == account_accept_button
+			    || button == account_retry_button)
+			{
+				{
+					auto &value = menu_state();
+					std::scoped_lock lock(value.mutex);
+					value.account_details = false;
+				}
+				kcd2o::account::service().accept(
+				    kcd2o::ui_settings().account_service_url);
+				show_account_page();
+			}
+			else if (button == account_decline_button
+			    || button == account_disable_button)
+			{
+				kcd2o::account::service().decline();
+				auto &value = menu_state();
+				{
+					std::scoped_lock lock(value.mutex);
+					value.account_details = false;
+					value.pending_join = false;
+					value.password.clear();
+				}
+				show_account_page();
+			}
+			else if (button == account_continue_button)
+			{
+				show_multiplayer_page();
+			}
+			else if (button == account_details_button)
+			{
+				auto &value = menu_state();
+				{
+					std::scoped_lock lock(value.mutex);
+					value.account_details = !value.account_details;
+				}
+				show_account_page();
+			}
+			else if (button == account_copy_button)
+			{
+				const auto account = kcd2o::account::service().status();
+				if (!account.account_id.empty())
+					(void)set_clipboard_text(account.account_id);
+				show_account_page();
 			}
 			else if (button == name_button)
 			{
@@ -544,6 +871,33 @@ namespace big::native_multiplayer_menu
 			else if (button == connect_button)
 			{
 				connect_or_defer();
+			}
+			else if (button == refresh_button)
+			{
+				kcd2o::account::directory().refresh(kcd2o::ui_settings().account_service_url);
+				show_multiplayer_page();
+			}
+			else if (button == favorite_button)
+			{
+				auto &value = menu_state();
+				std::string id;
+				{ std::scoped_lock lock(value.mutex); id = value.selected_server_id; }
+				if (!id.empty())
+					kcd2o::account::directory().set_favorite(id, !kcd2o::account::directory().favorite(id));
+				show_multiplayer_page();
+			}
+			else if (button == browser_back_button)
+			{
+				auto &value = menu_state();
+				{ std::scoped_lock lock(value.mutex); value.selected_server_id.clear(); value.password.clear(); value.editing = edit_field::none; }
+				show_multiplayer_page();
+			}
+			else if (button.starts_with(server_button_prefix))
+			{
+				const auto id = std::string(button.substr(server_button_prefix.size()));
+				auto &value = menu_state();
+				{ std::scoped_lock lock(value.mutex); value.selected_server_id = id; value.password = kcd2o::account::directory().password(id).value_or(std::string{}); }
+				show_multiplayer_page();
 			}
 			else if (button == disconnect_button)
 			{
@@ -603,7 +957,9 @@ namespace big::native_multiplayer_menu
 				value.element = nullptr;
 				value.listener_attached = false;
 				value.page_open = false;
+				value.account_page_open = false;
 				value.death_page_open = false;
+				value.account_details = false;
 				value.editing = edit_field::none;
 			}
 		}
@@ -619,7 +975,9 @@ namespace big::native_multiplayer_menu
 			if (value.element == sender)
 			{
 				value.page_open = false;
+				value.account_page_open = false;
 				value.death_page_open = false;
+				value.account_details = false;
 				value.editing = edit_field::none;
 			}
 		}
@@ -634,6 +992,7 @@ namespace big::native_multiplayer_menu
 			ingame_ui::native_menu_api api(menu);
 			if (!api.available())
 				return;
+			api.clear_information();
 			auto *element = api.element();
 			auto &value = menu_state();
 			bool attach_listener{};
@@ -648,6 +1007,7 @@ namespace big::native_multiplayer_menu
 				attach_listener = !value.listener_attached;
 				value.listener_attached = true;
 				value.page_open = false;
+				value.account_page_open = false;
 				value.editing = edit_field::none;
 			}
 			if (attach_listener)
@@ -670,11 +1030,33 @@ namespace big::native_multiplayer_menu
 				std::scoped_lock lock(value.mutex);
 				pending = value.pending_join;
 			}
-			const auto label = pending
-			    ? ingame_ui::localized("menu.root.pending")
-			    : status.state == kcd2o::client_state::connected
-			    ? ingame_ui::localized("menu.root.connected")
-			    : ingame_ui::localized("menu.root.multiplayer");
+			std::string label;
+			if (pending)
+				label = ingame_ui::localized("menu.root.pending");
+			else if (status.state == kcd2o::client_state::connected)
+				label = ingame_ui::localized("menu.root.connected");
+			else
+			{
+				using kcd2o::account::account_state;
+				switch (kcd2o::account::service().status().state)
+				{
+				case account_state::undecided:
+					label = ingame_ui::localized("account.root.setup");
+					break;
+				case account_state::declined:
+					label = ingame_ui::localized("account.root.disabled");
+					break;
+				case account_state::registering:
+					label = ingame_ui::localized("account.root.registering");
+					break;
+				case account_state::error:
+					label = ingame_ui::localized("account.root.error");
+					break;
+				case account_state::ready:
+					label = ingame_ui::localized("menu.root.multiplayer");
+					break;
+				}
+			}
 			(void)api.append_button(
 			    {std::string(multiplayer_button),
 			     label,
@@ -743,28 +1125,56 @@ namespace big::native_multiplayer_menu
 				return;
 			}
 
+			bool account_page_open{};
+			std::uint64_t last_account_revision{};
+			{
+				std::scoped_lock lock(value.mutex);
+				account_page_open = value.account_page_open;
+				last_account_revision = value.last_account_revision;
+			}
+			if (account_page_open)
+			{
+				if (kcd2o::account::service().status().revision
+				    != last_account_revision)
+					show_account_page();
+				return;
+			}
+
 			bool pending{};
 			{
 				std::scoped_lock lock(value.mutex);
 				pending = value.pending_join;
 			}
-			if (pending && kcd2o::kcse::ui_client().can_start_join())
+			if (pending
+			    && kcd2o::account::service().status().multiplayer_enabled()
+			    && kcd2o::kcse::ui_client().can_start_join())
 			{
 				kcd2o::client_options options;
+				std::string selected_id;
 				{
 					std::scoped_lock lock(value.mutex);
 					auto &settings = kcd2o::ui_settings();
-					options.address = settings.address;
 					options.display_name = settings.display_name;
 					options.password = value.password;
+					options.account_service_url = settings.account_service_url;
+					selected_id = value.selected_server_id;
 					value.pending_join = false;
 				}
+				const auto directory = kcd2o::account::directory().snapshot();
+				const auto selected = std::ranges::find_if(directory.servers,
+				    [&](const kcd2o::account::public_server &server) { return server.id == selected_id; });
+				if (selected != directory.servers.end())
+				{
+					options.address = selected->address;
+					options.server_id = selected->id;
+				}
 				const auto started =
-				    kcd2o::kcse::ui_client().connect(options);
+				    !options.address.empty() && kcd2o::kcse::ui_client().connect(options);
 				{
 					std::scoped_lock lock(value.mutex);
 					if (started)
 					{
+						value.selected_server_id.clear();
 						value.password.clear();
 						value.local_feedback_key.clear();
 					}
@@ -778,6 +1188,7 @@ namespace big::native_multiplayer_menu
 			}
 
 			bool poll_status{};
+			std::uint64_t shown_directory_revision{};
 			{
 				const auto now = std::chrono::steady_clock::now();
 				std::scoped_lock lock(value.mutex);
@@ -787,6 +1198,13 @@ namespace big::native_multiplayer_menu
 				    && now >= value.next_status_poll;
 				if (poll_status)
 					value.next_status_poll = now + std::chrono::milliseconds(500);
+				shown_directory_revision = value.last_directory_revision;
+			}
+			if (kcd2o::account::directory().snapshot().revision != shown_directory_revision)
+			{
+				std::scoped_lock lock(value.mutex);
+				if (value.page_open)
+					value.rebuild_requested = true;
 			}
 			if (poll_status)
 			{
@@ -820,6 +1238,29 @@ namespace big::native_multiplayer_menu
 		try
 		{
 			auto &value = menu_state();
+			void *account_menu{};
+			{
+				std::scoped_lock lock(value.mutex);
+				if (value.account_page_open)
+					account_menu = value.menu;
+			}
+			if (account_menu)
+			{
+				int scroll_lines{};
+				if (message == WM_MOUSEWHEEL)
+				{
+					const auto wheel = GET_WHEEL_DELTA_WPARAM(wparam);
+					scroll_lines = -(wheel / WHEEL_DELTA) * 3;
+				}
+				else if (message == WM_KEYDOWN && wparam == VK_PRIOR)
+					scroll_lines = -10;
+				else if (message == WM_KEYDOWN && wparam == VK_NEXT)
+					scroll_lines = 10;
+				if (scroll_lines != 0)
+					return ingame_ui::native_menu_api(account_menu)
+					    .scroll_information(scroll_lines);
+			}
+
 			std::scoped_lock lock(value.mutex);
 			if (!value.page_open || value.editing == edit_field::none)
 				return false;
@@ -873,10 +1314,6 @@ namespace big::native_multiplayer_menu
 
 			const wchar_t character = static_cast<wchar_t>(wparam);
 			auto encoded = narrow_utf8(std::wstring_view(&character, 1));
-			if (value.editing == edit_field::address
-			    && (encoded.size() != 1 || encoded[0] <= ' '
-			        || encoded[0] > '~'))
-				return true;
 			if (text.size() + encoded.size() <= limit)
 				text += encoded;
 			value.rebuild_requested = true;

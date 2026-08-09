@@ -62,10 +62,12 @@ namespace kcd2o::server
 
 	server_core::server_core(
 	    server_config config,
-	    token_generator generate_token) :
+	    token_generator generate_token,
+	    account_authenticator authenticate_account) :
 	    m_config(validated_config(std::move(config))),
 	    m_generate_token(generate_token ? std::move(generate_token) : []
 	        { return random_hex(32); }),
+	    m_authenticate_account(std::move(authenticate_account)),
 	    m_store(m_config),
 	    m_npcs(m_store.manifest().level_id, m_config.npc_world_catalog_path),
 	    m_human_npcs_disabled(m_config.disable_human_npcs),
@@ -1155,7 +1157,46 @@ namespace kcd2o::server
 		std::optional<persisted_profile> profile;
 		bool rotate_identity = false;
 		bool enrolled_profile = false;
-		if (!message.identity_token().empty())
+		if (m_config.account_auth_enabled)
+		{
+			std::string auth_error;
+			const auto account_id = m_authenticate_account
+			    ? m_authenticate_account(message.access_token(), auth_error)
+			    : std::nullopt;
+			if (!account_id)
+			{
+				reject(
+				    connection,
+				    protocol::REJECT_REASON_IDENTITY_REQUIRED,
+				    auth_error.empty() ? "KCD2Online authentication failed" : auth_error);
+				return;
+			}
+			profile = m_store.find_by_persistent_id(*account_id);
+			if (!profile)
+			{
+				if (reserved_slots() >= m_config.max_players)
+				{
+					reject(connection, protocol::REJECT_REASON_SERVER_FULL, "server is full");
+					return;
+				}
+				auto created = instantiate_starter_profile(
+				    m_config.starter_profile,
+				    m_store.allocate_player_id(),
+				    pending.display_name,
+				    m_store.manifest().level_id);
+				apply_default_avatar(created);
+				created.set_persistent_id(*account_id);
+				if (m_store.manifest().spawn_valid)
+				{
+					created.set_transform_valid(true);
+					*created.mutable_last_transform() = m_store.manifest().spawn;
+				}
+				profile = persisted_profile{hash_token(*account_id), std::move(created)};
+				enrolled_profile = true;
+				m_store.save_profile(profile->identity_hash, profile->profile);
+			}
+		}
+		else if (!message.identity_token().empty())
 		{
 			profile = m_store.find_by_token(message.identity_token());
 			if (!profile)
@@ -2941,7 +2982,10 @@ namespace kcd2o::server
 	{
 		protocol::Envelope envelope;
 		auto *challenge = envelope.mutable_server_challenge();
-		challenge->set_server_id(m_store.manifest().server_id);
+		challenge->set_server_id(m_config.account_auth_enabled
+		    ? m_config.account_server_id
+		    : m_store.manifest().server_id);
+		challenge->set_central_auth_required(m_config.account_auth_enabled);
 		challenge->set_required_runtime_features(
 		    required_client_runtime_capabilities);
 		challenge->set_negotiated_runtime_features(

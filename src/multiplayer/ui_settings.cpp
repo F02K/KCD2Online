@@ -25,6 +25,16 @@ namespace kcd2o
 			    "Last multiplayer display name.");
 			return entry;
 		}
+
+		auto *account_service_url_entry()
+		{
+			static auto *entry = big::config::general().bind(
+			    "Multiplayer",
+			    "Account Service URL",
+			    std::string{"https://api.kingdom-online.cc"},
+			    "KCD2Online account and server-browser service URL.");
+			return entry;
+		}
 	}
 
 	void multiplayer_ui_settings::persist_address() const
@@ -41,7 +51,8 @@ namespace kcd2o
 	{
 		static multiplayer_ui_settings settings{
 		    address_entry()->get_value(),
-		    display_name_entry()->get_value()};
+		    display_name_entry()->get_value(),
+		    account_service_url_entry()->get_value()};
 		return settings;
 	}
 }

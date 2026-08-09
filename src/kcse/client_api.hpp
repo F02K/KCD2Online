@@ -26,6 +26,8 @@ namespace kcd2o::kcse
 		char password[text_capacity]{};
 		char content_hash[short_text_capacity]{};
 		char claim_code[short_text_capacity]{};
+		char server_id[short_text_capacity]{};
+		char account_service_url[text_capacity]{};
 	};
 
 	struct runtime_status

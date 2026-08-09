@@ -118,6 +118,14 @@ namespace
 		return envelope;
 	}
 
+	protocol::Envelope central_auth(std::string access_token)
+	{
+		protocol::Envelope envelope;
+		envelope.mutable_client_authenticate()->set_access_token(
+		    std::move(access_token));
+		return envelope;
+	}
+
 	protocol::Envelope ready(const protocol::ServerBootstrap &bootstrap)
 	{
 		protocol::Envelope envelope;
@@ -340,8 +348,14 @@ int main()
 		output
 		    << "[server]\n"
 		       "level_id = \"sandbox\"\n"
+		       "max_players = 50000\n"
 		       "world_directory = \"world\"\n"
 		       "disable_non_player_entities = true\n"
+		       "[auth]\n"
+		       "enabled = true\n"
+		       "service_url = \"https://api.kingdom-online.cc\"\n"
+		       "identity_file = \"server-identity.json\"\n"
+		       "public_address = \"203.0.113.20:27020\"\n"
 		       "[property]\n"
 		       "game_data = \"generated-game-data\"\n"
 		       "[environment]\n"
@@ -354,6 +368,7 @@ int main()
 		output.close();
 		const auto parsed = load_server_config(path);
 		assert(parsed.disable_human_npcs);
+		assert(parsed.max_players == 50'000);
 		assert(parsed.disable_animal_npcs);
 		assert(parsed.world_directory
 		    == parsed_config_world.path / "world");
@@ -365,9 +380,59 @@ int main()
 		assert(parsed.weather_transition_seconds == 12);
 		assert(parsed.sleeping_players_required == 3);
 		assert(parsed.sleep_wake_hour == 7.25);
+		assert(parsed.account_auth_enabled);
+		assert(parsed.account_server_id.empty());
+		assert(parsed.account_server_key.empty());
+		assert(parsed.account_identity_file
+		    == parsed_config_world.path / "server-identity.json");
 	}
 
 	temporary_world generated_property_world;
+	temporary_world central_auth_world;
+	{
+		auto config = config_for(central_auth_world.path);
+		config.account_auth_enabled = true;
+		config.account_service_url = "https://api.kingdom-online.cc";
+		config.account_server_id = "central-test";
+		config.account_server_key = "test-key";
+		config.public_address = "127.0.0.1:27020";
+		constexpr std::string_view account_id =
+		    "0c997ac1-8ae3-45b0-9b7f-bf3bd45ea21e";
+		server_core core(
+		    config,
+		    {},
+		    [&](std::string_view token, std::string &error)
+		    {
+			    if (token == "valid-access-token")
+				    return std::optional{std::string(account_id)};
+			    error = "invalid central token";
+			    return std::optional<std::string>{};
+		    });
+		core.on_transport_connected(90, start);
+		core.on_message(90, hello(), start);
+		auto outbound = core.take_outbound();
+		assert(outbound.size() == 1);
+		assert(outbound.front().envelope.server_challenge().central_auth_required());
+		assert(outbound.front().envelope.server_challenge().server_id()
+		    == "central-test");
+		core.on_message(90, central_auth("invalid"), start + 1ms);
+		outbound = core.take_outbound();
+		assert(has_rejection(outbound, 90, protocol::REJECT_REASON_IDENTITY_REQUIRED));
+
+		core.on_transport_connected(91, start + 2ms);
+		core.on_message(91, hello(), start + 2ms);
+		(void)core.take_outbound();
+		core.on_message(91, central_auth("valid-access-token"), start + 3ms);
+		outbound = core.take_outbound();
+		const auto bootstrap = find_bootstrap(outbound, 91);
+		assert(bootstrap.issued_identity_token().empty());
+		assert(bootstrap.profile().persistent_id() == account_id);
+		core.on_message(91, ready(bootstrap), start + 4ms);
+		outbound = core.take_outbound();
+		assert(has_accepted(outbound, 91, 1));
+		assert(core.players().front().persistent_id == account_id);
+	}
+
 	{
 		const auto game_data = generated_property_world.path / "game_data";
 		std::filesystem::create_directories(game_data);

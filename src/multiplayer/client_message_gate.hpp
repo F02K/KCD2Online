@@ -83,6 +83,28 @@ namespace kcd2o
 		}
 	}
 
+	// ServerAccepted is delivered reliably on the ordered-state lane. Traffic
+	// from the realtime and interactive lanes can overtake it after the server
+	// has already promoted the session. Those messages are valid, but the client
+	// must discard them until ServerAccepted completes the local transition.
+	[[nodiscard]] constexpr bool is_server_message_early_before_accept(
+	    client_state state,
+	    protocol::Envelope::PayloadCase payload) noexcept
+	{
+		if (state != client_state::applying_profile)
+			return false;
+		switch (payload)
+		{
+		case protocol::Envelope::kWorldSnapshot:
+		case protocol::Envelope::kChatBroadcast:
+		case protocol::Envelope::kServerNpcSnapshot:
+		case protocol::Envelope::kServerNpcMotion:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	[[nodiscard]] constexpr bool server_message_requires_game_thread(protocol::Envelope::PayloadCase payload) noexcept
 	{
 		using payload_case = protocol::Envelope::PayloadCase;

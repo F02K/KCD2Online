@@ -122,8 +122,7 @@ namespace kcd2o
 			            || !finite(state.behavior_target().y())
 			            || !finite(state.behavior_target().z())))
 			    || state.behavior() == protocol::NPC_BEHAVIOR_UNSPECIFIED
-			    || state.behavior() > protocol::NPC_BEHAVIOR_DEAD
-			    || state.aggro_size() > static_cast<int>(max_players))
+			    || state.behavior() > protocol::NPC_BEHAVIOR_DEAD)
 				return false;
 			std::unordered_set<std::uint64_t> aggro_players;
 			for (const auto &entry : state.aggro())
@@ -323,11 +322,14 @@ namespace kcd2o
 				const auto credential_count =
 				    static_cast<int>(!message.identity_token().empty())
 				    + static_cast<int>(!message.claim_code().empty())
-				    + static_cast<int>(message.enroll());
+				    + static_cast<int>(message.enroll())
+				    + static_cast<int>(!message.access_token().empty());
 				return credential_count == 1
 				    && message.identity_token().size() <= 128
 				    && message.claim_code().size() <= 64
-				    && message.resume_token().size() <= 128;
+				    && message.resume_token().size() <= 128
+				    && message.access_token().size()
+				        <= max_access_token_size;
 			}
 			if (envelope.has_server_bootstrap())
 			{
@@ -471,9 +473,7 @@ namespace kcd2o
 			{
 				const auto &message = envelope.server_sleep_state();
 				return message.revision() > 0
-				    && message.required_players() > 0
-				    && message.required_players() <= max_players
-				    && message.sleeping_players() <= max_players;
+				    && message.required_players() > 0;
 			}
 			if (envelope.has_server_respawn())
 			{
@@ -561,8 +561,7 @@ namespace kcd2o
 			if (envelope.has_server_accepted())
 			{
 				const auto &message = envelope.server_accepted();
-				if (message.players_size() > static_cast<int>(max_players)
-				    || message.profile_snapshot_interval_seconds() < 5
+				if (message.profile_snapshot_interval_seconds() < 5
 				    || message.profile_snapshot_interval_seconds() > 60
 				    || !message.has_avatar_policy()
 				    || !is_valid_avatar_policy(message.avatar_policy())
@@ -607,8 +606,7 @@ namespace kcd2o
 			else if (envelope.has_world_snapshot())
 			{
 				const auto &message = envelope.world_snapshot();
-				if (message.players_size() > static_cast<int>(max_players)
-				    || !message.has_environment()
+				if (!message.has_environment()
 				    || !is_valid_environment_state(message.environment()))
 				{
 					return false;

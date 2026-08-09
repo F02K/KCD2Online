@@ -8,7 +8,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
 
-project(KCD2Online VERSION 0.1.2 LANGUAGES CXX C ASM ASM_MASM)
+project(KCD2Online VERSION 0.1.3 LANGUAGES CXX C ASM ASM_MASM)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/multiplayer/version.hpp.in"
@@ -235,6 +235,7 @@ list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]kcse[/\\\\]plugin\\.cpp$")
 list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]kcse[/\\\\]native_.*\\.cpp$")
 list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]multiplayer[/\\\\]client\\.cpp$")
 list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]multiplayer[/\\\\]identity_store\\.cpp$")
+list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]account[/\\\\].*\\.cpp$")
 list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]gui[/\\\\]native_multiplayer_menu\\.cpp$")
 list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]gui[/\\\\]native_ingame_menu_api\\.cpp$")
 list(FILTER SRC_MAIN EXCLUDE REGEX "[/\\\\]gui[/\\\\]native_ui_localization\\.cpp$")
@@ -376,11 +377,17 @@ target_compile_definitions(KCD2OnlineServerCore PRIVATE
 set_property(TARGET KCD2OnlineServerCore PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
 add_executable(KCD2OnlineServer "${SRC_DIR}/server/server_main.cpp")
+target_sources(KCD2OnlineServer PRIVATE
+    "${SRC_DIR}/server/backend_client.cpp"
+    "${SRC_DIR}/server/backend_client.hpp"
+)
 set_property(TARGET KCD2OnlineServer PROPERTY CXX_STANDARD 23)
 target_include_directories(KCD2OnlineServer PRIVATE "${SRC_DIR}")
 target_link_libraries(KCD2OnlineServer PRIVATE
     KCD2OnlineServerCore
     KCD2OnlineNetworking
+    nlohmann_json::nlohmann_json
+    winhttp
 )
 target_compile_definitions(KCD2OnlineServer PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
@@ -403,6 +410,36 @@ add_custom_command(TARGET KCD2OnlineServer POST_BUILD
 # The native Scaleform menu uses CryEngine ABI types and must therefore be
 # compiled with libKCD2's PCH instead of the main module's ROM/ImGui PCH.
 if(KCD2Online_BUILD_KCSE)
+    add_library(KCD2OnlineAccount STATIC
+        "${SRC_DIR}/account/account_api.cpp"
+        "${SRC_DIR}/account/account_api.hpp"
+        "${SRC_DIR}/account/account_crypto.cpp"
+        "${SRC_DIR}/account/account_crypto.hpp"
+        "${SRC_DIR}/account/account_service.cpp"
+        "${SRC_DIR}/account/account_service.hpp"
+        "${SRC_DIR}/account/account_store.cpp"
+        "${SRC_DIR}/account/account_store.hpp"
+        "${SRC_DIR}/account/server_directory.cpp"
+        "${SRC_DIR}/account/server_directory.hpp"
+    )
+    set_property(TARGET KCD2OnlineAccount PROPERTY CXX_STANDARD 23)
+    set_property(TARGET KCD2OnlineAccount PROPERTY CXX_STANDARD_REQUIRED ON)
+    target_include_directories(KCD2OnlineAccount PUBLIC "${SRC_DIR}")
+    target_compile_definitions(KCD2OnlineAccount PRIVATE
+        "_CRT_SECURE_NO_WARNINGS"
+        "NOMINMAX"
+        "WIN32_LEAN_AND_MEAN"
+    )
+    target_compile_options(KCD2OnlineAccount PRIVATE /utf-8 /W4 /permissive-)
+    target_link_libraries(KCD2OnlineAccount PUBLIC nlohmann_json::nlohmann_json)
+    target_link_libraries(KCD2OnlineAccount PRIVATE
+        advapi32
+        bcrypt
+        crypt32
+        winhttp
+    )
+    set_property(TARGET KCD2OnlineAccount PROPERTY COMPILE_WARNING_AS_ERROR ON)
+
     add_library(KCD2OnlineNativeMultiplayerMenu OBJECT
 		"${SRC_DIR}/gui/ingame_menu.hpp"
 		"${SRC_DIR}/gui/native_ingame_menu_api.cpp"
@@ -435,6 +472,7 @@ if(KCD2Online_BUILD_KCSE)
     )
     target_link_libraries(KCD2OnlineNativeMultiplayerMenu PRIVATE
         kcd_re
+        KCD2OnlineAccount
         KCD2OnlineProtocol
         KCD2OnlineNetworking
     )
@@ -454,7 +492,7 @@ if(KCD2Online_BUILD_KCSE)
     target_compile_definitions(KCD2Online PRIVATE
         "KCD2Online_NATIVE_MULTIPLAYER_MENU"
     )
-    target_link_libraries(KCD2Online PRIVATE kcd_re)
+    target_link_libraries(KCD2Online PRIVATE kcd_re KCD2OnlineAccount)
 endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -579,6 +617,7 @@ if(KCD2Online_BUILD_KCSE)
         KCD2OnlineProtocol
         KCD2OnlineNetworking
         KCD2OnlineNpcCatalog
+        KCD2OnlineAccount
         crypt32
     )
     set_property(TARGET KCD2OnlineKCSEClient PROPERTY COMPILE_WARNING_AS_ERROR ON)
@@ -938,6 +977,16 @@ if (BUILD_TESTING)
     set_property(TARGET KCD2OnlineIdentityStoreTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     add_test(NAME KCD2OnlineIdentityStoreTests COMMAND KCD2OnlineIdentityStoreTests)
 
+    if(TARGET KCD2OnlineAccount)
+        add_executable(KCD2OnlineAccountClientTests
+            "${PROJECT_SOURCE_DIR}/tests/account_client_tests.cpp"
+        )
+        set_property(TARGET KCD2OnlineAccountClientTests PROPERTY CXX_STANDARD 23)
+        target_link_libraries(KCD2OnlineAccountClientTests PRIVATE KCD2OnlineAccount)
+        set_property(TARGET KCD2OnlineAccountClientTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+        add_test(NAME KCD2OnlineAccountClientTests COMMAND KCD2OnlineAccountClientTests)
+    endif()
+
 	add_executable(KCD2OnlineWorldObjectSyncTests
 		"${PROJECT_SOURCE_DIR}/tests/world_object_sync_tests.cpp"
 	)
@@ -975,6 +1024,9 @@ if (BUILD_TESTING)
             KCD2OnlineIdentityStoreTests
 			KCD2OnlineWorldObjectSyncTests
     )
+    if(TARGET KCD2OnlineAccountClientTests)
+        add_dependencies(KCD2OnlineTests KCD2OnlineAccountClientTests)
+    endif()
 endif()
 
 if (KCD2Online_WHGAME_PATH)

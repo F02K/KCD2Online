@@ -30,6 +30,12 @@ namespace kcd2o::server
 		std::string name{"KCD2Online Server"};
 		std::string password;
 		std::uint32_t max_players{8};
+		bool account_auth_enabled{};
+		std::string account_service_url{"https://api.kingdom-online.cc"};
+		std::string account_server_id;
+		std::string account_server_key;
+		std::filesystem::path account_identity_file{"server-identity.json"};
+		std::string public_address;
 		std::string level_id;
 		std::string required_content_hash;
 		std::uint32_t tick_rate{30};

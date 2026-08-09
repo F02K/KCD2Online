@@ -190,6 +190,7 @@ message ServerChallenge {
   string server_id = 1;
   uint64 required_runtime_features = 2;
   uint64 negotiated_runtime_features = 3;
+  bool central_auth_required = 4;
 }
 
 message ClientAuthenticate {
@@ -197,6 +198,7 @@ message ClientAuthenticate {
   string claim_code = 2;
   bool enroll = 3;
   string resume_token = 4;
+  string access_token = 5;
 }
 
 message RpgValue {
