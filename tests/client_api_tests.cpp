@@ -45,6 +45,9 @@ namespace
 		return 0;
 	}
 	void __cdecl diagnostic_logging(std::uint32_t) noexcept {}
+	std::uint32_t __cdecl resource_ui(char *, std::uint32_t) noexcept { return 0; }
+	std::uint32_t __cdecl submit_resource_ui(
+	    const kcd2o::kcse::resource_ui_event_request *) noexcept { return 1; }
 }
 
 int main()
@@ -64,6 +67,8 @@ int main()
 	static_assert(std::is_trivially_copyable_v<chat_entry_view>);
 	static_assert(std::is_standard_layout_v<client_api>);
 	static_assert(std::is_trivially_copyable_v<client_api>);
+	static_assert(std::is_standard_layout_v<resource_ui_event_request>);
+	static_assert(std::is_trivially_copyable_v<resource_ui_event_request>);
 #ifdef _WIN64
 	static_assert(sizeof(fixed_string) == 64);
 	static_assert(sizeof(connect_request) == 836);
@@ -71,7 +76,8 @@ int main()
 	static_assert(sizeof(client_status_view) == 720);
 	static_assert(sizeof(remote_player_view) == 88);
 	static_assert(sizeof(chat_entry_view) == 344);
-	static_assert(sizeof(client_api) == 120);
+	static_assert(sizeof(resource_ui_event_request) == 33028);
+	static_assert(sizeof(client_api) == 136);
 #endif
 
 	client_api valid{
@@ -91,7 +97,9 @@ int main()
 	    players,
 	    chat,
 	    archetypes,
-	    diagnostic_logging};
+	    diagnostic_logging,
+	    resource_ui,
+	    submit_resource_ui};
 	assert(compatible(&valid));
 	static_assert(kcd2o::kcd2o_version == "0.1.4");
 	static_assert(kcd2o::kcd2o_version_major == 0);

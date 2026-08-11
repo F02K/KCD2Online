@@ -1287,6 +1287,26 @@ def package_artifacts(
         for source in server_sources:
             shutil.copy2(source, server_root / source.name)
 
+        # Resource examples and their dedicated authoring documentation are part of
+        # the standalone server distribution. Server operators must not need a
+        # source checkout, KCSE, or a separate Lua installation.
+        for source_name, destination_name in (("resources", "resources"),):
+            source = project_root / "data" / "server" / source_name
+            if source.is_dir():
+                shutil.copytree(source, server_root / destination_name)
+        documentation = project_root / "docs"
+        if documentation.is_dir():
+            docs_root = server_root / "docs"
+            docs_root.mkdir(parents=True, exist_ok=True)
+            for name in (
+                "server-scripting.md",
+                "resource-ui.md",
+                "resource-delivery.md",
+            ):
+                source = documentation / name
+                if source.is_file():
+                    shutil.copy2(source, docs_root / name)
+
         if game_data_dir is not None:
             required_game_data = (
                 "WHGame.dll",

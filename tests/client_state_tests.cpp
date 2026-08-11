@@ -16,6 +16,7 @@ int main()
 	    client_state::connecting,
 	    client_state::preflight,
 	    client_state::authenticating,
+	    client_state::downloading_resources,
 	    client_state::waiting_for_bootstrap,
 	    client_state::loading_sandbox,
 	    client_state::applying_profile,
@@ -35,6 +36,7 @@ int main()
 	    client_state::connecting,
 	    client_state::preflight,
 	    client_state::authenticating,
+	    client_state::downloading_resources,
 	    client_state::loading_sandbox,
 	    client_state::applying_profile,
 	    client_state::connected};
@@ -59,6 +61,12 @@ int main()
 	assert(is_valid_client_transition(
 	    client_state::authenticating,
 	    client_state::waiting_for_bootstrap));
+	assert(is_server_message_allowed(
+	    client_state::authenticating,
+	    payload::kServerResourceManifest));
+	assert(is_server_message_allowed(
+	    client_state::downloading_resources,
+	    payload::kServerResourceChunk));
 	assert(is_valid_client_transition(
 	    client_state::waiting_for_bootstrap,
 	    client_state::loading_sandbox));
@@ -132,6 +140,8 @@ int main()
 	assert(!server_message_requires_game_thread(payload::kServerShutdown));
 	assert(!server_message_requires_game_thread(payload::kPong));
 	assert(!server_message_requires_game_thread(payload::kChatBroadcast));
+	assert(!server_message_requires_game_thread(payload::kServerResourceChunk));
+	assert(!server_message_requires_game_thread(payload::kServerUiUpdate));
 	assert(server_message_requires_game_thread(payload::kServerBootstrap));
 	assert(server_message_requires_game_thread(payload::kWorldSnapshot));
 	return 0;

@@ -9,6 +9,7 @@ namespace kcd2o
 		disconnected,
 		preflight,
 		authenticating,
+		downloading_resources,
 		waiting_for_bootstrap,
 		loading_sandbox,
 		applying_profile,
@@ -29,6 +30,7 @@ namespace kcd2o
 		case client_state::connecting:
 		case client_state::preflight:
 		case client_state::authenticating:
+		case client_state::downloading_resources:
 		case client_state::waiting_for_bootstrap:
 		case client_state::loading_sandbox:
 		case client_state::applying_profile:
@@ -72,6 +74,11 @@ namespace kcd2o
 		case client_state::authenticating:
 			return to == client_state::waiting_for_bootstrap
 			    || to == client_state::loading_sandbox
+			    || to == client_state::downloading_resources
+			    || to == client_state::reconnecting;
+		case client_state::downloading_resources:
+			return to == client_state::waiting_for_bootstrap
+			    || to == client_state::loading_sandbox
 			    || to == client_state::reconnecting;
 		case client_state::waiting_for_bootstrap:
 			return to == client_state::loading_sandbox
@@ -106,6 +113,8 @@ namespace kcd2o
 			return "Protocol preflight";
 		case client_state::authenticating:
 			return "Authenticating";
+		case client_state::downloading_resources:
+			return "Downloading server resources";
 		case client_state::waiting_for_bootstrap:
 			return "Waiting for bootstrap";
 		case client_state::loading_sandbox:

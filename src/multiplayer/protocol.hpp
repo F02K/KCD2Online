@@ -41,6 +41,12 @@ namespace kcd2o
 	constexpr std::size_t voice_viseme_count = 15;
 	constexpr std::size_t max_voice_opus_bytes = 512;
 	constexpr std::size_t max_profile_quick_access_slots = 36;
+	constexpr std::size_t max_client_resources = 128;
+	constexpr std::size_t max_resource_chunk_bytes = 48 * 1024;
+	constexpr std::size_t max_resource_json_bytes = 32 * 1024;
+	constexpr std::size_t max_resource_ui_events_per_second = 60;
+	constexpr std::size_t max_resource_package_bytes = 64 * 1024 * 1024;
+	constexpr std::size_t max_resource_set_bytes = 256 * 1024 * 1024;
 	constexpr std::int64_t max_profile_money = 2'000'000'000;
 	constexpr std::uint32_t money_subunits_per_groschen = 10;
 	constexpr std::uint32_t max_profile_item_count = 1'000'000;

@@ -236,6 +236,18 @@ namespace kcd2o::server
 				}
 			}
 		}
+		if (const auto *resources = document["resources"].as_table())
+		{
+			config.resources_enabled = (*resources)["enabled"].value_or(true);
+			config.resource_directory = (*resources)["directory"].value_or(
+			    config.resource_directory.string());
+			config.script_memory_limit_mb = checked_integer(
+			    *resources, "memory_limit_mb", config.script_memory_limit_mb);
+			config.script_instruction_limit = checked_integer(
+			    *resources, "instruction_limit", config.script_instruction_limit);
+			config.script_error_limit = checked_integer(
+			    *resources, "error_limit", config.script_error_limit);
+		}
 		config.world_directory =
 		    (*server)["world_directory"].value_or(config.world_directory.string());
 		config.starter_profile_path =
@@ -266,6 +278,12 @@ namespace kcd2o::server
 			config.starter_profile_path =
 			    std::filesystem::absolute(path).parent_path()
 			    / config.starter_profile_path;
+		}
+		if (config.resource_directory.is_relative())
+		{
+			config.resource_directory =
+			    std::filesystem::absolute(path).parent_path()
+			    / config.resource_directory;
 		}
 		if (!config.property_game_data.empty()
 		    && config.property_game_data.is_relative())
@@ -448,6 +466,17 @@ namespace kcd2o::server
 		if (config.world_directory.empty())
 		{
 			throw std::runtime_error("world_directory must not be empty");
+		}
+		if (config.resources_enabled && config.resource_directory.empty())
+			throw std::runtime_error("[resources].directory must not be empty");
+		if (config.script_memory_limit_mb < 4
+		    || config.script_memory_limit_mb > 256
+		    || config.script_instruction_limit < 10'000
+		    || config.script_instruction_limit > 10'000'000
+		    || config.script_error_limit == 0
+		    || config.script_error_limit > 100)
+		{
+			throw std::runtime_error("resource script limits are invalid");
 		}
 		validate_starter_profile_template(config.starter_profile);
 		protocol::AvatarPolicy avatar_policy;

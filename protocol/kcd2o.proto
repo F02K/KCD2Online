@@ -828,6 +828,93 @@ message PlayerAvatarUpdated {
   AvatarDescriptor avatar = 2;
 }
 
+// Client resources are immutable, content-addressed archives. Server-only
+// resources are deliberately absent from this manifest and never leave the
+// dedicated server.
+message ClientResourcePackage {
+  string resource_id = 1;
+  string version = 2;
+  string sha256 = 3;
+  uint64 size = 4;
+  string client_entry = 5;
+}
+
+message ServerResourceManifest {
+  uint64 generation = 1;
+  string root_sha256 = 2;
+  repeated ClientResourcePackage packages = 3;
+  uint64 total_size = 4;
+}
+
+message ClientResourceRequest {
+  string root_sha256 = 1;
+  string package_sha256 = 2;
+  uint64 offset = 3;
+}
+
+message ServerResourceChunk {
+  string package_sha256 = 1;
+  uint64 offset = 2;
+  uint64 total_size = 3;
+  bytes data = 4;
+  bool final = 5;
+}
+
+message ClientResourcesReady {
+  uint64 generation = 1;
+  string root_sha256 = 2;
+}
+
+// Resource events are declared by resource.toml and validated in both
+// directions before they reach Lua.
+message ClientResourceEvent {
+  string resource_id = 1;
+  string event = 2;
+  string payload_json = 3;
+  uint64 sequence = 4;
+}
+
+message ServerResourceEvent {
+  string resource_id = 1;
+  string event = 2;
+  string payload_json = 3;
+  uint64 sequence = 4;
+}
+
+enum ServerUiOperation {
+  SERVER_UI_OPERATION_UNSPECIFIED = 0;
+  SERVER_UI_OPERATION_SHOW = 1;
+  SERVER_UI_OPERATION_PATCH = 2;
+  SERVER_UI_OPERATION_CLOSE = 3;
+  SERVER_UI_OPERATION_TOAST = 4;
+}
+
+message ServerUiUpdate {
+  string resource_id = 1;
+  string document_id = 2;
+  ServerUiOperation operation = 3;
+  string payload_json = 4;
+  uint64 revision = 5;
+}
+
+message ServerInputBinding {
+  string resource_id = 1;
+  string action_id = 2;
+  string label = 3;
+  uint32 default_virtual_key = 4;
+  bool unregister = 5;
+}
+
+message ClientUiEvent {
+  string resource_id = 1;
+  string document_id = 2;
+  string control_id = 3;
+  string event = 4;
+  string payload_json = 5;
+  uint64 revision = 6;
+  uint64 sequence = 7;
+}
+
 message Envelope {
   oneof payload {
     ClientHello client_hello = 1;
@@ -887,5 +974,14 @@ message Envelope {
     ServerNpcGameplayUpdate server_npc_gameplay_update = 55;
     ClientVoiceFrame client_voice_frame = 56;
     ServerVoiceFrame server_voice_frame = 57;
+    ServerResourceManifest server_resource_manifest = 58;
+    ClientResourceRequest client_resource_request = 59;
+    ServerResourceChunk server_resource_chunk = 60;
+    ClientResourcesReady client_resources_ready = 61;
+    ClientResourceEvent client_resource_event = 62;
+    ServerResourceEvent server_resource_event = 63;
+    ServerUiUpdate server_ui_update = 64;
+    ServerInputBinding server_input_binding = 65;
+    ClientUiEvent client_ui_event = 66;
   }
 }

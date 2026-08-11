@@ -1,0 +1,27 @@
+[resource]
+id = "event_example"
+version = "1.0.0"
+api_version = 1
+dependencies = []
+
+[server]
+entry = "server/main.lua"
+capabilities = ["chat"]
+
+[client]
+entry = "client/main.lua"
+capabilities = []
+
+[[events]]
+name = "hello"
+direction = "server_to_client"
+reliable = true
+max_per_second = 2
+max_bytes = 1024
+
+[[events]]
+name = "hello_ack"
+direction = "client_to_server"
+reliable = true
+max_per_second = 2
+max_bytes = 1024

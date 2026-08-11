@@ -1,6 +1,7 @@
 #include "gui.hpp"
 
 #include "gui/ingame_chat.hpp"
+#include "gui/server_ui.hpp"
 #include "gui/native_multiplayer_menu.hpp"
 #include "gui/renderer.hpp"
 #include "hooks/hooking.hpp"
@@ -2251,6 +2252,9 @@ namespace big
 		ingame_chat::on_window_message(
 		    msg,
 		    static_cast<std::uintptr_t>(wparam));
+		server_ui::on_window_message(msg,
+		    static_cast<std::uintptr_t>(wparam),
+		    static_cast<std::intptr_t>(lparam));
 
 		if (msg == WM_RBUTTONUP)
 		{

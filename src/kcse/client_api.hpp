@@ -12,6 +12,7 @@ namespace kcd2o::kcse
 
 	inline constexpr std::size_t short_text_capacity = 64;
 	inline constexpr std::size_t text_capacity = 256;
+	inline constexpr std::size_t resource_payload_capacity = 32 * 1024;
 
 	struct fixed_string
 	{
@@ -94,6 +95,16 @@ namespace kcd2o::kcse
 		std::uint32_t network_role{};
 	};
 
+	struct resource_ui_event_request
+	{
+		std::uint32_t struct_size{sizeof(resource_ui_event_request)};
+		char resource_id[short_text_capacity]{};
+		char document_id[short_text_capacity]{};
+		char control_id[short_text_capacity]{};
+		char event[short_text_capacity]{};
+		char payload_json[resource_payload_capacity]{};
+	};
+
 	struct client_api
 	{
 		std::uint32_t struct_size{};
@@ -124,6 +135,11 @@ namespace kcd2o::kcse
 		    std::uint32_t capacity) noexcept{};
 		void(__cdecl *set_diagnostic_logging)(
 		    std::uint32_t enabled) noexcept{};
+		std::uint32_t(__cdecl *copy_resource_ui_json)(
+		    char *output,
+		    std::uint32_t capacity) noexcept{};
+		std::uint32_t(__cdecl *submit_resource_ui_event)(
+		    const resource_ui_event_request *request) noexcept{};
 	};
 
 	using query_client = const client_api *(__cdecl *)(
@@ -142,6 +158,8 @@ namespace kcd2o::kcse
 		    && api->attempt_sleep && api->request_respawn
 		    && api->copy_players && api->copy_chat
 		    && api->copy_avatar_archetypes
-		    && api->set_diagnostic_logging;
+		    && api->set_diagnostic_logging
+		    && api->copy_resource_ui_json
+		    && api->submit_resource_ui_event;
 	}
 }

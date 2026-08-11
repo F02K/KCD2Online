@@ -17,6 +17,7 @@ namespace kcd2o
 		{
 			return state == client_state::preflight
 			    || state == client_state::authenticating
+			    || state == client_state::downloading_resources
 			    || state == client_state::waiting_for_bootstrap
 			    || state == client_state::loading_sandbox
 			    || state == client_state::applying_profile
@@ -37,6 +38,11 @@ namespace kcd2o
 		case client_state::preflight:
 			return payload == payload_case::kServerChallenge;
 		case client_state::authenticating:
+			return payload == payload_case::kServerBootstrap
+			    || payload == payload_case::kServerResourceManifest;
+		case client_state::downloading_resources:
+			return payload == payload_case::kServerResourceChunk
+			    || payload == payload_case::kServerBootstrap;
 		case client_state::waiting_for_bootstrap:
 			return payload == payload_case::kServerBootstrap;
 		case client_state::applying_profile:
@@ -75,6 +81,9 @@ namespace kcd2o
 			case payload_case::kServerNpcMotion:
 			case payload_case::kServerNpcGameplayUpdate:
 			case payload_case::kServerVoiceFrame:
+			case payload_case::kServerResourceEvent:
+			case payload_case::kServerUiUpdate:
+			case payload_case::kServerInputBinding:
 				return true;
 			default:
 				return false;
@@ -118,6 +127,11 @@ namespace kcd2o
 		case payload_case::kPong:
 		case payload_case::kChatBroadcast:   return false;
 		case payload_case::kServerVoiceFrame: return false;
+		case payload_case::kServerResourceManifest:
+		case payload_case::kServerResourceChunk:
+		case payload_case::kServerResourceEvent:
+		case payload_case::kServerUiUpdate:
+		case payload_case::kServerInputBinding: return false;
 		default:                             return true;
 		}
 	}

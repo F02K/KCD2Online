@@ -874,6 +874,52 @@ namespace
 		}
 	}
 
+	std::uint32_t __cdecl abi_copy_resource_ui_json(
+	    char *output, std::uint32_t capacity) noexcept
+	{
+		try
+		{
+			if (!g_client)
+				return 0;
+			const auto json = g_client->resource_ui_json();
+			const auto required = narrow_count(json.size() + 1);
+			if (!output || capacity == 0)
+				return required;
+			if (capacity < required)
+				return required;
+			std::memcpy(output, json.data(), json.size());
+			output[json.size()] = '\0';
+			return required;
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_submit_resource_ui_event(
+	    const kcd2o::kcse::resource_ui_event_request *request) noexcept
+	{
+		try
+		{
+			if (!g_client || !request
+			    || request->struct_size != sizeof(*request)
+			    || !valid_text(request->resource_id)
+			    || !valid_text(request->document_id)
+			    || !valid_text(request->control_id)
+			    || !valid_text(request->event)
+			    || !valid_text(request->payload_json))
+				return 0;
+			return g_client->send_resource_ui_event(request->resource_id,
+			    request->document_id, request->control_id, request->event,
+			    request->payload_json) ? 1U : 0U;
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
 	void __cdecl abi_set_diagnostic_logging(std::uint32_t enabled) noexcept
 	{
 		kcd2o::kcse::join_trace::set_diagnostics_enabled(enabled != 0);
@@ -896,7 +942,9 @@ namespace
 	    abi_copy_players,
 	    abi_copy_chat,
 	    abi_copy_avatar_archetypes,
-	    abi_set_diagnostic_logging};
+	    abi_set_diagnostic_logging,
+	    abi_copy_resource_ui_json,
+	    abi_submit_resource_ui_event};
 }
 
 KCSE_EXPORT KCSE::PluginVersionData KCSEPlugin_Version = {

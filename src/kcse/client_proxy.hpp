@@ -29,6 +29,13 @@ namespace kcd2o::kcse
 		[[nodiscard]] std::vector<kcd2o::remote_player_view>
 		remote_players() const;
 		[[nodiscard]] std::vector<chat_entry> chat_history() const;
+		[[nodiscard]] std::string resource_ui_json() const;
+		[[nodiscard]] bool submit_resource_ui_event(
+		    std::string resource,
+		    std::string document,
+		    std::string control,
+		    std::string event,
+		    std::string payload_json = "{}") const;
 
 	private:
 		[[nodiscard]] const client_api *load() const noexcept;

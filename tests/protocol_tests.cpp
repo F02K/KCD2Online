@@ -608,6 +608,32 @@ int main()
 	valid_environment.set_world_time_seconds(-1.0);
 	assert(!is_valid_environment_state(valid_environment));
 
+	protocol::Envelope resource_manifest;
+	auto *manifest = resource_manifest.mutable_server_resource_manifest();
+	manifest->set_generation(1);
+	manifest->set_root_sha256(std::string(64, 'a'));
+	auto *resource_package = manifest->add_packages();
+	resource_package->set_resource_id("example");
+	resource_package->set_version("1.0.0");
+	resource_package->set_sha256(std::string(64, 'b'));
+	resource_package->set_size(10);
+	resource_package->set_client_entry("client/main.lua");
+	manifest->set_total_size(10);
+	assert(encode(resource_manifest, reliability::reliable, &error));
+	resource_package->set_client_entry("../server/main.lua");
+	assert(!encode(resource_manifest, reliability::reliable, &error));
+
+	protocol::Envelope ui_update;
+	auto *ui = ui_update.mutable_server_ui_update();
+	ui->set_resource_id("example");
+	ui->set_document_id("main");
+	ui->set_operation(protocol::SERVER_UI_OPERATION_SHOW);
+	ui->set_payload_json("{\"title\":\"Example\"}");
+	ui->set_revision(1);
+	assert(encode(ui_update, reliability::reliable, &error));
+	ui->set_payload_json(std::string(max_resource_json_bytes + 1, 'x'));
+	assert(!encode(ui_update, reliability::reliable, &error));
+
 	assert(kcd2o_version == "0.1.4");
 	auto unknown_address_library = *runtime;
 	unknown_address_library.set_address_library_sha256(std::string(64, '0'));

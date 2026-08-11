@@ -2,11 +2,14 @@
 
 #include "property/catalog.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <charconv>
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 
@@ -76,6 +79,9 @@ namespace kcd2o::server
 	    token_generator generate_token,
 	    account_authenticator authenticate_account) :
 	    m_config(validated_config(std::move(config))),
+	    m_resources(m_config.resources_enabled
+	        ? resources::load_resource_set(m_config.resource_directory)
+	        : resources::resource_set{}),
 	    m_generate_token(generate_token ? std::move(generate_token) : []
 	        { return random_hex(32); }),
 	    m_authenticate_account(std::move(authenticate_account)),
@@ -312,6 +318,62 @@ namespace kcd2o::server
 			case protocol::Envelope::kClientVoiceFrame:
 				handle_voice(*player, envelope.client_voice_frame(), now);
 				break;
+			case protocol::Envelope::kClientResourceEvent:
+			{
+				std::string error;
+				const auto &message = envelope.client_resource_event();
+				const auto *definition = m_resources.definition(message.resource_id());
+				const auto event = definition
+				    ? std::ranges::find(definition->events, message.event(),
+				          &resources::event_definition::name)
+				    : std::vector<resources::event_definition>::const_iterator{};
+				if (!definition || event == definition->events.end())
+				{
+					reject(connection, protocol::REJECT_REASON_MALFORMED_MESSAGE,
+					    "unknown resource event");
+					break;
+				}
+				const auto event_key =
+				    message.resource_id() + ":" + message.event();
+				auto &last_sequence = player->last_resource_sequences[event_key];
+				if (message.sequence() <= last_sequence)
+					break;
+				last_sequence = message.sequence();
+				auto &times = player->resource_event_times[event_key];
+				const auto cutoff = now - std::chrono::seconds(1);
+				while (!times.empty() && times.front() < cutoff) times.pop_front();
+				if (times.size() >= event->max_per_second)
+					break;
+				times.push_back(now);
+				if (!m_scripts || !m_scripts->client_event(player->id,
+				        message.resource_id(), message.event(),
+				        message.payload_json(), error))
+					reject(connection, protocol::REJECT_REASON_MALFORMED_MESSAGE,
+					    error.empty() ? "invalid resource event" : error);
+				break;
+			}
+			case protocol::Envelope::kClientUiEvent:
+			{
+				std::string error;
+				const auto &message = envelope.client_ui_event();
+				if (message.sequence() <= player->last_ui_sequence)
+					break;
+				player->last_ui_sequence = message.sequence();
+				auto &times = player->resource_event_times[
+				    message.resource_id() + ":$ui"];
+				const auto cutoff = now - std::chrono::seconds(1);
+				while (!times.empty() && times.front() < cutoff) times.pop_front();
+				if (times.size() >= max_resource_ui_events_per_second)
+					break;
+				times.push_back(now);
+				if (!m_scripts || !m_scripts->ui_event(player->id,
+				        message.resource_id(), message.document_id(),
+				        message.control_id(), message.event(),
+				        message.payload_json(), error))
+					reject(connection, protocol::REJECT_REASON_MALFORMED_MESSAGE,
+					    error.empty() ? "invalid resource UI event" : error);
+				break;
+			}
 			default:
 				reject(
 				    connection,
@@ -373,6 +435,15 @@ namespace kcd2o::server
 				    now);
 			}
 			break;
+		case pending_stage::resources:
+			if (envelope.has_client_resource_request())
+				handle_resource_request(connection, envelope.client_resource_request());
+			else if (envelope.has_client_resources_ready())
+				handle_resources_ready(connection, envelope.client_resources_ready());
+			else
+				reject(connection, protocol::REJECT_REASON_MALFORMED_MESSAGE,
+				    "client must finish resource synchronization first");
+			break;
 		case pending_stage::waiting_for_initializer:
 		case pending_stage::loading_world:
 			if (envelope.has_client_world_ready())
@@ -404,13 +475,16 @@ namespace kcd2o::server
 	{
 		advance_environment_clock(now);
 		++m_server_tick;
+		if (m_scripts)
+			m_scripts->tick(now);
 		tick_dummies(now);
 		std::vector<connection_id> expired_pending;
 		for (const auto &[connection, pending] : m_pending)
 		{
 			const auto handshake_pending =
 			    pending.stage == pending_stage::hello
-			    || pending.stage == pending_stage::authenticate;
+			    || pending.stage == pending_stage::authenticate
+			    || pending.stage == pending_stage::resources;
 			if (handshake_pending && now >= pending.deadline)
 			{
 				expired_pending.push_back(connection);
@@ -676,6 +750,58 @@ namespace kcd2o::server
 				begin_dummy_input(player, now);
 			}
 		}
+		if (m_config.resources_enabled)
+		{
+			scripting::server_resource_callbacks callbacks;
+			callbacks.log = [](std::string message)
+			{
+				std::clog << "[resource] " << message << '\n';
+			};
+			callbacks.players = [this]
+			{
+				std::vector<scripting::script_player> result;
+				for (const auto &player : players())
+					result.push_back({player.id, player.display_name,
+					    player.connected, player.network_role});
+				return result;
+			};
+			callbacks.say = [this](std::string text, std::optional<std::uint64_t> target)
+			{
+				if (!target)
+					server_say(std::move(text), m_current_time);
+				else if (auto found = m_players.find(*target);
+				         found != m_players.end() && found->second.connection)
+					send_system_message(found->second, std::move(text), m_current_time);
+			};
+			callbacks.kick = [this](std::uint64_t player, std::string reason)
+			{
+				kick(player, std::move(reason), m_current_time);
+			};
+			callbacks.send_event = [this](std::string_view resource,
+			    std::optional<std::uint64_t> target, std::string_view event,
+			    const nlohmann::json &payload, bool reliable)
+			{
+				send_resource_event(resource, target, event, payload, reliable);
+			};
+			callbacks.send_ui = [this](std::string_view resource, std::uint64_t target,
+			    std::string_view document, std::string_view operation,
+			    const nlohmann::json &payload)
+			{
+				send_resource_ui(resource, target, document, operation, payload);
+			};
+			callbacks.send_binding = [this](std::string_view resource,
+			    std::uint64_t target, std::string_view action, std::string_view label,
+			    std::uint32_t key, bool unregister)
+			{
+				send_resource_binding(resource, target, action, label, key, unregister);
+			};
+			m_scripts = std::make_unique<scripting::server_resource_runtime>(
+			    m_resources,
+			    static_cast<std::size_t>(m_config.script_memory_limit_mb) * 1024 * 1024,
+			    m_config.script_instruction_limit, m_config.script_error_limit,
+			    std::move(callbacks));
+			m_scripts->start();
+		}
 	}
 
 	void server_core::begin_dummy_input(
@@ -756,6 +882,68 @@ namespace kcd2o::server
 	void server_core::server_say(std::string text, time_point now)
 	{
 		broadcast_system_message(std::move(text), now);
+	}
+
+	void server_core::send_resource_event(std::string_view resource,
+	    std::optional<player_id> target, std::string_view event,
+	    const nlohmann::json &payload, bool reliable)
+	{
+		protocol::Envelope envelope;
+		auto *message = envelope.mutable_server_resource_event();
+		message->set_resource_id(resource);
+		message->set_event(event);
+		message->set_payload_json(payload.dump());
+		message->set_sequence(++m_resource_sequence);
+		if (target)
+		{
+			const auto found = m_players.find(*target);
+			if (found != m_players.end() && found->second.connection)
+				queue(*found->second.connection, std::move(envelope),
+				    reliable ? reliability::reliable : reliability::unreliable);
+		}
+		else
+		{
+			broadcast(std::move(envelope),
+			    reliable ? reliability::reliable : reliability::unreliable);
+		}
+	}
+
+	void server_core::send_resource_ui(std::string_view resource,
+	    player_id target, std::string_view document, std::string_view operation,
+	    const nlohmann::json &payload)
+	{
+		const auto found = m_players.find(target);
+		if (found == m_players.end() || !found->second.connection)
+			return;
+		protocol::Envelope envelope;
+		auto *message = envelope.mutable_server_ui_update();
+		message->set_resource_id(resource);
+		message->set_document_id(document);
+		message->set_payload_json(payload.dump());
+		message->set_revision(++m_resource_ui_revision);
+		message->set_operation(operation == "show"
+		    ? protocol::SERVER_UI_OPERATION_SHOW
+		    : operation == "patch" ? protocol::SERVER_UI_OPERATION_PATCH
+		    : operation == "close" ? protocol::SERVER_UI_OPERATION_CLOSE
+		    : protocol::SERVER_UI_OPERATION_TOAST);
+		queue(*found->second.connection, std::move(envelope), reliability::reliable);
+	}
+
+	void server_core::send_resource_binding(std::string_view resource,
+	    player_id target, std::string_view action, std::string_view label,
+	    std::uint32_t key, bool unregister)
+	{
+		const auto found = m_players.find(target);
+		if (found == m_players.end() || !found->second.connection)
+			return;
+		protocol::Envelope envelope;
+		auto *message = envelope.mutable_server_input_binding();
+		message->set_resource_id(resource);
+		message->set_action_id(action);
+		message->set_label(label);
+		message->set_default_virtual_key(key);
+		message->set_unregister(unregister);
+		queue(*found->second.connection, std::move(envelope), reliability::reliable);
 	}
 
 	bool server_core::grant_permission(
@@ -1514,6 +1702,22 @@ namespace kcd2o::server
 		// pending session, so an authenticated client may wait for the engine's
 		// actual level-complete signal without a wall-clock deadline.
 		pending.deadline = time_point::max();
+		if (!m_resources.client_packages.empty())
+		{
+			pending.stage = pending_stage::resources;
+			pending.deadline = now
+			    + std::chrono::seconds(m_config.handshake_timeout_seconds)
+			    + std::chrono::minutes(5);
+			send_resource_manifest(connection);
+			return;
+		}
+		begin_bootstrap(connection);
+	}
+
+	void server_core::begin_bootstrap(connection_id connection)
+	{
+		auto &pending = m_pending.at(connection);
+		pending.deadline = time_point::max();
 		if (m_store.manifest().spawn_valid)
 		{
 			pending.stage = pending_stage::loading_world;
@@ -1642,6 +1846,9 @@ namespace kcd2o::server
 		    m_players.insert_or_assign(session.id, std::move(session));
 		(void)inserted;
 		send_accepted(iterator->second);
+		if (m_scripts)
+			m_scripts->player_joined({iterator->second.id,
+			    iterator->second.display_name, true, iterator->second.network_role});
 		send_world_objects(connection);
 		send_world_items(connection);
 		protocol::Envelope joined;
@@ -2671,6 +2878,8 @@ namespace kcd2o::server
 			text.remove_suffix(1);
 		if (text.empty())
 			return;
+		if (m_scripts)
+			m_scripts->chat(player.id, text);
 
 		auto split_command = [](std::string_view input)
 		{
@@ -2812,6 +3021,70 @@ namespace kcd2o::server
 				    envelope,
 				    reliability::unreliable);
 		}
+	}
+
+	void server_core::send_resource_manifest(connection_id connection)
+	{
+		protocol::Envelope envelope;
+		auto *manifest = envelope.mutable_server_resource_manifest();
+		manifest->set_generation(m_resources.generation);
+		manifest->set_root_sha256(m_resources.root_hash);
+		std::uint64_t total{};
+		for (const auto &package : m_resources.client_packages)
+		{
+			auto *entry = manifest->add_packages();
+			entry->set_resource_id(package.resource_id);
+			entry->set_version(package.version);
+			entry->set_sha256(package.hash);
+			entry->set_size(package.bytes.size());
+			entry->set_client_entry(package.client_entry);
+			total += package.bytes.size();
+		}
+		manifest->set_total_size(total);
+		queue(connection, std::move(envelope), reliability::reliable);
+	}
+
+	void server_core::handle_resource_request(connection_id connection,
+	    const protocol::ClientResourceRequest &message)
+	{
+		if (message.root_sha256() != m_resources.root_hash)
+		{
+			reject(connection, protocol::REJECT_REASON_CONTENT_MISMATCH,
+			    "resource manifest changed while downloading");
+			return;
+		}
+		const auto *package = m_resources.package(message.package_sha256());
+		if (!package || message.offset() >= package->bytes.size()
+		    || message.offset() % resources::resource_chunk_bytes != 0)
+		{
+			reject(connection, protocol::REJECT_REASON_MALFORMED_MESSAGE,
+			    "invalid resource package request");
+			return;
+		}
+		const auto offset = static_cast<std::size_t>(message.offset());
+		const auto count = std::min(resources::resource_chunk_bytes,
+		    package->bytes.size() - offset);
+		protocol::Envelope envelope;
+		auto *chunk = envelope.mutable_server_resource_chunk();
+		chunk->set_package_sha256(package->hash);
+		chunk->set_offset(offset);
+		chunk->set_total_size(package->bytes.size());
+		chunk->set_data(package->bytes.data() + offset, count);
+		chunk->set_final(offset + count == package->bytes.size());
+		queue(connection, std::move(envelope), reliability::reliable);
+	}
+
+	void server_core::handle_resources_ready(connection_id connection,
+	    const protocol::ClientResourcesReady &message)
+	{
+		if (message.generation() != m_resources.generation
+		    || message.root_sha256() != m_resources.root_hash)
+		{
+			reject(connection, protocol::REJECT_REASON_CONTENT_MISMATCH,
+			    "client activated a different resource set");
+			return;
+		}
+		begin_bootstrap(connection);
 	}
 
 	void server_core::send_chat_message(
@@ -3162,6 +3435,8 @@ namespace kcd2o::server
 		if (player.dead)
 			return;
 		player.dead = true;
+		if (m_scripts)
+			m_scripts->death(player.id);
 		remove_sleep_vote(player.id);
 		release_activity(player);
 		broadcast_system_message(player.display_name + " died.", now);
@@ -3336,6 +3611,7 @@ namespace kcd2o::server
 		}
 		const auto dummy = iterator->second.dummy;
 		const auto display_name = iterator->second.display_name;
+		const auto role = iterator->second.network_role;
 		persist_player(iterator->second, now);
 		remove_sleep_vote(id);
 		release_activity(iterator->second);
@@ -3349,6 +3625,8 @@ namespace kcd2o::server
 			    close);
 		}
 		m_players.erase(iterator);
+		if (m_scripts && !dummy)
+			m_scripts->player_left({id, display_name, false, role}, reason);
 		m_npc_delivery.erase(id);
 		const auto positions = player_positions();
 		queue_npc_events(m_npcs.remove_player(id, positions, now));

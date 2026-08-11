@@ -347,6 +347,52 @@ target_compile_definitions(KCD2OnlineProperty PRIVATE
 )
 set_property(TARGET KCD2OnlineProperty PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
+add_library(KCD2OnlineResources STATIC
+    "${SRC_DIR}/resources/resource_cache.cpp"
+    "${SRC_DIR}/resources/resource_cache.hpp"
+    "${SRC_DIR}/resources/resource_package.cpp"
+    "${SRC_DIR}/resources/resource_package.hpp"
+    "${SRC_DIR}/resources/sha256.cpp"
+    "${SRC_DIR}/resources/sha256.hpp"
+)
+set_property(TARGET KCD2OnlineResources PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineResources PUBLIC "${SRC_DIR}")
+target_link_libraries(KCD2OnlineResources PUBLIC
+    tomlplusplus::tomlplusplus
+    nlohmann_json::nlohmann_json
+)
+target_link_libraries(KCD2OnlineResources PRIVATE bcrypt)
+target_compile_definitions(KCD2OnlineResources PRIVATE
+    "_CRT_SECURE_NO_WARNINGS"
+    "NOMINMAX"
+    "WIN32_LEAN_AND_MEAN"
+)
+set_property(TARGET KCD2OnlineResources PROPERTY COMPILE_WARNING_AS_ERROR ON)
+
+add_library(KCD2OnlineScripting STATIC
+    "${SRC_DIR}/scripting/lua_sandbox.cpp"
+    "${SRC_DIR}/scripting/lua_sandbox.hpp"
+    "${SRC_DIR}/scripting/server_resource_runtime.cpp"
+    "${SRC_DIR}/scripting/server_resource_runtime.hpp"
+)
+set_property(TARGET KCD2OnlineScripting PROPERTY CXX_STANDARD 23)
+target_include_directories(KCD2OnlineScripting PUBLIC
+    "${SRC_DIR}"
+    ${LUA_INCLUDE_DIR}
+)
+target_link_libraries(KCD2OnlineScripting PUBLIC
+    KCD2OnlineResources
+    KCD2OnlineProtocol
+    lua_static
+    nlohmann_json::nlohmann_json
+)
+target_compile_definitions(KCD2OnlineScripting PRIVATE
+    "_CRT_SECURE_NO_WARNINGS"
+    "NOMINMAX"
+    "WIN32_LEAN_AND_MEAN"
+)
+set_property(TARGET KCD2OnlineScripting PROPERTY COMPILE_WARNING_AS_ERROR ON)
+
 add_library(KCD2OnlineServerCore STATIC
 	"${SRC_DIR}/server/item_ledger.cpp"
 	"${SRC_DIR}/server/item_ledger.hpp"
@@ -368,6 +414,8 @@ target_include_directories(KCD2OnlineServerCore PUBLIC "${SRC_DIR}")
 target_link_libraries(KCD2OnlineServerCore PUBLIC
     KCD2OnlineProtocol
     KCD2OnlineProperty
+    KCD2OnlineResources
+    KCD2OnlineScripting
     tomlplusplus::tomlplusplus
     bcrypt
 	 nlohmann_json::nlohmann_json
@@ -600,6 +648,8 @@ if(KCD2Online_BUILD_KCSE)
         "${SRC_DIR}/kcse/native_runtime.hpp"
         "${SRC_DIR}/multiplayer/client.cpp"
         "${SRC_DIR}/multiplayer/client.hpp"
+        "${SRC_DIR}/multiplayer/client_resources.cpp"
+        "${SRC_DIR}/multiplayer/client_resources.hpp"
         "${SRC_DIR}/multiplayer/client_message_gate.hpp"
         "${SRC_DIR}/multiplayer/client_state.hpp"
         "${SRC_DIR}/multiplayer/identity_store.cpp"
@@ -625,6 +675,8 @@ if(KCD2Online_BUILD_KCSE)
         kcd_re
         KCD2OnlineProtocol
         KCD2OnlineNetworking
+        KCD2OnlineResources
+        KCD2OnlineScripting
         KCD2OnlineNpcCatalog
         KCD2OnlineAccount
         crypt32
@@ -912,6 +964,18 @@ if (BUILD_TESTING)
     set_property(TARGET KCD2OnlineClientStateTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     add_test(NAME KCD2OnlineClientStateTests COMMAND KCD2OnlineClientStateTests)
 
+	add_executable(KCD2OnlineResourceTests
+		"${PROJECT_SOURCE_DIR}/tests/resource_tests.cpp"
+		"${SRC_DIR}/multiplayer/client_resources.cpp"
+		"${SRC_DIR}/multiplayer/client_resources.hpp"
+	)
+	set_property(TARGET KCD2OnlineResourceTests PROPERTY CXX_STANDARD 23)
+	target_link_libraries(KCD2OnlineResourceTests PRIVATE KCD2OnlineScripting)
+	target_compile_definitions(KCD2OnlineResourceTests PRIVATE
+		"NOMINMAX" "WIN32_LEAN_AND_MEAN")
+	set_property(TARGET KCD2OnlineResourceTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+	add_test(NAME KCD2OnlineResourceTests COMMAND KCD2OnlineResourceTests)
+
 	add_executable(KCD2OnlinePlayerRespawnGuardTests
 		"${PROJECT_SOURCE_DIR}/tests/player_respawn_guard_tests.cpp"
 	)
@@ -1086,6 +1150,7 @@ if (BUILD_TESTING)
             KCD2OnlinePropertyTests
             KCD2OnlineGameCommandQueueTests
             KCD2OnlineClientStateTests
+			KCD2OnlineResourceTests
             KCD2OnlinePlayerRespawnGuardTests
             KCD2OnlineEntityControlTests
             KCD2OnlineRuntimeHandleTests

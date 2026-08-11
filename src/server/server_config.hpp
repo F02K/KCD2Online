@@ -75,6 +75,11 @@ namespace kcd2o::server
 		std::uint32_t voice_max_frames_per_second{60};
 		std::vector<std::string> permission_owners;
 		std::filesystem::path world_directory{"world"};
+		bool resources_enabled{true};
+		std::filesystem::path resource_directory{"resources"};
+		std::uint32_t script_memory_limit_mb{32};
+		std::uint32_t script_instruction_limit{250'000};
+		std::uint32_t script_error_limit{3};
 		std::filesystem::path starter_profile_path{"starter_profile.toml"};
 		// Generated from the audited retail level PAKs and shipped beside the
 		// dedicated server. Production levels use it as an NPC GUID/kind allowlist.

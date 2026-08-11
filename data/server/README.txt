@@ -20,3 +20,12 @@ First-time setup
 
 Run KCD2OnlineGameDataGenerator.exe again after a supported game update or after
 changing installed mod PAKs so that the server content manifest stays current.
+
+Lua resources
+-------------
+
+The release is self-contained: Lua is linked into KCD2OnlineServer.exe and no
+separate runtime or SDK is required. Resources live in the resources folder.
+The bundled examples include a server-only ImGui UI and a client/server event
+resource. See docs\server-scripting.md, docs\resource-ui.md and
+docs\resource-delivery.md before writing production scripts.

@@ -92,6 +92,40 @@ namespace kcd2o
 			return valid_utf8_with_codepoint_count(value, 1, maximum);
 		}
 
+		bool valid_resource_identifier(std::string_view value)
+		{
+			return !value.empty() && value.size() <= 64
+			    && std::isalnum(static_cast<unsigned char>(value.front()))
+			    && std::ranges::all_of(value, [](unsigned char character)
+			       {
+				       return std::isalnum(character) || character == '.'
+				           || character == '_' || character == '-';
+			       });
+		}
+
+		bool valid_sha256(std::string_view value)
+		{
+			return value.size() == 64
+			    && std::ranges::all_of(value, [](unsigned char character)
+			       {
+				       return std::isdigit(character)
+				           || (character >= 'a' && character <= 'f');
+			       });
+		}
+
+		bool valid_resource_path(std::string_view value)
+		{
+			if (value.empty() || value.size() > 240 || value.front() == '/'
+			    || value.front() == '\\' || value.contains(':')
+			    || value.contains('\\') || value.contains(".."))
+				return false;
+			return std::ranges::all_of(value, [](unsigned char character)
+			{
+				return std::isalnum(character) || character == '/' || character == '.'
+				    || character == '_' || character == '-';
+			});
+		}
+
 		bool valid_inventory_item(
 		    const protocol::InventoryItem &item,
 		    bool allow_equipped_slot)
@@ -581,6 +615,123 @@ namespace kcd2o
 				return message.player_id() != 0 && message.has_avatar()
 				    && is_valid_avatar_descriptor(message.avatar());
 			}
+			if (envelope.has_server_resource_manifest())
+			{
+				const auto &message = envelope.server_resource_manifest();
+				if (message.generation() == 0
+				    || !valid_sha256(message.root_sha256())
+				    || message.packages_size() > static_cast<int>(max_client_resources)
+				    || message.total_size() > max_resource_set_bytes)
+					return false;
+				std::unordered_set<std::string> ids;
+				std::unordered_set<std::string> hashes;
+				std::uint64_t total{};
+				for (const auto &package : message.packages())
+				{
+					if (!valid_resource_identifier(package.resource_id())
+					    || !valid_identifier(package.version(), 32)
+					    || !valid_sha256(package.sha256())
+					    || package.size() == 0
+					    || package.size() > max_resource_package_bytes
+					    || !valid_resource_path(package.client_entry())
+					    || !std::string_view(package.client_entry()).starts_with("client/")
+					    || !ids.insert(package.resource_id()).second
+					    || !hashes.insert(package.sha256()).second)
+						return false;
+					total += package.size();
+				}
+				return total == message.total_size();
+			}
+			if (envelope.has_client_resource_request())
+			{
+				const auto &message = envelope.client_resource_request();
+				return valid_sha256(message.root_sha256())
+				    && valid_sha256(message.package_sha256())
+				    && message.offset() <= max_resource_package_bytes;
+			}
+			if (envelope.has_server_resource_chunk())
+			{
+				const auto &message = envelope.server_resource_chunk();
+				return valid_sha256(message.package_sha256())
+				    && message.total_size() > 0
+				    && message.total_size() <= max_resource_package_bytes
+				    && message.offset() < message.total_size()
+				    && !message.data().empty()
+				    && message.data().size() <= max_resource_chunk_bytes
+				    && message.offset() + message.data().size()
+				        <= message.total_size()
+				    && message.final()
+				        == (message.offset() + message.data().size()
+				            == message.total_size());
+			}
+			if (envelope.has_client_resources_ready())
+			{
+				const auto &message = envelope.client_resources_ready();
+				return message.generation() != 0
+				    && valid_sha256(message.root_sha256());
+			}
+			if (envelope.has_client_resource_event()
+			    || envelope.has_server_resource_event())
+			{
+				const auto &resource_id = envelope.has_client_resource_event()
+				    ? envelope.client_resource_event().resource_id()
+				    : envelope.server_resource_event().resource_id();
+				const auto &event = envelope.has_client_resource_event()
+				    ? envelope.client_resource_event().event()
+				    : envelope.server_resource_event().event();
+				const auto &payload = envelope.has_client_resource_event()
+				    ? envelope.client_resource_event().payload_json()
+				    : envelope.server_resource_event().payload_json();
+				const auto sequence = envelope.has_client_resource_event()
+				    ? envelope.client_resource_event().sequence()
+				    : envelope.server_resource_event().sequence();
+				return valid_resource_identifier(resource_id)
+				    && valid_resource_identifier(event) && sequence != 0
+				    && payload.size() <= max_resource_json_bytes
+				    && valid_utf8_with_codepoint_count(
+				        payload, payload.empty() ? 0 : 1, max_resource_json_bytes);
+			}
+			if (envelope.has_server_ui_update())
+			{
+				const auto &message = envelope.server_ui_update();
+				return valid_resource_identifier(message.resource_id())
+				    && valid_resource_identifier(message.document_id())
+				    && message.operation()
+				        != protocol::SERVER_UI_OPERATION_UNSPECIFIED
+				    && protocol::ServerUiOperation_IsValid(message.operation())
+				    && message.revision() != 0
+				    && message.payload_json().size() <= max_resource_json_bytes
+				    && valid_utf8_with_codepoint_count(
+				        message.payload_json(),
+				        message.payload_json().empty() ? 0 : 1,
+				        max_resource_json_bytes);
+			}
+			if (envelope.has_server_input_binding())
+			{
+				const auto &message = envelope.server_input_binding();
+				return valid_resource_identifier(message.resource_id())
+				    && valid_resource_identifier(message.action_id())
+				    && (message.unregister()
+				        ? message.label().empty() && message.default_virtual_key() == 0
+				        : valid_utf8_with_codepoint_count(message.label(), 1, 96)
+				            && message.default_virtual_key() > 0
+				            && message.default_virtual_key() <= 0xFF);
+			}
+			if (envelope.has_client_ui_event())
+			{
+				const auto &message = envelope.client_ui_event();
+				return valid_resource_identifier(message.resource_id())
+				    && (valid_resource_identifier(message.document_id())
+				        || (message.event() == "key" && message.document_id().empty()))
+				    && valid_resource_identifier(message.control_id())
+				    && valid_resource_identifier(message.event())
+				    && message.revision() != 0 && message.sequence() != 0
+				    && message.payload_json().size() <= max_resource_json_bytes
+				    && valid_utf8_with_codepoint_count(
+				        message.payload_json(),
+				        message.payload_json().empty() ? 0 : 1,
+				        max_resource_json_bytes);
+			}
 			if (envelope.has_server_accepted())
 			{
 				const auto &message = envelope.server_accepted();
@@ -671,6 +822,8 @@ namespace kcd2o
 		{
 		case protocol::Envelope::kChatSend:
 		case protocol::Envelope::kChatBroadcast:
+		case protocol::Envelope::kClientResourceEvent:
+		case protocol::Envelope::kClientUiEvent:
 			return traffic_lane::interactive;
 
 		case protocol::Envelope::kClientTransform:

@@ -229,6 +229,36 @@ namespace kcd2o::kcse
 		return result;
 	}
 
+	std::string ui_client_proxy::resource_ui_json() const
+	{
+		const auto *api = load();
+		if (!api)
+			return {};
+		const auto required = api->copy_resource_ui_json(nullptr, 0);
+		if (required <= 1 || required > resource_payload_capacity * 8)
+			return {};
+		std::string result(required - 1, '\0');
+		if (api->copy_resource_ui_json(result.data(), required) != required)
+			return {};
+		return result;
+	}
+
+	bool ui_client_proxy::submit_resource_ui_event(std::string resource,
+	    std::string document, std::string control, std::string event,
+	    std::string payload_json) const
+	{
+		const auto *api = load();
+		if (!api || payload_json.size() >= resource_payload_capacity)
+			return false;
+		resource_ui_event_request request;
+		copy_text(request.resource_id, resource);
+		copy_text(request.document_id, document);
+		copy_text(request.control_id, control);
+		copy_text(request.event, event);
+		copy_text(request.payload_json, payload_json);
+		return api->submit_resource_ui_event(&request) != 0;
+	}
+
 	std::vector<chat_entry> ui_client_proxy::chat_history() const
 	{
 		const auto *api = load();

@@ -6,6 +6,7 @@
 #include "multiplayer/remote_transform_sequence.hpp"
 #include "multiplayer/runtime.hpp"
 #include "multiplayer/client_state.hpp"
+#include "multiplayer/client_resources.hpp"
 
 #include <chrono>
 #include <atomic>
@@ -131,6 +132,13 @@ namespace kcd2o
 		[[nodiscard]] std::vector<remote_player_view> remote_players() const;
 		[[nodiscard]] std::vector<chat_entry> chat_history() const;
 		[[nodiscard]] std::optional<protocol::TransformState> take_local_correction();
+		[[nodiscard]] std::string resource_ui_json() const;
+		[[nodiscard]] bool send_resource_ui_event(
+		    std::string resource,
+		    std::string document,
+		    std::string control,
+		    std::string event,
+		    std::string payload_json = "{}");
 
 	private:
 		client_runtime &m_runtime;
@@ -204,6 +212,10 @@ namespace kcd2o
 		{
 			protocol::ClientVoiceFrame message;
 		};
+		struct resource_ui_command
+		{
+			protocol::ClientUiEvent message;
+		};
 		using network_command = std::variant<
 		    connect_command,
 		    disconnect_command,
@@ -222,7 +234,8 @@ namespace kcd2o
 		    respawn_command,
 		    activity_start_command,
 		    activity_end_command,
-		    voice_command>;
+		    voice_command,
+		    resource_ui_command>;
 
 		struct timed_transform
 		{
@@ -278,6 +291,7 @@ namespace kcd2o
 		mutable std::mutex m_state_mutex;
 		client_status m_status;
 		client_update_rates m_update_rates;
+		client_resources m_resources;
 		std::string m_resume_token;
 		std::string m_server_id;
 		identity_store m_identities;

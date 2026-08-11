@@ -7,6 +7,8 @@
 #include "multiplayer/world_catalog.hpp"
 #include "kcse/join_trace.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -71,6 +73,8 @@ namespace kcd2o
 				return "protocol-preflight";
 			case client_state::authenticating:
 				return "authenticating";
+			case client_state::downloading_resources:
+				return "downloading-resources";
 			case client_state::waiting_for_bootstrap:
 				return "waiting-for-bootstrap";
 			case client_state::loading_sandbox:
@@ -927,6 +931,41 @@ namespace kcd2o
 		return correction;
 	}
 
+	std::string multiplayer_client::resource_ui_json() const
+	{
+		return m_resources.ui_snapshot_json();
+	}
+
+	bool multiplayer_client::send_resource_ui_event(std::string resource,
+	    std::string document, std::string control, std::string event,
+	    std::string payload_json)
+	{
+		if (!resources::valid_resource_id(resource)
+		    || (!resources::valid_resource_event_name(document)
+		        && !(event == "key" && document.empty()))
+		    || !resources::valid_resource_event_name(control)
+		    || !resources::valid_resource_event_name(event)
+		    || payload_json.size() > max_resource_json_bytes)
+			return false;
+		{
+			std::scoped_lock lock(m_state_mutex);
+			if (m_status.state != client_state::connected)
+				return false;
+		}
+		try
+		{
+			(void)nlohmann::json::parse(payload_json);
+		}
+		catch (...)
+		{
+			return false;
+		}
+		queue_network(resource_ui_command{m_resources.make_ui_event(
+		    std::move(resource), std::move(document), std::move(control),
+		    std::move(event), std::move(payload_json))});
+		return true;
+	}
+
 	void multiplayer_client::network_loop(std::stop_token stop)
 	{
 		using namespace std::chrono_literals;
@@ -1161,7 +1200,65 @@ namespace kcd2o
 						        }
 						        return;
 					        }
-					        if (envelope->has_server_accepted())
+					        if (envelope->has_server_resource_manifest())
+					        {
+						        if (!set_state(client_state::downloading_resources))
+							        return;
+						        std::string resource_error;
+						        try
+						        {
+							        if (!m_resources.accept_manifest(
+							                envelope->server_resource_manifest(),
+							                m_server_id, resource_error))
+								        throw std::runtime_error(resource_error);
+							        for (auto &outgoing : m_resources.take_outgoing())
+								        (void)send_envelope(outgoing.envelope, outgoing.delivery);
+						        }
+						        catch (const std::exception &exception)
+						        {
+							        set_state(client_state::disconnected,
+							            std::string("server resource activation failed: ") + exception.what());
+							        if (transport) transport->abort_connection("resource activation failed");
+						        }
+						        return;
+					        }
+					        else if (envelope->has_server_resource_chunk())
+					        {
+						        std::string resource_error;
+						        try
+						        {
+							        if (!m_resources.accept_chunk(
+							                envelope->server_resource_chunk(), resource_error))
+								        throw std::runtime_error(resource_error);
+							        for (auto &outgoing : m_resources.take_outgoing())
+								        (void)send_envelope(outgoing.envelope, outgoing.delivery);
+						        }
+						        catch (const std::exception &exception)
+						        {
+							        set_state(client_state::disconnected,
+							            std::string("server resource download failed: ") + exception.what());
+							        if (transport) transport->abort_connection("resource download failed");
+						        }
+						        return;
+					        }
+					        else if (envelope->has_server_resource_event())
+					        {
+						        m_resources.accept_event(envelope->server_resource_event());
+						        for (auto &outgoing : m_resources.take_outgoing())
+							        (void)send_envelope(outgoing.envelope, outgoing.delivery);
+						        return;
+					        }
+					        else if (envelope->has_server_ui_update())
+					        {
+						        m_resources.accept_ui(envelope->server_ui_update());
+						        return;
+					        }
+					        else if (envelope->has_server_input_binding())
+					        {
+						        m_resources.accept_binding(envelope->server_input_binding());
+						        return;
+					        }
+					        else if (envelope->has_server_accepted())
 					        {
 						        const auto &accepted =
 						            envelope->server_accepted();
@@ -1199,6 +1296,9 @@ namespace kcd2o
 						                accepted.level_id(),
 						                accepted.players_size()));
 						        reconnect_attempt = 0;
+						        m_resources.connected();
+						        for (auto &outgoing : m_resources.take_outgoing())
+							        (void)send_envelope(outgoing.envelope, outgoing.delivery);
 					        }
 					        else if (envelope->has_server_challenge())
 					        {
@@ -1438,6 +1538,7 @@ namespace kcd2o
 						    using type = std::decay_t<decltype(typed)>;
 						    if constexpr (std::is_same_v<type, connect_command>)
 						    {
+							    m_resources.reset();
 							    options = std::move(typed.options);
 							    reconnect_attempt = 0;
 							    first_world_snapshot_seen = false;
@@ -1614,16 +1715,23 @@ namespace kcd2o
 				    envelope,
 				    reliability::reliable);
 			}
-			else if constexpr (
-			    std::is_same_v<type, voice_command>)
+							else if constexpr (
+							    std::is_same_v<type, voice_command>)
 			{
 				protocol::Envelope envelope;
 				*envelope.mutable_client_voice_frame() =
 				    std::move(typed.message);
 				(void)send_envelope(
 				    envelope,
-				    reliability::unreliable);
-			}
+								    reliability::unreliable);
+							}
+							else if constexpr (
+							    std::is_same_v<type, resource_ui_command>)
+							{
+								protocol::Envelope envelope;
+								*envelope.mutable_client_ui_event() = std::move(typed.message);
+								(void)send_envelope(envelope, reliability::reliable);
+							}
 					    },
 					    command);
 				}

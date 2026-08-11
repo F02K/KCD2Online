@@ -4,6 +4,7 @@
 #include "fonts/fonts.hpp"
 #include "gui.hpp"
 #include "gui/ingame_chat.hpp"
+#include "gui/server_ui.hpp"
 #include "hooks/hooking.hpp"
 
 #include <backends/imgui_impl_dx12.h>
@@ -1001,6 +1002,7 @@ namespace big
 					if (ingame_chat::blocks_game_input())
 					{
 						ingame_chat::render(true);
+						server_ui::render(true);
 					}
 				}
 				else if (g_gui)
@@ -1009,6 +1011,7 @@ namespace big
 					ImGui_ImplWin32_NewFrame();
 					ImGui::NewFrame();
 					ingame_chat::render(false);
+					server_ui::render(false);
 					ImGui::Render();
 					chat_draw_data = ImGui::GetDrawData();
 					g_imgui_frame_source = imgui_frame_source::chat;

@@ -2203,5 +2203,65 @@ int main()
 		    }));
 	}
 
+	temporary_world resource_world;
+	{
+		const auto resource = resource_world.path / "resources" / "client_test";
+		std::filesystem::create_directories(resource / "client");
+		{
+			std::ofstream manifest(resource / "resource.toml");
+			manifest << "[resource]\nid='client_test'\nversion='1.0.0'\n"
+			            << "[client]\nentry='client/main.lua'\ncapabilities=[]\n";
+		}
+		{
+			std::ofstream script(resource / "client" / "main.lua");
+			script << "print('resource handshake')\n";
+		}
+		auto config = config_for(resource_world.path / "world");
+		config.resource_directory = resource_world.path / "resources";
+		server_core core(config);
+		core.on_transport_connected(70, start);
+		core.on_message(70, hello(), start + 1ms);
+		(void)core.take_outbound();
+		core.on_message(70, enroll(), start + 2ms);
+		auto outbound = core.take_outbound();
+		const auto manifest_message = std::ranges::find_if(outbound,
+		    [](const outbound_message &message)
+		    {
+			    return message.envelope.has_server_resource_manifest();
+		    });
+		assert(manifest_message != outbound.end());
+		assert(manifest_message->envelope.server_resource_manifest().packages_size() == 1);
+		assert(std::ranges::none_of(outbound, [](const outbound_message &message)
+		{
+			return message.envelope.has_server_bootstrap();
+		}));
+		const auto resource_root_hash =
+		    manifest_message->envelope.server_resource_manifest().root_sha256();
+		const auto resource_package_hash =
+		    manifest_message->envelope.server_resource_manifest().packages(0).sha256();
+		const auto resource_generation =
+		    manifest_message->envelope.server_resource_manifest().generation();
+
+		protocol::Envelope request;
+		request.mutable_client_resource_request()->set_root_sha256(
+		    resource_root_hash);
+		request.mutable_client_resource_request()->set_package_sha256(
+		    resource_package_hash);
+		request.mutable_client_resource_request()->set_offset(0);
+		core.on_message(70, request, start + 3ms);
+		outbound = core.take_outbound();
+		assert(outbound.size() == 1);
+		assert(outbound.front().envelope.has_server_resource_chunk());
+
+		protocol::Envelope resources_ready;
+		resources_ready.mutable_client_resources_ready()->set_generation(
+		    resource_generation);
+		resources_ready.mutable_client_resources_ready()->set_root_sha256(
+		    resource_root_hash);
+		core.on_message(70, resources_ready, start + 4ms);
+		assert(find_bootstrap(core.take_outbound(), 70).mode()
+		    == protocol::BOOTSTRAP_MODE_LOAD);
+	}
+
 	return 0;
 }

@@ -291,6 +291,8 @@ namespace big::native_multiplayer_menu
 				return ingame_ui::localized("menu.status.negotiating");
 			case client_state::authenticating:
 				return ingame_ui::localized("menu.status.authenticating");
+			case client_state::downloading_resources:
+				return "Downloading server resources";
 			case client_state::waiting_for_bootstrap:
 				return ingame_ui::localized("menu.status.waiting_server");
 			case client_state::loading_sandbox:
