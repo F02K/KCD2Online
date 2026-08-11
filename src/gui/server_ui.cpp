@@ -201,11 +201,11 @@ namespace big::server_ui
 		{
 			if (!g_keybind_editor) return;
 			ImGui::SetNextWindowSize({430.0F, 300.0F}, ImGuiCond_FirstUseEver);
-			if (!ImGui::Begin("Server-Keybinds (F8)", &g_keybind_editor))
+			if (!ImGui::Begin("Server keybinds (F8)", &g_keybind_editor))
 			{
 				ImGui::End(); return;
 			}
-			ImGui::TextWrapped("Keybinds gelten nur fuer diesen Client. Klicke auf eine Taste und druecke danach die neue Taste.");
+			ImGui::TextWrapped("Keybinds apply only to this client. Click a binding, then press the new key.");
 			for (const auto &binding : g_state.value("bindings", json::array()))
 			{
 				const auto resource = binding.value("resource_id", "");
@@ -214,7 +214,7 @@ namespace big::server_ui
 				ImGui::Text("%s", binding.value("label", action).c_str());
 				ImGui::SameLine(260.0F);
 				const auto label = g_rebind_resource == resource && g_rebind_action == action
-				    ? "Taste druecken..." : "VK " + std::to_string(effective_key(binding));
+				    ? "Press a key..." : "Key " + std::to_string(effective_key(binding));
 				if (ImGui::Button(label.c_str(), {135.0F, 0.0F}))
 				{
 					g_rebind_resource = resource; g_rebind_action = action;

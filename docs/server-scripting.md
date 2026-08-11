@@ -1,38 +1,38 @@
-# Server-Scripting mit Lua
+# Server-side Lua scripting
 
-KCD2Online lädt Ressourcen immer pro Server. Eine Ressource ist ein eigener Ordner unter `resources/` und besitzt genau eine `resource.toml`. Lua ist statisch in `KCD2OnlineServer.exe` und `KCD2OnlineKCSEClient.dll` eingebaut. Auf einem dedizierten Server werden daher weder Lua, das Spiel, KCSE noch das vollständige KCD2Online-Repository benötigt.
+KCD2Online loads resources separately for each server. A resource is a directory under `resources/` with exactly one `resource.toml` manifest. Lua is statically linked into `KCD2OnlineServer.exe` and `KCD2OnlineKCSEClient.dll`. A dedicated server therefore does not need a separate Lua installation, the game, KCSE, or a complete checkout of the KCD2Online repository.
 
-## Schnellstart aus der Server-ZIP
+## Quick start with the server ZIP
 
-1. Einen neuen Ordner unter `resources/` anlegen.
-2. `resource.toml` und mindestens einen Entry-Point unter `server/` oder `client/` erstellen.
-3. Den Server neu starten. Ressourcen werden derzeit bewusst nur beim Start geladen; es gibt kein Hot-Reload.
-4. Manifest- oder Ladefehler erscheinen in der Serverkonsole und verhindern den Start. Ausgaben von serverseitigem `print(...)` tragen das Präfix `[resource]`.
+1. Create a directory under `resources/`.
+2. Add `resource.toml` and at least one entry point under `server/` or `client/`.
+3. Restart the server. Resources are deliberately loaded only during startup; hot reload is not supported.
+4. Manifest and loading errors are printed to the server console and prevent startup. Output from server-side `print(...)` is prefixed with `[resource]`.
 
-Für serverseitige UI oder Keybinds genügt ein `server/`-Ordner. Ein `client/`-Ordner ist nur nötig, wenn tatsächlich Lua auf dem Spieler-PC laufen soll.
+A `server/` directory is sufficient for server-controlled UI and keybinds. Add a `client/` directory only when Lua code actually needs to run on players' computers.
 
-## Ordnerstruktur
+## Directory structure
 
 ```text
 resources/
-  mein_script/
+  my_script/
     resource.toml
     server/
       main.lua
-      weitere_module.lua
+      another_module.lua
     client/
       main.lua
     shared/
-      daten.json
+      data.json
 ```
 
-`server/` und `client/` sind optional. Eine rein serverseitige Ressource hat nur `[server]`; dann wird kein Code an Clients übertragen. Sobald `[client]` existiert, packt der Server ausschließlich `client/` sowie explizit freigegebene Dateien aus `shared/`. `server/` kann niemals Bestandteil des Client-Pakets werden.
+`server/` and `client/` are optional. A server-only resource declares only `[server]`, and no code is transferred to clients. If `[client]` is present, the server packages only `client/` and files from `shared/` that are explicitly allowlisted. Files under `server/` can never become part of a client package.
 
 ## Manifest
 
 ```toml
 [resource]
-id = "mein_script"
+id = "my_script"
 version = "1.0.0"
 api_version = 1
 dependencies = []
@@ -46,68 +46,68 @@ entry = "client/main.lua"
 capabilities = []
 
 [shared]
-client_paths = ["shared/daten.json"]
+client_paths = ["shared/data.json"]
 
 [[events]]
-name = "aktion"
+name = "action"
 direction = "bidirectional" # client_to_server | server_to_client | bidirectional
 reliable = true
 max_per_second = 10
 max_bytes = 4096
 ```
 
-IDs bestehen aus Kleinbuchstaben, Zahlen, `.`, `_` und `-`. Abhängigkeiten werden topologisch geladen; fehlende oder zyklische Abhängigkeiten stoppen den Serverstart. Entry-Pfade müssen in ihrem jeweiligen Ordner liegen. Symlinks, `..`, absolute Pfade und Lua-Bytecode werden abgewiesen.
+IDs may contain lowercase letters, digits, `.`, `_`, and `-`. Dependencies are loaded in topological order; missing or cyclic dependencies stop server startup. Entry paths must remain inside their respective directories. Symlinks, `..`, absolute paths, and Lua bytecode are rejected.
 
-## Server-API
+## Server API
 
-- `server.on(name, callback)` registriert `start`, `player_joined`, `player_left`, `chat`, `player_death` oder `ui`.
-- `server.players()` liefert eine Tabelle aus `{ id, name, connected, role }`.
-- `server.say(text [, player_id])` sendet eine Systemnachricht. Erfordert `chat`.
-- `server.kick(player_id [, reason])` trennt einen Spieler. Erfordert `players.kick`.
-- `events.on(name, callback)` empfängt ein im Manifest erlaubtes Client-Event. Callback: `(player_id, payload)`.
-- `events.emit_client(player_id_or_nil, name, payload)` sendet an einen Spieler; `nil` oder `0` sendet an alle. Richtung, Größe und Zuverlässigkeit stammen aus dem Manifest.
-- `timer.after(ms, callback)` und `timer.every(ms, callback)` erstellen begrenzte Server-Timer.
-- `ui.show`, `ui.patch`, `ui.close` und `ui.toast` benötigen `ui`.
-- `input.register`, `input.unregister` und `input.on` benötigen `input`.
+- `server.on(name, callback)` registers `start`, `player_joined`, `player_left`, `chat`, `player_death`, or `ui` handlers.
+- `server.players()` returns a table of `{ id, name, connected, role }` values.
+- `server.say(text [, player_id])` sends a system message. Requires `chat`.
+- `server.kick(player_id [, reason])` disconnects a player. Requires `players.kick`.
+- `events.on(name, callback)` receives a client event allowed by the manifest. Callback: `(player_id, payload)`.
+- `events.emit_client(player_id_or_nil, name, payload)` sends to one player; `nil` or `0` broadcasts to everyone. Direction, size, and reliability are defined by the manifest.
+- `timer.after(ms, callback)` and `timer.every(ms, callback)` create bounded server timers.
+- `ui.show`, `ui.patch`, `ui.close`, and `ui.toast` require `ui`.
+- `input.register`, `input.unregister`, and `input.on` require `input`.
 
-Die Lifecycle-Callbacks erhalten folgende Argumente:
+Lifecycle callbacks receive these arguments:
 
-| Name | Callback-Argumente |
+| Name | Callback arguments |
 | --- | --- |
-| `start` | keine |
+| `start` | none |
 | `player_joined` | `player` |
 | `player_left` | `player, reason` |
 | `chat` | `player_id, text` |
 | `player_death` | `player_id` |
 | `ui` | `player_id, document_id, control_id, event, payload` |
 
-Ein `player` enthält `id`, `name`, `connected` und `role`. IDs und Rollen sind serverseitige Informationen; Event- und UI-Payloads vom Client bleiben trotzdem untrusted input.
+A `player` contains `id`, `name`, `connected`, and `role`. IDs and roles are server-side information, but event and UI payloads received from a client must still be treated as untrusted input.
 
-Beispiel für Lebenszyklus und Timer:
+Example using a lifecycle event and timer:
 
 ```lua
 server.on("player_joined", function(player)
-    server.say("Willkommen " .. player.name)
+    server.say("Welcome " .. player.name)
     timer.after(5000, function()
-        server.say("Du bist seit fünf Sekunden verbunden.", player.id)
+        server.say("You have been connected for five seconds.", player.id)
     end)
 end)
 ```
 
-`require("helfer")` lädt ausschließlich `server/helfer.lua` beziehungsweise auf dem Client `client/helfer.lua`. Dateisystem, Betriebssystem, Netzwerk, native DLLs, `loadfile`, `dofile` und dynamisches Bytecode-Laden sind nicht verfügbar.
+`require("helper")` loads only `server/helper.lua`, or `client/helper.lua` on the client. File system, operating system, network, native DLL, `loadfile`, `dofile`, and dynamic bytecode access are unavailable.
 
-## Client-API
+## Client API
 
-Client-Lua ist für lokale Logik gedacht, nicht für Autorität. Es kann deklarierte Events mit `events.on(name, callback)` empfangen und mit `events.emit_server(name, payload)` senden. Der Empfangs-Callback erhält genau den JSON-Payload als Lua-Wert. Bereits beim Laden gesendete Events werden lokal zurückgehalten, bis der Server den Weltbeitritt akzeptiert hat. Der Server prüft Resource-ID, Event-Richtung, Rate und Payload-Größe erneut. `reliable = false` benutzt für beide Richtungen den unzuverlässigen Transport und eignet sich nur für ersetzbare Aktualisierungen.
+Client-side Lua is intended for local behavior, not authority. It can receive declared events with `events.on(name, callback)` and send them with `events.emit_server(name, payload)`. The receive callback gets the JSON payload as a Lua value. Events emitted while loading are queued locally until the server accepts the world join. The server validates the resource ID, event direction, rate, and payload size again. Setting `reliable = false` uses the unreliable transport in both directions and is suitable only for replaceable updates.
 
-Spielstände, Geld, Inventar, Positionen oder Berechtigungen dürfen niemals anhand einer Client-Aussage vertraut werden. Der serverseitige Handler muss Werte immer gegen den aktuellen autoritativen Zustand prüfen.
+Never trust client claims about save data, money, inventory, position, or permissions. Server-side handlers must always validate values against the current authoritative state.
 
-Eine Ressource braucht keinen `client/`-Ordner, um UI oder Keybinds zu verwenden: Die integrierte UI- und Input-Laufzeit ist bereits Teil des normalen KCD2Online-Clients. Das ist für die meisten Server-Skripte der empfohlene Weg.
+A resource does not need a `client/` directory to use UI or keybinds: the integrated UI and input runtime is already part of the standard KCD2Online client. This is the recommended approach for most server scripts.
 
-## Fehler- und Ressourcenlimits
+## Error and resource limits
 
-Jede Ressource besitzt einen eigenen Lua-State. Speicher, Instruktionen pro Callback, JSON-Tiefe/-Größe und wiederholte Laufzeitfehler sind begrenzt. Die Grenzwerte stehen in `server.toml` unter `[resources]`. Nach zu vielen Fehlern wird nur die betroffene Ressource deaktiviert. Ein Fehler beim initialen Laden stoppt den Server, damit kein halb konfigurierter Server online geht.
+Each resource has its own Lua state. Memory, instructions per callback, JSON depth and size, and repeated runtime errors are limited. The limits are configured under `[resources]` in `server.toml`. After too many errors, only the affected resource is disabled. An initial loading error stops the server so that a partially configured server never goes online.
 
-Weitere feste Grenzen sind 128 Ressourcen, 512 Dateien pro Client-Paket, 16 MiB pro Datei, 64 MiB pro Paket, 256 MiB für alle Client-Pakete und 32 KiB pro Event-/UI-JSON. Manifestwerte können Events zusätzlich kleiner und langsamer begrenzen.
+Additional fixed limits are 128 resources, 512 files per client package, 16 MiB per file, 64 MiB per package, 256 MiB across all client packages, and 32 KiB per event or UI JSON payload. Manifest settings can further reduce an event's size and rate.
 
-Die mitgelieferten Beispiele `welcome_ui` und `event_example` können direkt kopiert, verändert oder gelöscht werden.
+The included `welcome_ui` and `event_example` resources can be copied, modified, or deleted.

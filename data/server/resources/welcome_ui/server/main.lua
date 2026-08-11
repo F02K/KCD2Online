@@ -6,15 +6,15 @@ local function show_dashboard(player)
         title = "KCD2Online Server",
         size = { 440, 260 },
         widgets = {
-            { type = "text", text = "Willkommen, " .. player.name .. "!" },
+            { type = "text", text = "Welcome, " .. player.name .. "!" },
             { type = "separator", text = "Server Resource UI" },
-            { type = "text", text = "Dieses Fenster wurde nur durch server/main.lua erzeugt." },
-            { type = "progress", text = "Beispiel", value = 0.72 },
-            { type = "button", id = "hello", text = "Hallo sagen" },
-            { type = "button", id = "close", text = "Schliessen", same_line = true }
+            { type = "text", text = "This window was created entirely by server/main.lua." },
+            { type = "progress", text = "Example", value = 0.72 },
+            { type = "button", id = "hello", text = "Say hello" },
+            { type = "button", id = "close", text = "Close", same_line = true }
         }
     })
-    input.register(player.id, "toggle_welcome", "Willkommensfenster", 0x75) -- F6
+    input.register(player.id, "toggle_welcome", "Welcome window", 0x75) -- F6
 end
 
 server.on("player_joined", function(player)
@@ -24,7 +24,7 @@ end)
 server.on("ui", function(player_id, document, control, event, payload)
     if document ~= "welcome" or event ~= "click" then return end
     if control == "hello" then
-        server.say("Hallo aus Lua!", player_id)
+        server.say("Hello from Lua!", player_id)
     elseif control == "close" then
         open[player_id] = false
         ui.close(player_id, "welcome")

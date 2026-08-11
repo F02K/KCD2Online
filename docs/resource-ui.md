@@ -1,73 +1,73 @@
-# Deklarative Server-UI und Keybinds
+# Declarative server UI and keybinds
 
-Server-UI ist ein validiertes JSON-Dokument, das der fest eingebauten ImGui-Schicht übergeben wird. Lua erhält keinen direkten ImGui-Zeiger und führt keinen Code im Render-Thread aus. Dadurch bleiben Rendering, Eingabe und Netzwerk voneinander getrennt.
+Server UI is represented as a validated JSON document passed to the built-in ImGui layer. Lua receives no direct ImGui pointer and never executes code on the render thread. This keeps rendering, input, and networking isolated from one another.
 
-Die vollständigen Signaturen lauten:
+The complete function signatures are:
 
 ```lua
 ui.show(player_id, document_id, document)
 ui.patch(player_id, document_id, merge_patch)
 ui.close(player_id, document_id)
-ui.toast(player_id, toast_id, { text = "Nachricht" })
+ui.toast(player_id, toast_id, { text = "Message" })
 ```
 
-`player_id` stammt beispielsweise aus `player_joined` oder `server.players()`. Dokument-, Control-, Toast- und Action-IDs sollten stabile, kurze ASCII-Bezeichner wie `shop` oder `buy_item` sein.
+You can obtain `player_id` from `player_joined` or `server.players()`, for example. Document, control, toast, and action IDs should be stable, short ASCII identifiers such as `shop` or `buy_item`.
 
-## Ein Fenster anzeigen
+## Showing a window
 
 ```lua
 ui.show(player_id, "shop", {
-    title = "Haendler",
+    title = "Merchant",
     position = { 80, 120 },
     size = { 440, 320 },
     movable = true,
     widgets = {
-        { type = "text", text = "Warenangebot" },
-        { type = "separator", text = "Auswahl" },
-        { type = "checkbox", id = "bulk", text = "Mehrfachkauf", value = false },
-        { type = "slider", id = "amount", text = "Menge", value = 1, min = 1, max = 10 },
-        { type = "input", id = "note", text = "Notiz", value = "", },
-        { type = "button", id = "buy", text = "Kaufen" },
-        { type = "progress", text = "Ruf", value = 0.65 },
+        { type = "text", text = "Available goods" },
+        { type = "separator", text = "Selection" },
+        { type = "checkbox", id = "bulk", text = "Bulk purchase", value = false },
+        { type = "slider", id = "amount", text = "Amount", value = 1, min = 1, max = 10 },
+        { type = "input", id = "note", text = "Note", value = "", },
+        { type = "button", id = "buy", text = "Buy" },
+        { type = "progress", text = "Reputation", value = 0.65 },
         { type = "spacer", height = 8 }
     }
 })
 ```
 
-Unterstützte Widget-Typen sind `text`, `separator`, `spacer`, `button`, `checkbox`, `slider`, `input` und `progress`. `same_line = true` setzt ein Element hinter das vorherige. Unbekannte Felder werden ignoriert; unbekannte Widget-Typen werden nicht gerendert.
+Supported widget types are `text`, `separator`, `spacer`, `button`, `checkbox`, `slider`, `input`, and `progress`. Set `same_line = true` to place an element after the previous one. Unknown fields are ignored; unknown widget types are not rendered.
 
-`ui.patch(player_id, document_id, patch)` verwendet JSON-Merge-Patch-Semantik. `ui.close(player_id, document_id)` schließt das Fenster. `ui.toast(player_id, toast_id, { text = "Nachricht" })` zeigt die Meldung fünf Sekunden lang unten rechts an.
+`ui.patch(player_id, document_id, patch)` uses JSON Merge Patch semantics. `ui.close(player_id, document_id)` closes the window. `ui.toast(player_id, toast_id, { text = "Message" })` displays a notification in the lower-right corner for five seconds.
 
-## UI-Ereignisse
+## UI events
 
 ```lua
 server.on("ui", function(player_id, document_id, control_id, event, payload)
     if document_id == "shop" and control_id == "buy" and event == "click" then
-        -- Preis, Bestand und Berechtigung immer serverseitig neu prüfen.
+        -- Always validate price, stock, and permissions again on the server.
     end
 end)
 ```
 
-Buttons senden `click`, Checkboxen und Slider `change`, Textfelder bei Enter `submit`. Der Payload enthält beispielsweise `{ value = true }`. Die Dokumentrevision wird mitgesendet, ist aber kein Autoritätsbeweis.
+Buttons emit `click`; checkboxes and sliders emit `change`; text inputs emit `submit` when Enter is pressed. The payload contains a value such as `{ value = true }`. The document revision is also transmitted, but it is not proof of authority.
 
-`ui.patch` folgt JSON Merge Patch: Objektfelder werden ersetzt oder rekursiv zusammengeführt, `nil`/JSON-`null` entfernt ein Feld. Arrays wie `widgets` werden als Ganzes ersetzt.
+`ui.patch` follows JSON Merge Patch: object fields are replaced or merged recursively, and `nil`/JSON `null` removes a field. Arrays such as `widgets` are replaced as a whole.
 
 ## Keybinds
 
 ```lua
-input.register(player_id, "open_shop", "Shop oeffnen", 0x75) -- F6
+input.register(player_id, "open_shop", "Open shop", 0x75) -- F6
 
 input.on("open_shop", function(player_id, payload)
-    -- UI öffnen oder schließen
+    -- Open or close the UI
 end)
 ```
 
-`default_virtual_key` benutzt Windows-Virtual-Key-Codes von 1 bis 255; F8 (`0x77`) ist für den Editor reserviert. Mit `input.unregister(player_id, action_id)` wird die Aktion entfernt. Spieler öffnen mit F8 den lokalen Server-Keybind-Editor und können eine andere Taste wählen. Diese Belegung wird pro Server und Ressource unter `%LOCALAPPDATA%\KCD2Online\resource-keybinds.json` gespeichert. Tastendrücke werden nicht ausgelöst, während Chat oder ein Texteingabefeld aktiv ist.
+`default_virtual_key` uses Windows virtual-key codes from 1 through 255; F8 (`0x77`) is reserved for the editor. Use `input.unregister(player_id, action_id)` to remove an action. Players can press F8 to open the local server keybind editor and select another key. Bindings are stored per server and resource in `%LOCALAPPDATA%\KCD2Online\resource-keybinds.json`. Key presses are not emitted while chat or a text input is active.
 
-Eine Action wird erst nach `input.register` auf dem Zielclient angeboten. `input.on(action_id, callback)` erhält `(player_id, payload)`; der aktuelle Payload ist `{ pressed = true }`. Feste Spielaktionen dürfen nicht allein davon abhängen, dass der Client diesen Key tatsächlich gedrückt hat.
+An action becomes available on the target client only after `input.register`. The callback registered by `input.on(action_id, callback)` receives `(player_id, payload)`; the current payload is `{ pressed = true }`. Authoritative game actions must never depend solely on the client's claim that a key was pressed.
 
-Zum Schutz des Clients werden gleichzeitig höchstens 64 UI-Dokumente, 128 dynamische Bindings und 256 KiB deklarativer UI-Zustand gehalten. Nicht mehr benötigte Fenster und Actions sollten trotzdem immer mit `ui.close` beziehungsweise `input.unregister` entfernt werden.
+To protect the client, the runtime holds at most 64 UI documents, 128 dynamic bindings, and 256 KiB of declarative UI state at the same time. Unused windows and actions should still always be removed with `ui.close` and `input.unregister`, respectively.
 
-## Sicherheitsmodell
+## Security model
 
-UI ist niemals vertrauenswürdig. Ein veränderter Client kann jedes UI- oder Keybind-Ereignis selbst erzeugen. Der Server muss deshalb bei jeder Aktion Distanz, Zustand, Besitz, Preis, Cooldown und Berechtigung erneut prüfen. Hashes schützen den normalen Client vor beschädigten oder lokal veränderten Cache-Dateien; sie machen einen fremden, absichtlich manipulierten Client nicht vertrauenswürdig.
+UI is never trusted. A modified client can forge any UI or keybind event. The server must therefore validate distance, state, ownership, price, cooldown, and permissions again for every action. Hashes protect a normal client from corrupt or locally modified cache files; they do not make a custom, deliberately modified client trustworthy.

@@ -1,21 +1,21 @@
-# Laden und Verteilen von Server-Ressourcen
+# Loading and distributing server resources
 
-Nach der normalen Versions- und Kontoanmeldung sendet der Server ein Manifest mit Generation, Root-SHA-256, Paketgrößen und den Hashes aller Client-Ressourcen. Der Client prüft seinen lokalen, inhaltsadressierten Cache und fordert nur fehlende Pakete in 48-KiB-Blöcken über den bereits verschlüsselten und zuverlässigen GameNetworkingSockets-Kanal an.
+After the normal version and account handshake, the server sends a manifest containing the generation, root SHA-256 hash, package sizes, and hashes of all client resources. The client checks its local content-addressed cache and requests only missing packages, in 48 KiB chunks, over the existing encrypted and reliable GameNetworkingSockets channel.
 
-Jedes Paket wird vollständig gehasht, anschließend wird jede enthaltene Datei nochmals gegen ihren Hash geprüft. Erst danach wird es atomar im Cache gespeichert und aktiviert. Der Client bestätigt Generation und Root-Hash; erst dann sendet der Server den Welt-Bootstrap. Ein abweichender Hash, eine falsche Reihenfolge, ein zu großes Paket oder ein ungültiger Pfad beendet den Join.
+Each complete package is hashed, and every contained file is then checked against its own hash. Only after these checks does the client store and activate the package atomically. The client acknowledges the generation and root hash; the server sends the world bootstrap only after receiving that acknowledgment. A mismatched hash, incorrect sequence, oversized package, or invalid path aborts the join.
 
-Der Cache liegt unter `%LOCALAPPDATA%\KCD2Online\resources`. Pakete sind nach SHA-256 benannt und können serverübergreifend wiederverwendet werden. Eine Aktivierungsdatei ordnet einem Server nur die aktuell bestätigten Hashes zu. Änderungen erzeugen neue Hashes und werden beim nächsten Join automatisch geladen.
+The cache is stored under `%LOCALAPPDATA%\KCD2Online\resources`. Packages are named by SHA-256 hash and can be reused across servers. An activation file maps a server only to its currently confirmed hashes. Changes produce new hashes and are downloaded automatically on the next join.
 
-Wichtig: Der Client muss Lua nicht separat installieren. Der Server-Release enthält die statisch gelinkte Server-Laufzeit; der reguläre Client-Release enthält die Client-Laufzeit und den ImGui-Renderer. Ein Betreiber braucht aus dem Repository nur das, was in der Server-ZIP liegt: EXE, Konfiguration, `resources/`, Dokumentation und die lokal erzeugten `game_data`.
+The client does not need a separate Lua installation. The server release contains the statically linked server runtime; the standard client release contains the client runtime and ImGui renderer. A server operator needs only the contents of the server ZIP: the executable, configuration, `resources/`, documentation, and locally generated `game_data`.
 
-Servercode wird nie übertragen. Clientcode muss zwangsläufig auf dem Client ausführbar und damit grundsätzlich untersuchbar sein. Obfuskation wäre kein Sicherheitsmechanismus. Geheimnisse und autoritative Regeln gehören ausschließlich nach `server/`.
+Server code is never transferred. Client code must necessarily be executable on the client and can therefore always be inspected. Obfuscation is not a security boundary. Keep secrets and authoritative rules exclusively under `server/`.
 
-## Update- und Betriebsablauf
+## Updates and operations
 
-- Änderungen unter `client/`, an freigegebenen `shared/`-Dateien oder am Client-Manifest erzeugen einen neuen Paket- und Root-Hash.
-- Rein serverseitige Änderungen erzeugen bewusst keinen neuen Client-Download.
-- Nach einer Änderung den dedizierten Server neu starten. Bereits verbundene Spieler behalten den alten Zustand bis zur Trennung; ein laufendes Resource-Hot-Reload ist nicht vorgesehen.
-- Beschädigte oder lokal veränderte Cache-Blobs werden beim nächsten Join verworfen und erneut geladen.
-- Ein Resource-Ordner ohne `[client]` erscheint nicht im Download-Manifest.
+- Changes under `client/`, changes to allowlisted `shared/` files, or client manifest changes generate new package and root hashes.
+- Server-only changes deliberately do not trigger a new client download.
+- Restart the dedicated server after making a change. Connected players retain the old state until they disconnect; live resource hot reload is not supported.
+- Corrupt or locally modified cache blobs are discarded and downloaded again during the next join.
+- A resource directory without `[client]` does not appear in the download manifest.
 
-Die Server-ZIP enthält `resources/` mit Beispielen und `docs/` mit diesen Anleitungen. Eigene Produktionsressourcen werden direkt in diesen Ordner kopiert; ein Repository-Checkout oder Build-System ist dafür nicht erforderlich.
+The server ZIP includes `resources/` with examples and `docs/` with these guides. Copy production resources directly into that directory; no repository checkout or build system is required.
