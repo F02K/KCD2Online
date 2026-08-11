@@ -130,6 +130,14 @@ message AvatarPolicy {
   repeated string allowed_archetype_ids = 2;
 }
 
+enum NetworkRole {
+  NETWORK_ROLE_USER = 0;
+  NETWORK_ROLE_SUPPORTER = 1;
+  NETWORK_ROLE_MODERATOR = 2;
+  NETWORK_ROLE_ADMIN = 3;
+  NETWORK_ROLE_OWNER = 4;
+}
+
 enum PlayerActivityKind {
   PLAYER_ACTIVITY_KIND_NONE = 0;
   PLAYER_ACTIVITY_KIND_BLACKSMITHING = 1;
@@ -157,6 +165,7 @@ message PlayerSnapshot {
   // Stable public identity assigned once by the server. Unlike player_id this
   // remains suitable for long-lived RP contracts and property assignments.
   string persistent_id = 9;
+  NetworkRole network_role = 10;
 }
 
 message ClientRuntimeCapabilities {
@@ -258,6 +267,9 @@ message EnvironmentState {
   uint32 weather_id = 5;
   uint32 weather_transition_ms = 6;
   uint64 weather_revision = 7;
+  // Monotonic in-game seconds at server_time_ms. Unlike the wrapped display
+  // hour, this preserves forward-only Calendar time across day boundaries.
+  double world_time_seconds = 8;
 }
 
 message ServerBootstrap {
@@ -474,6 +486,7 @@ message ServerAccepted {
   uint32 profile_snapshot_interval_seconds = 9;
   AvatarPolicy avatar_policy = 10;
   PropertyHomeMarker home_marker = 11;
+  NetworkRole network_role = 12;
 }
 
 message ServerHomeMarkerUpdated {
@@ -567,11 +580,55 @@ message ChatSend {
   string text = 1;
 }
 
+enum ChatChannel {
+  CHAT_CHANNEL_SAY = 0;
+  CHAT_CHANNEL_WHISPER = 1;
+  CHAT_CHANNEL_SHOUT = 2;
+  CHAT_CHANNEL_EMOTE = 3;
+  CHAT_CHANNEL_SCENE = 4;
+  CHAT_CHANNEL_OOC = 5;
+  CHAT_CHANNEL_SYSTEM = 6;
+  CHAT_CHANNEL_ANNOUNCEMENT = 7;
+  CHAT_CHANNEL_ADMIN = 8;
+}
+
 message ChatBroadcast {
   uint64 player_id = 1;
   string display_name = 2;
   string text = 3;
   uint64 server_time_ms = 4;
+  ChatChannel channel = 5;
+  NetworkRole network_role = 6;
+}
+
+// Low-latency proximity voice. Audio is encoded as one 20 ms Opus frame at
+// 48 kHz mono. Visemes are fifteen unsigned 8-bit weights (silence, PP, FF,
+// TH, DD, kk, CH, SS, nn, RR, aa, E, ih, oh, ou) sampled from the same PCM
+// frame, so receivers can schedule facial presentation on the audio playout
+// clock instead of the packet-arrival clock.
+enum VoiceRange {
+  VOICE_RANGE_NORMAL = 0;
+  VOICE_RANGE_WHISPER = 1;
+  VOICE_RANGE_SHOUT = 2;
+}
+
+message ClientVoiceFrame {
+  uint32 sequence = 1;
+  uint64 capture_time_ms = 2;
+  VoiceRange range = 3;
+  bytes opus = 4;
+  bytes visemes = 5;
+  bool end_of_talkspurt = 6;
+}
+
+message ServerVoiceFrame {
+  uint64 player_id = 1;
+  uint32 sequence = 2;
+  uint64 capture_time_ms = 3;
+  VoiceRange range = 4;
+  bytes opus = 5;
+  bytes visemes = 6;
+  bool end_of_talkspurt = 7;
 }
 
 message Ping {
@@ -828,5 +885,7 @@ message Envelope {
     ClientNpcUpdateBatch client_npc_update_batch = 53;
     ServerNpcMotion server_npc_motion = 54;
     ServerNpcGameplayUpdate server_npc_gameplay_update = 55;
+    ClientVoiceFrame client_voice_frame = 56;
+    ServerVoiceFrame server_voice_frame = 57;
   }
 }

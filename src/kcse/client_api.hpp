@@ -65,6 +65,14 @@ namespace kcd2o::kcse
 		std::uint32_t sleeping_players_required{1};
 		std::uint32_t dead{};
 		std::uint32_t respawn_pending{};
+		std::uint32_t voice_recording{};
+		std::uint32_t voice_speaking{};
+		float voice_level{};
+		std::uint32_t voice_range{};
+		std::uint32_t native_keybinds{};
+		std::uint32_t chat_action_generation{};
+		std::uint32_t emote_action_held{};
+		std::uint32_t network_role{};
 	};
 
 	struct remote_player_view
@@ -73,14 +81,17 @@ namespace kcd2o::kcse
 		std::uint32_t connected{};
 		std::uint32_t movement_mode{};
 		char display_name[short_text_capacity]{};
+		std::uint32_t network_role{};
 	};
 
 	struct chat_entry_view
 	{
 		std::uint64_t player_id{};
 		std::uint64_t server_time_ms{};
+		std::uint32_t channel{};
 		char display_name[short_text_capacity]{};
 		char text[text_capacity]{};
+		std::uint32_t network_role{};
 	};
 
 	struct client_api
@@ -95,6 +106,7 @@ namespace kcd2o::kcse
 		    const connect_request *request) noexcept{};
 		void(__cdecl *disconnect)() noexcept{};
 		std::uint32_t(__cdecl *send_chat)(const char *text) noexcept{};
+		std::uint32_t(__cdecl *play_emote)(std::uint32_t kind) noexcept{};
 		std::uint32_t(__cdecl *select_avatar)(
 		    const char *archetype_id) noexcept{};
 		std::uint32_t(__cdecl *attempt_sleep)() noexcept{};
@@ -126,7 +138,7 @@ namespace kcd2o::kcse
 		    && api->version_minor == kcd2o_version_minor
 		    && api->version_patch == kcd2o_version_patch
 		    && api->get_runtime_status && api->connect && api->disconnect
-		    && api->send_chat && api->select_avatar && api->get_status
+		    && api->send_chat && api->play_emote && api->select_avatar && api->get_status
 		    && api->attempt_sleep && api->request_respawn
 		    && api->copy_players && api->copy_chat
 		    && api->copy_avatar_archetypes

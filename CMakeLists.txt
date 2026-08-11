@@ -8,7 +8,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
 
-project(KCD2Online VERSION 0.1.3 LANGUAGES CXX C ASM ASM_MASM)
+project(KCD2Online VERSION 0.1.4 LANGUAGES CXX C ASM ASM_MASM)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/multiplayer/version.hpp.in"
@@ -71,6 +71,7 @@ kcd2o_force_retail_msvc_runtime("${CMAKE_CURRENT_SOURCE_DIR}")
 
 find_package(Protobuf CONFIG REQUIRED)
 find_package(GameNetworkingSockets CONFIG REQUIRED)
+find_package(Opus CONFIG REQUIRED)
 
 if(KCD2Online_BUILD_KCSE)
     find_package(spdlog CONFIG REQUIRED)
@@ -351,6 +352,8 @@ add_library(KCD2OnlineServerCore STATIC
 	"${SRC_DIR}/server/item_ledger.hpp"
 	"${SRC_DIR}/server/npc_registry.cpp"
 	"${SRC_DIR}/server/npc_registry.hpp"
+	"${SRC_DIR}/server/permission_store.cpp"
+	"${SRC_DIR}/server/permission_store.hpp"
     "${SRC_DIR}/server/server_config.cpp"
     "${SRC_DIR}/server/server_config.hpp"
     "${SRC_DIR}/server/server_core.cpp"
@@ -534,6 +537,8 @@ if(KCD2Online_BUILD_KCSE)
 		"${SRC_DIR}/kcse/native_equipment.hpp"
 		"${SRC_DIR}/kcse/native_inventory.cpp"
 		"${SRC_DIR}/kcse/native_inventory.hpp"
+		"${SRC_DIR}/kcse/native_keybinds.cpp"
+		"${SRC_DIR}/kcse/native_keybinds.hpp"
         "${SRC_DIR}/kcse/native_profile_backend.cpp"
         "${SRC_DIR}/kcse/native_profile_backend.hpp"
 		"${SRC_DIR}/kcse/native_remote_avatar_backend.cpp"
@@ -546,6 +551,8 @@ if(KCD2Online_BUILD_KCSE)
 		"${SRC_DIR}/kcse/player_respawn_guard.hpp"
 		"${SRC_DIR}/kcse/native_runtime.cpp"
         "${SRC_DIR}/kcse/native_runtime.hpp"
+		"${SRC_DIR}/kcse/native_voice.cpp"
+		"${SRC_DIR}/kcse/native_voice.hpp"
 		"${SRC_DIR}/kcse/native_world_object_sync.cpp"
 		"${SRC_DIR}/kcse/native_world_object_sync.hpp"
 		"${SRC_DIR}/kcse/native_world_item_sync.cpp"
@@ -580,6 +587,8 @@ if(KCD2Online_BUILD_KCSE)
         kcd_re
         KCD2OnlineNpcCatalog
         KCD2OnlineProtocol
+		Opus::opus
+		ole32
     )
     set_property(TARGET KCD2OnlineKCSENativeRuntime PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
@@ -692,6 +701,76 @@ endforeach()
 add_dependencies(KCD2Online KCD2OnlineLanguageFiles)
 if(TARGET KCD2OnlineKCSEClient)
     add_dependencies(KCD2OnlineKCSEClient KCD2OnlineLanguageFiles)
+endif()
+
+# KCD's controls page resolves every group/action caption through the game's
+# localization manager. Ship the KCD2Online keys as normal mod localization
+# PAKs so missing labels never leak into the UI as "@key" placeholders.
+set(KCD2Online_GAME_LOCALIZATION_ROOT
+    "${PROJECT_SOURCE_DIR}/data/game_localization"
+)
+set(KCD2Online_GAME_LOCALIZATION_OUTPUT
+    "$<TARGET_FILE_DIR:KCD2Online>/Mods/KCD2Online/Localization"
+)
+set(KCD2Online_GAME_LOCALIZATION_ENGLISH
+    "${KCD2Online_GAME_LOCALIZATION_ROOT}/english/text_kcd2online.xml"
+)
+set(KCD2Online_GAME_LOCALIZATION_GERMAN
+    "${KCD2Online_GAME_LOCALIZATION_ROOT}/german/text_kcd2online.xml"
+)
+set(KCD2Online_MOD_MANIFEST_TEMPLATE
+    "${KCD2Online_GAME_LOCALIZATION_ROOT}/mod.manifest.in"
+)
+set(KCD2Online_MOD_MANIFEST
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/KCD2Online/mod.manifest"
+)
+configure_file(
+    "${KCD2Online_MOD_MANIFEST_TEMPLATE}"
+    "${KCD2Online_MOD_MANIFEST}"
+    @ONLY
+)
+add_custom_target(KCD2OnlineGameLocalization
+    COMMAND "${CMAKE_COMMAND}" -E remove_directory
+        "${KCD2Online_GAME_LOCALIZATION_OUTPUT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${KCD2Online_GAME_LOCALIZATION_OUTPUT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "$<TARGET_FILE_DIR:KCD2Online>/Mods/KCD2Online"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${KCD2Online_MOD_MANIFEST}"
+        "$<TARGET_FILE_DIR:KCD2Online>/Mods/KCD2Online/mod.manifest"
+    DEPENDS
+        "${KCD2Online_MOD_MANIFEST_TEMPLATE}"
+        "${KCD2Online_GAME_LOCALIZATION_ENGLISH}"
+        "${KCD2Online_GAME_LOCALIZATION_GERMAN}"
+    COMMENT "Bundling native KCD2Online localization"
+    VERBATIM
+)
+set(KCD2Online_ENGLISH_GAME_LANGUAGES
+    English Czech French Spanish Italian Polish Russian Portuguese Turkish
+    Japanese Korean Chineses Chineset Ukrainian Vietnamese
+)
+foreach(KCD2Online_GAME_LANGUAGE IN LISTS KCD2Online_ENGLISH_GAME_LANGUAGES)
+    add_custom_command(TARGET KCD2OnlineGameLocalization POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E chdir
+            "${KCD2Online_GAME_LOCALIZATION_ROOT}/english"
+            "${CMAKE_COMMAND}" -E tar cf
+            "${KCD2Online_GAME_LOCALIZATION_OUTPUT}/${KCD2Online_GAME_LANGUAGE}_xml.pak"
+            --format=zip -- "text_kcd2online.xml"
+        VERBATIM
+    )
+endforeach()
+add_custom_command(TARGET KCD2OnlineGameLocalization POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E chdir
+        "${KCD2Online_GAME_LOCALIZATION_ROOT}/german"
+        "${CMAKE_COMMAND}" -E tar cf
+        "${KCD2Online_GAME_LOCALIZATION_OUTPUT}/German_xml.pak"
+        --format=zip -- "text_kcd2online.xml"
+    VERBATIM
+)
+add_dependencies(KCD2Online KCD2OnlineGameLocalization)
+if(TARGET KCD2OnlineKCSEClient)
+    add_dependencies(KCD2OnlineKCSEClient KCD2OnlineGameLocalization)
 endif()
 
 if (MSVC)

@@ -1,0 +1,10 @@
+<kcd_mod>
+	<info>
+		<name>KCD2Online</name>
+		<modid>kcd2online</modid>
+		<description>Native multiplayer integration for Kingdom Come: Deliverance II.</description>
+		<author>KCD2Online contributors</author>
+		<version>@PROJECT_VERSION@</version>
+		<created_on>2026-08-10</created_on>
+	</info>
+</kcd_mod>

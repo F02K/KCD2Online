@@ -1,6 +1,9 @@
 #include "kcse/native_runtime.hpp"
+
+#include "kcse/native_keybinds.hpp"
 #include "kcse/join_trace.hpp"
 #include "kcse/player_respawn_guard.hpp"
+#include "multiplayer/emote_catalog.hpp"
 #include "multiplayer/profile_reconciler.hpp"
 #include "multiplayer/world_catalog.hpp"
 
@@ -42,14 +45,10 @@ namespace kcd2o::kcse
 {
 	namespace
 	{
-		constexpr int environment_cvar_override_mask =
-		    0x00000002 // VF_CHEAT
-		    | 0x00000080 // VF_NET_SYNCED
-		    | 0x00000800 // VF_READONLY
-		    | 0x00800000 // VF_CONST_CVAR
-		    | 0x01000000 // VF_CHEAT_ALWAYS_CHECK
-		    | 0x02000000 // VF_CHEAT_NOCHECK
-		    | 0x40000000; // VF_SYSSPEC_OVERWRITE
+		constexpr auto environment_apply_result =
+		    "KCD2Online_EnvironmentApplied";
+		constexpr auto environment_time_offset =
+		    "KCD2Online_WorldTimeOffset";
 
 		// KCD2 keeps CSystem in LEVEL_LOAD_COMPLETE (13) once the native world is
 		// ready. Player/Actor objects become visible several seconds before that
@@ -582,152 +581,8 @@ namespace kcd2o::kcse
 		bool environment_runtime_available() noexcept
 		{
 			auto *environment = SSystemGlobalEnvironment::GetInstance();
-			if (!environment || !environment->pConsole)
-				return false;
-#ifdef _WIN32
-			__try
-			{
-#endif
-				for (const auto *name : {"e_TimeOfDay", "e_TimeOfDaySpeed"})
-				{
-					auto *cvar = environment->pConsole->GetCVar(name);
-					if (!cvar)
-						return false;
-					auto **vtable = *reinterpret_cast<void ***>(cvar);
-					if (!vtable)
-						return false;
-					for (const auto slot : {4U, 10U, 11U, 12U, 13U})
-					{
-						if (!vtable[slot] || !in_whgame_text(vtable[slot]))
-							return false;
-					}
-				}
-				return true;
-#ifdef _WIN32
-			}
-			__except(EXCEPTION_EXECUTE_HANDLER)
-			{
-				return false;
-			}
-#endif
-		}
-
-		bool guarded_force_set_cvar(
-		    ICVar *cvar,
-		    const char *text,
-		    float *actual,
-		    int *original_flags,
-		    int *overridden_flags) noexcept
-		{
-			*original_flags = 0;
-			*overridden_flags = 0;
-#ifdef _WIN32
-			__try
-			{
-				__try
-				{
-#endif
-					auto **vtable = *reinterpret_cast<void ***>(cvar);
-					if (!vtable)
-						return false;
-					for (const auto slot : {4U, 10U, 11U, 12U, 13U})
-					{
-						if (!vtable[slot] || !in_whgame_text(vtable[slot]))
-							return false;
-					}
-					*original_flags = cvar->GetFlags();
-					*overridden_flags =
-					    *original_flags & environment_cvar_override_mask;
-					if (*overridden_flags != 0)
-						cvar->ClearFlags(*overridden_flags);
-					using force_set = void(__fastcall *)(ICVar *, const char *);
-					reinterpret_cast<force_set>(vtable[10])(cvar, text);
-					*actual = cvar->GetFVal();
-#ifdef _WIN32
-				}
-				__finally
-				{
-#endif
-					if (*overridden_flags != 0)
-					{
-						const auto current_flags = cvar->GetFlags();
-						cvar->SetFlags(current_flags | *overridden_flags);
-					}
-#ifdef _WIN32
-				}
-			}
-			__except(EXCEPTION_EXECUTE_HANDLER)
-			{
-				return false;
-			}
-#endif
-			return true;
-		}
-
-		bool force_set_environment_cvar(
-		    const char *name,
-		    double value,
-		    bool circular,
-		    std::string &error) noexcept
-		{
-			auto *environment = SSystemGlobalEnvironment::GetInstance();
-			if (!environment || !environment->pConsole)
-			{
-				error = "native engine console is unavailable";
-				return false;
-			}
-			auto *cvar = environment->pConsole->GetCVar(name);
-			if (!cvar)
-			{
-				error = std::format("required environment CVar '{}' is unavailable", name);
-				return false;
-			}
-			const auto text = std::format("{:.6f}", value);
-			float actual_float{};
-			int original_flags{};
-			int overridden_flags{};
-			if (!guarded_force_set_cvar(
-			        cvar,
-			        text.c_str(),
-			        &actual_float,
-			        &original_flags,
-			        &overridden_flags))
-			{
-				error = std::format(
-				    "CVar '{}' override raised an SEH exception or has an "
-				    "incompatible vtable",
-				    name);
-				KCD2Online_JOIN_TRACE("join.environment.cvar.failed", error);
-				return false;
-			}
-			const auto actual = static_cast<double>(actual_float);
-			const auto difference = circular
-			    ? circular_time_distance_hours(actual, value)
-			    : std::abs(actual - value);
-			if (!std::isfinite(actual) || difference > 0.001)
-			{
-				error = std::format(
-				    "CVar '{}' rejected override to {}; actual value is {}; "
-				    "flags=0x{:08X}; overridden=0x{:08X}",
-				    name,
-				    value,
-				    actual,
-				    static_cast<unsigned int>(original_flags),
-				    static_cast<unsigned int>(overridden_flags));
-				KCD2Online_JOIN_TRACE("join.environment.cvar.failed", error);
-				return false;
-			}
-			KCD2Online_JOIN_TRACE(
-			    "join.environment.cvar.applied",
-			    std::format(
-			        "name=\"{}\" requested={} actual={} flags=0x{:08X} "
-			        "overridden=0x{:08X}",
-			        name,
-			        value,
-			        actual,
-			        static_cast<unsigned int>(original_flags),
-			        static_cast<unsigned int>(overridden_flags)));
-			return true;
+			return environment && environment->pConsole
+			    && environment->pScriptSystem;
 		}
 
 		protocol::Quaternion quaternion_from_matrix(const Matrix34 &matrix)
@@ -782,36 +637,11 @@ namespace kcd2o::kcse
 
 		bool replayable_non_combat_fragment(std::string_view fragment)
 		{
-			if (fragment.empty() || fragment.size() > 96)
-				return false;
-			if (!std::ranges::all_of(
-			        fragment,
-			        [](unsigned char character)
-			        {
-				        return std::isalnum(character) != 0
-				            || character == '_' || character == '-'
-				            || character == '/' || character == '.'
-				            || character == ':';
-			        }))
-				return false;
-			std::string lower(fragment);
-			std::ranges::transform(
-			    lower,
-			    lower.begin(),
-			    [](unsigned char value)
-			    {
-				    return static_cast<char>(std::tolower(value));
-			    });
-			constexpr std::string_view excluded[] = {
-			    "combat", "attack", "strike", "parry", "block", "hit",
-			    "death", "finisher", "motion", "locomotion", "idle",
-			    "walk", "run", "sprint"};
-			return std::ranges::none_of(
-			    excluded,
-			    [&](std::string_view token)
-			    {
-				    return lower.contains(token);
-			    });
+			// FullBody replication is intentionally closed over the emote catalog.
+			// Generic local Mannequin fragments (equipment, interactions, reactions)
+			// have their own replicated state and must never become a second Avatar
+			// animation owner merely because their name was sampled for one frame.
+			return find_emote_fragment(fragment) != nullptr;
 		}
 
 		protocol::Vec3 facing_from_rotation(
@@ -900,6 +730,7 @@ namespace kcd2o::kcse
 		m_frame_seen.store(true, std::memory_order_release);
 		m_entities.process_pending_entity_control();
 		m_remote_backend.advance_frame();
+		m_voice.tick();
 		const auto changed =
 		    m_epoch_invalidated.exchange(false, std::memory_order_acq_rel);
 		if (changed)
@@ -1352,7 +1183,9 @@ namespace kcd2o::kcse
 			    "CCryAction=nil");
 			return {false, "CCryAction is unavailable."};
 		}
+		m_native_weather_revision = 0;
 		lock.unlock();
+		clear_script_global(environment_time_offset);
 		const auto environment_applied =
 		    apply_environment_state(bootstrap.environment(), true);
 		lock.lock();
@@ -1855,20 +1688,38 @@ namespace kcd2o::kcse
 			    m_diagnostic);
 			return false;
 		}
-		std::string error;
-		if (!force_set_environment_cvar(
-		        "e_TimeOfDay",
-		        state.time_of_day_hours(),
-		        true,
-		        error)
-		    || !force_set_environment_cvar(
-		        "e_TimeOfDaySpeed",
-		        state.time_scale(),
-		        false,
-		        error))
+		clear_script_global(environment_apply_result);
+		const auto script = std::format(
+		    "{0}=false; "
+		    "if Calendar and Calendar.GetWorldTime and "
+		    "Calendar.SetWorldTime and Calendar.SetWorldTimeRatio then "
+		    "local server={1:.6f}; local current=Calendar.GetWorldTime(); "
+		    "if {2}==nil then local offset=0; "
+		    "if current>server then "
+		    "offset=math.ceil((current-server)/86400)*86400; end; "
+		    "{2}=offset; end; "
+		    "local target=math.floor(server+{2}+0.5); "
+		    "if target>current then Calendar.SetWorldTime(target); "
+		    "elseif current>target+2 then "
+		    // KCD2 1.5.6 exposes IsWorldTimePaused but no corresponding setter.
+		    // Stop the clock through its supported ratio API until the server
+		    // timeline catches up on a later snapshot.
+		    "Calendar.SetWorldTimeRatio(0); {0}=true; return; end; "
+		    "Calendar.SetWorldTimeRatio({3:.6f}); {0}=true; end",
+		    environment_apply_result,
+		    state.world_time_seconds(),
+		    environment_time_offset,
+		    state.time_scale());
+		bool calendar_applied{};
+		if (!execute_script(script)
+		    || !take_script_global_bool(
+		        environment_apply_result,
+		        calendar_applied)
+		    || !calendar_applied)
 		{
 			std::scoped_lock lock(m_cache_mutex);
-			m_diagnostic = "Native environment synchronization failed: " + error;
+			m_diagnostic =
+			    "Native Calendar world-time synchronization failed.";
 			KCD2Online_JOIN_TRACE(
 			    "join.environment.apply.failed",
 			    m_diagnostic);
@@ -1876,10 +1727,14 @@ namespace kcd2o::kcse
 		}
 		if (apply_weather)
 		{
+			const auto transition_ms =
+			    state.weather_revision() > m_native_weather_revision
+			    ? state.weather_transition_ms()
+			    : 0U;
 			const auto command = std::format(
 			    "cheat_set_weather id:{} transition:{:.3f}",
 			    state.weather_id(),
-			    static_cast<double>(state.weather_transition_ms()) / 1000.0);
+			    static_cast<double>(transition_ms) / 1000.0);
 			if (!execute_console_command(command.c_str()))
 			{
 				std::scoped_lock lock(m_cache_mutex);
@@ -1890,12 +1745,15 @@ namespace kcd2o::kcse
 				    m_diagnostic);
 				return false;
 			}
+			m_native_weather_revision = state.weather_revision();
 		}
 		KCD2Online_JOIN_TRACE(
 		    "join.environment.apply.ok",
 		    std::format(
-		        "revision={} weather_revision={} apply_weather={}",
+		        "revision={} world_time_seconds={} weather_revision={} "
+		        "apply_weather={}",
 		        state.revision(),
+		        state.world_time_seconds(),
 		        state.weather_revision(),
 		        apply_weather));
 		return true;
@@ -2161,12 +2019,67 @@ namespace kcd2o::kcse
 		    && result;
 	}
 
+	bool native_runtime::play_emote(std::string_view fragment)
+	{
+		const auto player = m_entities.player();
+		const auto *emote = find_emote_fragment(fragment);
+		if (!emote || !player.entity || !player.actor || local_player_dead())
+			return false;
+
+		const auto script = std::format(
+		    "local e=System.GetEntity({}); if e and e.human and "
+		    "e.human.PlayAnim then e.human:PlayAnim({},{}); return true end "
+		    "return false",
+		    player.entity->GetId(),
+		    lua_string(emote->fragment),
+		    lua_string(emote->tags));
+		if (!execute_script(script))
+			return false;
+
+		// This action originates in the multiplayer UI, so publish it directly
+		// instead of hoping that the actor's transient fragment-name cache is
+		// sampled on the one frame where it changes.
+		std::scoped_lock lock(m_cache_mutex);
+		m_explicit_animation_fragment = emote->fragment;
+		m_explicit_animation_ends_at = std::chrono::steady_clock::now()
+		    + std::chrono::milliseconds(emote->duration_ms);
+		return true;
+	}
+
 	void native_runtime::show_multiplayer_notice(
 	    std::string_view message)
 	{
 		const auto script = "if Game and Game.SendInfoText then "
 		    "Game.SendInfoText(" + lua_string(message) + ", false) end";
 		(void)execute_script(script);
+	}
+
+	void native_runtime::set_voice_active(bool active)
+	{
+		m_voice.set_active(active && sandbox_active());
+	}
+
+	voice_capture_state native_runtime::voice_status() const noexcept
+	{
+		return m_voice.capture_state();
+	}
+
+	std::vector<protocol::ClientVoiceFrame>
+	native_runtime::poll_outbound_voice()
+	{
+		return m_voice.poll_outbound();
+	}
+
+	void native_runtime::receive_voice(
+	    const protocol::ServerVoiceFrame &frame)
+	{
+		m_voice.receive(frame);
+	}
+
+	void native_runtime::reset_voice()
+	{
+		native_keybinds::reset_transient();
+		m_voice.reset();
 	}
 
 	std::optional<protocol::TransformState>
@@ -2196,7 +2109,13 @@ namespace kcd2o::kcse
 		std::scoped_lock lock(m_cache_mutex);
 		m_local_transform            = transform;
 		m_local_transform_sampled_at = std::chrono::steady_clock::now();
-		m_transform_sequence         = 0;
+		// A correction carries the last sequence accepted by the server. Resetting
+		// the local counter to zero made every subsequent movement update stale
+		// until it happened to count past the old server value, leaving the remote
+		// player frozen at the correction point.
+		m_transform_sequence = std::max(
+		    m_transform_sequence,
+		    transform.sequence());
 		return true;
 	}
 
@@ -2206,6 +2125,19 @@ namespace kcd2o::kcse
 		m_remote_backend.set_epoch(
 		    m_epoch.load(std::memory_order_acquire));
 		auto result = m_remote_avatars.sync(players);
+		std::vector<voice_player_pose> voice_players;
+		voice_players.reserve(players.size());
+		for (const auto &player : players)
+		{
+			if (!player.connected || !player.has_transform)
+				continue;
+			voice_players.push_back({
+			    player.id,
+			    m_remote_backend.entity_id_for(player.id),
+			    player.transform.position(),
+			    player.transform.velocity()});
+		}
+		m_voice.update_players(voice_players);
 		KCD2Online_JOIN_TRACE(
 		    result.success ? "join.remote-sync.complete"
 		                   : "join.remote-sync.failed",
@@ -2255,6 +2187,8 @@ namespace kcd2o::kcse
 		m_local_animation_fragment.clear();
 		m_animation_sequence         = 0;
 		m_animation_started_at_ms    = 0;
+		m_explicit_animation_fragment.clear();
+		m_explicit_animation_ends_at = {};
 		m_probe_transform_verified   = false;
 		m_probe_complete             = false;
 		m_probe_failed               = false;
@@ -2452,7 +2386,6 @@ namespace kcd2o::kcse
 				else
 				{
 					m_probe_transform_verified = true;
-					m_transform_sequence = 0;
 					KCD2Online_JOIN_TRACE(
 					    "join.runtime.probe.identical-transform.ok",
 					    "SetWorldTM write/readback verified");
@@ -2558,6 +2491,19 @@ namespace kcd2o::kcse
 		std::scoped_lock lock(m_cache_mutex);
 		if (transform)
 		{
+			if (!m_explicit_animation_fragment.empty())
+			{
+				if (transform_sampled_at < m_explicit_animation_ends_at)
+				{
+					sampled_animation_fragment =
+					    m_explicit_animation_fragment;
+				}
+				else
+				{
+					m_explicit_animation_fragment.clear();
+					m_explicit_animation_ends_at = {};
+				}
+			}
 			// IEntity only exposes the world transform here. Derive the wire
 			// velocity from consecutive game-thread samples so the server can
 			// classify locomotion instead of publishing every player as idle.

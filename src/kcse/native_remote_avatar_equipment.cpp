@@ -4,6 +4,7 @@
 #include "kcse/native_equipment.hpp"
 #include "kcse/native_inventory.hpp"
 #include "kcse/native_weapon_controller.hpp"
+#include "multiplayer/avatar_visual.hpp"
 #include "npc/equipment_catalog.hpp"
 
 #include <entitymodule/C_EquipmentManager.h>
@@ -117,6 +118,7 @@ namespace kcd2o::kcse
 			}
 		}
 		item_instances.clear();
+		error.clear();
 		return true;
 	}
 
@@ -126,6 +128,35 @@ namespace kcd2o::kcse
 	    std::vector<native_remote_equipment_instance> &item_instances,
 	    std::string &error)
 	{
+		if (avatar_requests_no_equipment(appearance))
+		{
+			KCD2Online_JOIN_TRACE(
+			    "join.remote-appearance.equipment-empty",
+			    std::format(
+			        "player_id={} entity_id={} action=clear-authoritative-naked-state",
+			        native.player,
+			        native.entity_id));
+			if (item_instances.empty())
+			{
+				error.clear();
+				return true;
+			}
+			if (native.human.IsWeaponDrawn()
+			    && !set_weapon_set_drawn(
+			        native.human,
+			        native_weapon_set::any,
+			        false))
+			{
+				error = "remote naked-state change could not holster active weapon";
+				return false;
+			}
+			return clear_native_remote_equipment(
+			    native.soul,
+			    native.inventory,
+			    item_instances,
+			    error);
+		}
+
 		std::vector<desired_equipment_item> desired;
 		desired.reserve(appearance.equipment_size());
 		for (const auto &wire : appearance.equipment())
@@ -140,14 +171,16 @@ namespace kcd2o::kcse
 			if (!native.database.FindClassByGuid(guid))
 			{
 				KCD2Online_JOIN_TRACE(
-				    "join.remote-appearance.item-skipped",
+				    "join.remote-appearance.item-rejected",
 				    std::format(
 				        "player_id={} definition=\"{}\" slot=\"{}\" "
 				        "reason=native-definition-unavailable",
 				        native.player,
 				        wire.definition_id(),
 				        wire.equipped_slot()));
-				continue;
+				error = "remote equipment definition is unavailable: "
+				    + wire.definition_id();
+				return false;
 			}
 			desired.push_back({
 			    &wire,
@@ -254,7 +287,9 @@ namespace kcd2o::kcse
 				        native.player,
 				        item.wire->definition_id(),
 				        item.wire->equipped_slot()));
-				continue;
+				error = "remote native item creation failed: "
+				    + item.wire->definition_id();
+				return false;
 			}
 
 			const auto instance = make_instance_guid();
@@ -307,7 +342,9 @@ namespace kcd2o::kcse
 					return false;
 				}
 				item_instances.pop_back();
-				continue;
+				error = "remote native EquipItem rejected definition: "
+				    + item.wire->definition_id();
+				return false;
 			}
 
 			auto *equipment =
@@ -339,7 +376,14 @@ namespace kcd2o::kcse
 				return false;
 			}
 			item_instances.pop_back();
+			error = std::format(
+			    "remote native equipment slot mismatch for {}: expected {}, got {}",
+			    item.wire->definition_id(),
+			    item.wire->equipped_slot(),
+			    actual_slot.value_or(""));
+			return false;
 		}
+		error.clear();
 		return true;
 	}
 }

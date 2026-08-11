@@ -1,6 +1,6 @@
 # Multiplayer architecture and prototype status
 
-This document describes KCD2Online **v0.1.3**. The implementation is an active
+This document describes KCD2Online **v0.1.4**. The implementation is an active
 prototype and is not intended for production servers or valuable saves.
 
 ## Versioning and compatibility
@@ -13,7 +13,7 @@ KCD2Online has one semantic project version shared by:
 - packaged artifacts; and
 - the multiplayer handshake.
 
-The current version is `0.1.3`. There is no separate public protocol or KCSE C
+The current version is `0.1.4`. There is no separate public protocol or KCSE C
 ABI version. The KCSE query boundary reads the same generated major, minor, and
 patch components as the rest of the project. During the prototype phase, all
 components must match exactly; a mismatch is rejected before authentication or
@@ -50,7 +50,7 @@ copy, upload, or modify native save files.
 
 ## Transport lanes
 
-Each connection configures four outbound GameNetworkingSockets lanes. Chat is
+Each connection configures five outbound GameNetworkingSockets lanes. Chat is
 the only strictly prioritized lane. Reliable protocol state remains in one
 ordered lane, while absolute player and NPC motion use separate unreliable
 lanes with weighted bandwidth sharing. This keeps chat and player movement
@@ -63,10 +63,48 @@ The lane mapping is symmetric but configured independently in each direction:
 - `ordered_state`: all other reliable and causally ordered messages;
 - `player_realtime`: client transforms and server world snapshots; and
 - `npc_realtime`: NPC authority update batches and server NPC motion.
+- `voice_realtime`: unreliable, no-delay Opus voice frames and synchronized
+  viseme weights.
 
 Lanes share one connection and congestion controller; they prioritize queued
 traffic but do not create bandwidth. Realtime queues use per-lane backpressure
 so NPC congestion does not cause player-motion packets to be discarded.
+
+## Proximity voice
+
+Hold `V` for normal speech, `Ctrl+V` to whisper, or `Shift+V` to shout. The
+client captures the Windows communications microphone through WASAPI, converts
+it to 48 kHz mono, and sends one Opus VOIP frame every 20 milliseconds. Silence
+is not transmitted when push-to-talk is released.
+
+The server derives the sender from the authenticated connection and selects
+recipients from authoritative transforms. Default voice radii are 3, 15, and
+40 metres and can be changed in `[voice]`. Voice packets are rate limited and
+never enter the reliable state lane.
+
+Receivers keep an adaptive three-to-six-frame jitter target, use Opus packet-loss
+concealment for gaps, and feed decoded PCM into a lock-free FMOD user stream.
+Each speaker owns one 3D channel routed through `bus:/dieg/w_obj`; its position
+tracks the remote avatar's head. Fifteen quantized viseme weights share the
+audio frame sequence. The current safe presentation maps speech energy onto
+KCD2's `facial_chewing_01` transition animation; direct phoneme injection into
+the retail `LipSync_TransitionQueue` remains deliberately disabled until its
+KCD2 1.5.6 ABI has been verified.
+
+## Roleplay chat and emotes
+
+Normal messages are local `/say` speech. The server selects recipients from its
+authoritative transforms; clients cannot claim their own chat radius. Supported
+commands are `/w` or `/whisper`, `/s` or `/say`, `/y` or `/shout`, `/me`, `/do`,
+and the optional global `/ooc` channel. Default radii are 3, 15, and 40 metres
+and can be changed in `[chat]` without changing the protocol.
+
+Holding `G` opens the in-game emote wheel. Its initial audited catalog contains
+the non-looping player fragments `Greetings` (bow), `Soldier_Cheers` (cheer),
+`CrowdPeasantPoint` (point), and `NoWeaponSurrender` (surrender).
+The ABI accepts only the catalog enum, never a caller-supplied Lua snippet or
+animation fragment. The existing animation observation and replication path
+then presents that one-shot to nearby remote avatars.
 
 ## Server authority and persistence
 
@@ -77,7 +115,29 @@ The dedicated server owns the canonical multiplayer state. Its
   revision metadata;
 - `players/<player_id>.pb` for authenticated player profiles;
 - `world_objects.pb` for doors and synchronized containers; and
-- `world_items.pb` for dropped-item state and tombstones.
+- `world_items.pb` for dropped-item state and tombstones;
+- `permissions.json` for persistent UUID-to-scope grants; and
+- `admin-audit.jsonl` for append-only GM action records.
+
+The `[permissions].owners` UUIDs implicitly receive `*`. Other grants support
+exact scopes and suffix wildcards such as `admin.*`. Available GM scopes are
+`admin.players`, `admin.announce`, `admin.kick`, `admin.teleport`,
+`admin.freeze`, and `admin.permissions`. They guard `/players`, `/announce`,
+`/kick`, `/goto`, `/bring`, `/freeze`, `/unfreeze`, and `/perm` on the server.
+The dedicated console can bootstrap access with `permission grant <player_id>
+<scope>`; console and in-game changes are audited.
+
+When central account authentication is enabled, token introspection also returns the
+current network role. Supporters, moderators, admins, and owners bypass the server
+password, player limit, and backend-managed server membership ban. The server copies
+the role into authoritative player snapshots and chat broadcasts so clients can show
+a non-spoofable badge. Network admins and owners additionally receive effective `*`
+permission without an entry in `permissions.json`. Version, game-build, content, and
+protocol checks are never bypassed.
+
+Servers can opt into the backend-managed membership whitelist with
+`[auth].whitelist_enabled = true`. Regular accounts then need `whitelisted=true` in
+their server membership record; network staff retain their join bypass.
 
 Persistence uses a temporary sibling followed by atomic replacement. Player
 IDs, object identities, item instance UUIDs, and revisions survive restarts.
@@ -234,13 +294,17 @@ authoritative revision has already arrived.
 
 ## Environment
 
-The server owns the time-of-day anchor, real-time anchor, time scale, weather,
-and associated revisions. Clients advance time locally and apply bounded drift
-corrections. Weather transitions use a separate revision so they are not
-restarted on every snapshot.
+The server owns monotonic Calendar world time, its real-time anchor, time scale,
+weather, and associated revisions. Clients advance time locally and apply
+forward-only corrections through the game's Calendar API. Admin changes and
+shared sleep therefore retain day boundaries instead of moving RPG time
+backwards.
 
-Time values are applied through the engine CVar path. Weather continues through
-the game's weather command so native profile blending remains intact.
+Weather transitions use a separate revision so a new transition is not
+restarted on every snapshot. Clients periodically reassert the authoritative
+weather profile without a transition before the vanilla random-preset interval
+can elapse. Weather still uses the game's native weather command so profile
+blending remains intact.
 
 ## NPC synchronization
 

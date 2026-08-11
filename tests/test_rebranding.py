@@ -70,7 +70,7 @@ class RebrandingTests(unittest.TestCase):
         match = re.search(r"project\(KCD2Online VERSION ([0-9]+\.[0-9]+\.[0-9]+)", cmake)
         self.assertIsNotNone(match)
         version = match.group(1)
-        self.assertEqual(version, "0.1.3")
+        self.assertEqual(version, "0.1.4")
 
         manifest = json.loads((PROJECT_ROOT / "vcpkg.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["version-string"], version)
@@ -135,7 +135,7 @@ class RebrandingTests(unittest.TestCase):
         )
 
         self.assertIn("project(KCD2Online", cmake)
-        self.assertIn("project(KCD2Online VERSION 0.1.3", cmake)
+        self.assertIn("project(KCD2Online VERSION 0.1.4", cmake)
         self.assertIn("generated/kcd2o_version.hpp", cmake)
         self.assertIn("GENERATED_RESOURCE_FILE", cmake)
         self.assertIn("add_library(KCD2Online", cmake)

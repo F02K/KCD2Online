@@ -7,10 +7,11 @@ out/package/<profile>/
 ```
 
 The raw CMake configuration directory also contains the language files in the
-runtime-relative layout `Mods/KCD2Online/Lang/`. This applies both to builds started
-through `build.bat` and direct `cmake --build` invocations of the `KCD2Online`
-target. Translation-only changes are copied again on the next build without
-requiring the client DLL to be relinked.
+runtime-relative layouts `Mods/KCD2Online/Lang/` and
+`Mods/KCD2Online/Localization/`, together with `mod.manifest`. This applies both
+to builds started through `build.bat` and direct `cmake --build` invocations of
+the `KCD2Online` target. Translation-only changes are bundled again on the next
+build without requiring the client DLL to be relinked.
 
 `<profile>` is `debug` or `release`. Existing package contents are replaced only
 after a new package has been staged successfully, so stale files from earlier
@@ -30,13 +31,16 @@ out/package/release/
 |   |   |-- Mods/KCD2Online/KCSE/Plugins/
 |   |   |   |-- KCD2OnlineKCSEClient.dll
 |   |   |   `-- KCD2OnlineKCSEClient.pdb
+|   |   |-- Mods/KCD2Online/mod.manifest
+|   |   |-- Mods/KCD2Online/Localization/
+|   |   |   `-- *_xml.pak
 |   |   |-- Mods/KCD2Online/Lang/
 |   |   |   |-- de.lang
 |   |   |   |-- en.lang
 |   |   |   `-- README.md
 |   |   `-- KCSE/addresslib/
 |   |       `-- kcd_addresslib_*.bin
-|   `-- KCD2Online-Client-v0.1.3.zip
+|   `-- KCD2Online-Client-v0.1.4.zip
 |-- server/
 |   |-- KCD2OnlineServer.exe
 |   |-- KCD2OnlineServer.pdb
@@ -57,7 +61,7 @@ out/package/release/
 |   |-- tools/
 |   |   |-- KCD2OnlineSignatureAudit.exe
 |   |   `-- KCD2OnlineSignatureAudit.pdb
-|   `-- KCD2Online-Server-v0.1.3.zip
+|   `-- KCD2Online-Server-v0.1.4.zip
 |-- tests/
 |   |-- KCD2Online*Tests.exe
 |   `-- KCD2Online*Tests.pdb

@@ -1,6 +1,8 @@
 #include "multiplayer/avatar_visual.hpp"
+#include "multiplayer/voice_spatial.hpp"
 
 #include <cassert>
+#include <cmath>
 
 int main()
 {
@@ -78,7 +80,18 @@ int main()
 	    == protocol::AVATAR_WEAPON_CLASS_NONE);
 
 	protocol::AvatarDescriptor naked;
+	assert(avatar_requests_no_equipment(naked));
 	const auto unequipped = merge_avatar_visual(merged, naked, std::nullopt);
 	assert(unequipped.equipment().empty());
+	assert(avatar_requests_no_equipment(unequipped));
+
+	protocol::Vec3 game_position;
+	game_position.set_x(10.0F);
+	game_position.set_y(2000.0F);
+	game_position.set_z(3.0F);
+	const auto audio_position = to_voice_audio_coordinates(game_position, 1.65F);
+	assert(audio_position.x == 10.0F);
+	assert(std::abs(audio_position.y - 4.65F) < 0.0001F);
+	assert(audio_position.z == 2000.0F);
 	return 0;
 }

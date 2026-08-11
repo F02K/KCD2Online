@@ -107,6 +107,59 @@ namespace kcd2o::account
 				throw std::runtime_error("KCD2Online service returned invalid data");
 			return result;
 		}
+
+		std::string optional_string(
+		    const nlohmann::json &json,
+		    const char *name,
+		    std::size_t maximum)
+		{
+			const auto found = json.find(name);
+			if (found == json.end() || found->is_null())
+				return {};
+			if (!found->is_string())
+				throw std::runtime_error(
+				    std::string("KCD2Online service returned invalid '") + name + "'");
+			auto result = found->get<std::string>();
+			if (result.size() > maximum)
+				throw std::runtime_error("KCD2Online service returned invalid data");
+			return result;
+		}
+
+		account_profile parse_profile(const nlohmann::json &json)
+		{
+			account_profile profile{
+			    required_string(json, "accountId", 64),
+			    optional_string(json, "username", 32),
+			    optional_string(json, "displayName", 64),
+			    optional_string(json, "locale", 16),
+			    optional_string(json, "networkRole", 16)};
+			if (profile.locale.empty())
+				profile.locale = "en";
+			if (profile.network_role.empty())
+				profile.network_role = "user";
+			return profile;
+		}
+
+		std::string service_error(std::string_view response, DWORD status)
+		{
+			try
+			{
+				const auto json = nlohmann::json::parse(response);
+				const auto code = optional_string(json, "error", 128);
+				const auto message = optional_string(json, "message", 1024);
+				if (!message.empty() && !code.empty())
+					return message + " (" + code + ")";
+				if (!message.empty())
+					return message;
+				if (!code.empty())
+					return "KCD2Online request failed: " + code;
+			}
+			catch (const nlohmann::json::exception &)
+			{
+			}
+			return "KCD2Online service rejected the request (HTTP "
+			    + std::to_string(status) + ")";
+		}
 	}
 
 	account_api::account_api(std::string base_url) : m_base_url(std::move(base_url))
@@ -162,6 +215,31 @@ namespace kcd2o::account
 		    completion.at("expiresAtUnixSeconds").get<long long>()};
 	}
 
+	account_profile account_api::get_profile(const account_record &account) const
+	{
+		const auto authenticated = login(account, "account");
+		return parse_profile(nlohmann::json::parse(request_json(
+		    L"GET", "/v1/account/profile", {}, authenticated.access_token)));
+	}
+
+	account_profile account_api::update_profile(
+	    const account_record &account,
+	    std::string_view username,
+	    std::string_view display_name,
+	    std::string_view locale) const
+	{
+		const auto authenticated = login(account, "account");
+		const nlohmann::json request{
+		    {"username", username},
+		    {"displayName", display_name},
+		    {"locale", locale}};
+		return parse_profile(nlohmann::json::parse(request_json(
+		    L"PUT",
+		    "/v1/account/profile",
+		    request.dump(),
+		    authenticated.access_token)));
+	}
+
 	std::vector<public_server> account_api::list_servers() const
 	{
 		const auto json = nlohmann::json::parse(get_json("/v1/servers"));
@@ -194,7 +272,17 @@ namespace kcd2o::account
 	    std::string_view path,
 	    std::string_view body) const
 	{
-		if (!path.starts_with('/') || body.size() > 64 * 1024)
+		return request_json(L"POST", path, body);
+	}
+
+	std::string account_api::request_json(
+	    std::wstring_view method,
+	    std::string_view path,
+	    std::string_view body,
+	    std::string_view access_token) const
+	{
+		if (!path.starts_with('/') || body.size() > 64 * 1024
+		    || access_token.size() > 8192)
 			throw std::invalid_argument("KCD2Online request is invalid");
 		const auto endpoint = parse_url(m_base_url);
 		auto session = internet_handle(WinHttpOpen(
@@ -213,7 +301,7 @@ namespace kcd2o::account
 		const auto request_path = endpoint.base_path + wide(path);
 		auto request = internet_handle(WinHttpOpenRequest(
 		    connection.get(),
-		    L"POST",
+		    std::wstring(method).c_str(),
 		    request_path.c_str(),
 		    nullptr,
 		    WINHTTP_NO_REFERER,
@@ -221,12 +309,16 @@ namespace kcd2o::account
 		    endpoint.secure ? WINHTTP_FLAG_SECURE : 0));
 		if (!request)
 			throw std::runtime_error("Could not create a KCD2Online request");
-		constexpr wchar_t headers[] = L"Content-Type: application/json\r\nAccept: application/json\r\n";
+		auto headers = std::wstring(L"Accept: application/json\r\n");
+		if (!body.empty())
+			headers += L"Content-Type: application/json\r\n";
+		if (!access_token.empty())
+			headers += L"Authorization: KCD2O " + wide(access_token) + L"\r\n";
 		if (!WinHttpSendRequest(
 		        request.get(),
-		        headers,
+		        headers.c_str(),
 		        static_cast<DWORD>(-1),
-		        const_cast<char *>(body.data()),
+		        body.empty() ? nullptr : const_cast<char *>(body.data()),
 		        static_cast<DWORD>(body.size()),
 		        static_cast<DWORD>(body.size()),
 		        0)
@@ -252,7 +344,7 @@ namespace kcd2o::account
 				throw std::runtime_error("Could not read KCD2Online response");
 			if (available == 0)
 				break;
-			if (response.size() + available > 128 * 1024)
+			if (response.size() + available > 512 * 1024)
 				throw std::runtime_error("KCD2Online response is too large");
 			const auto offset = response.size();
 			response.resize(offset + available);
@@ -263,11 +355,7 @@ namespace kcd2o::account
 			response.resize(offset + read);
 		}
 		if (status < 200 || status >= 300)
-		{
-			if (status == 409)
-				throw std::runtime_error("KCD2Online account already exists for this device");
-			throw std::runtime_error("KCD2Online service rejected the account request");
-		}
+			throw std::runtime_error(service_error(response, status));
 		if (response.empty())
 			throw std::runtime_error("KCD2Online service returned an empty response");
 		return response;
@@ -275,23 +363,6 @@ namespace kcd2o::account
 
 	std::string account_api::get_json(std::string_view path) const
 	{
-		if (!path.starts_with('/'))
-			throw std::invalid_argument("KCD2Online request is invalid");
-		const auto endpoint = parse_url(m_base_url);
-		auto session = internet_handle(WinHttpOpen(L"KCD2Online/0.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, nullptr, 0));
-		if (!session) throw std::runtime_error("Could not initialize KCD2Online networking");
-		WinHttpSetTimeouts(session.get(), 5000, 5000, 10000, 10000);
-		auto connection = internet_handle(WinHttpConnect(session.get(), endpoint.host.c_str(), endpoint.port, 0));
-		const auto request_path = endpoint.base_path + wide(path);
-		auto request = internet_handle(WinHttpOpenRequest(connection.get(), L"GET", request_path.c_str(), nullptr, nullptr, WINHTTP_DEFAULT_ACCEPT_TYPES, endpoint.secure ? WINHTTP_FLAG_SECURE : 0));
-		if (!request || !WinHttpSendRequest(request.get(), L"Accept: application/json\r\n", static_cast<DWORD>(-1), nullptr, 0, 0, 0)
-		    || !WinHttpReceiveResponse(request.get(), nullptr))
-			throw std::runtime_error("KCD2Online service is unavailable");
-		DWORD status{}, status_size = sizeof(status);
-		WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &status, &status_size, nullptr);
-		std::string response;
-		for (;;) { DWORD available{}; if (!WinHttpQueryDataAvailable(request.get(), &available)) throw std::runtime_error("Could not read KCD2Online response"); if (!available) break; if (response.size() + available > 512 * 1024) throw std::runtime_error("KCD2Online response is too large"); const auto offset = response.size(); response.resize(offset + available); DWORD read{}; if (!WinHttpReadData(request.get(), response.data() + offset, available, &read)) throw std::runtime_error("Could not read KCD2Online response"); response.resize(offset + read); }
-		if (status < 200 || status >= 300) throw std::runtime_error("KCD2Online service rejected the server-list request");
-		return response;
+		return request_json(L"GET", path, {});
 	}
 }

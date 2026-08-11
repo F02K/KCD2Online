@@ -8,6 +8,52 @@ changes. Client and server versions must match exactly.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-09
+
+### Added
+
+- Added server-authoritative proximity VOIP with 48 kHz mono Opus frames, a
+  dedicated low-latency GameNetworkingSockets lane, rate limiting, and
+  whisper/normal/shout ranges.
+- Added WASAPI microphone capture, a receiver jitter buffer with Opus packet
+  loss concealment, live 3D FMOD user streams attached to remote-player head
+  positions, and synchronized compact viseme weights with a safe native facial
+  animation fallback.
+- Added a subtle bottom-left microphone indicator driven by the live capture
+  level, with distinct whisper, normal, and shout colors.
+- Added a native `KCD2Online` section to KCD2's controls settings for multiplayer
+  chat, push-to-talk, and the emote wheel. Bindings use the game's normal
+  rebinding, conflict detection, reset, and profile persistence behavior.
+- Added a four-way emote wheel for bow, cheer, point, and surrender animations,
+  with a radial cursor that follows the mouse direction from the center and
+  highlights a segment only after entering it.
+
+### Changed
+
+- Blocked movement and camera-look input while the emote wheel is open while
+  still forwarding release events so any user-defined emote binding can close
+  and submit the wheel reliably.
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.4`.
+- Made the server environment timeline carry monotonic Calendar world time in
+  addition to the displayed hour and apply its time scale through the game's
+  RPG Calendar API.
+
+### Fixed
+
+- Avoided a join-time world unload and engine crash by synchronizing Calendar
+  pauses through the supported world-time ratio API instead of requiring the
+  unavailable `Calendar.SetWorldTimePaused` Lua binding.
+- Replaced literal controls-page captions with packaged KCD2 localization keys,
+  preventing missing-label output such as `@Multiplayer @chat` and providing
+  German labels plus English fallbacks for the other supported game languages.
+- Prevented multiplayer time corrections, admin time changes, and shared sleep
+  skips from moving RPG world time backwards or desynchronizing it from the
+  visual day/night cycle.
+- Periodically reasserted the authoritative weather profile without restarting
+  its transition, preventing vanilla's local random preset selection from
+  leaving clients on different macro weather.
+
 ## [0.1.3] - 2026-08-09
 
 ### Added

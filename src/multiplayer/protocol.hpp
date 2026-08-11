@@ -38,6 +38,8 @@ namespace kcd2o
 	constexpr std::size_t max_world_object_inventory_items = 512;
 	constexpr std::size_t max_world_items = 4096;
 	constexpr std::size_t max_npcs_per_message = 256;
+	constexpr std::size_t voice_viseme_count = 15;
+	constexpr std::size_t max_voice_opus_bytes = 512;
 	constexpr std::size_t max_profile_quick_access_slots = 36;
 	constexpr std::int64_t max_profile_money = 2'000'000'000;
 	constexpr std::uint32_t money_subunits_per_groschen = 10;
@@ -111,10 +113,11 @@ namespace kcd2o
 		player_realtime = 0,
 		ordered_state = 1,
 		npc_realtime = 2,
-		interactive = 3
+		interactive = 3,
+		voice_realtime = 4
 	};
 
-	constexpr std::size_t traffic_lane_count = 4;
+	constexpr std::size_t traffic_lane_count = 5;
 
 	struct encoded_message
 	{

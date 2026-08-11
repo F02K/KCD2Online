@@ -3,7 +3,9 @@
 #include "multiplayer/protocol.hpp"
 #include "property/service.hpp"
 #include "server/item_ledger.hpp"
+#include "server/network_identity.hpp"
 #include "server/npc_registry.hpp"
+#include "server/permission_store.hpp"
 #include "server/server_config.hpp"
 #include "server/world_store.hpp"
 
@@ -48,13 +50,14 @@ namespace kcd2o::server
 		std::uint64_t last_sequence{};
 		protocol::MovementMode movement_mode{protocol::MOVEMENT_MODE_IDLE};
 		bool dummy{};
+		std::string network_role{"user"};
 	};
 
 	class server_core
 	{
 	public:
 		using token_generator = std::function<std::string()>;
-		using account_authenticator = std::function<std::optional<std::string>(
+		using account_authenticator = std::function<std::optional<network_identity>(
 		    std::string_view,
 		    std::string &)>;
 
@@ -80,6 +83,15 @@ namespace kcd2o::server
 		    std::string *error = nullptr);
 		[[nodiscard]] bool remove_dummy(player_id id, time_point now);
 		void server_say(std::string text, time_point now);
+		[[nodiscard]] bool grant_permission(
+		    player_id id,
+		    std::string permission,
+		    std::string &error);
+		[[nodiscard]] bool revoke_permission(
+		    player_id id,
+		    std::string_view permission,
+		    std::string &error);
+		[[nodiscard]] std::vector<std::string> permissions(player_id id) const;
 		[[nodiscard]] bool set_npc_entities_disabled(
 		    bool humans_disabled,
 		    bool animals_disabled);
@@ -140,6 +152,8 @@ namespace kcd2o::server
 			pending_stage stage{pending_stage::hello};
 			std::string display_name;
 			std::string content_hash;
+			bool password_accepted{};
+			std::optional<network_identity> network;
 			std::optional<persisted_profile> persisted;
 			std::string issued_identity_token;
 			std::string resume_token;
@@ -154,6 +168,10 @@ namespace kcd2o::server
 			token_hash identity_hash{};
 			std::optional<connection_id> connection;
 			bool dummy{};
+			std::string network_role{"user"};
+			bool network_full_permissions{};
+			bool network_chat_muted{};
+			bool network_voice_muted{};
 			bool has_transform{};
 			protocol::TransformState transform;
 			protocol::MovementMode movement_mode{protocol::MOVEMENT_MODE_IDLE};
@@ -163,10 +181,13 @@ namespace kcd2o::server
 			time_point reconnect_deadline;
 			std::deque<time_point> chat_times;
 			std::deque<time_point> avatar_update_times;
+			std::deque<time_point> voice_frame_times;
 			protocol::AvatarDescriptor avatar;
 			protocol::PlayerProfile profile;
 			time_point last_persisted_at;
 			bool dead{};
+			bool frozen{};
+			protocol::TransformState frozen_transform;
 			protocol::PlayerActivity activity;
 			std::uint64_t dummy_random_state{};
 			time_point dummy_last_update;
@@ -225,6 +246,37 @@ namespace kcd2o::server
 		void handle_chat(
 		    player_session &player,
 		    const protocol::ChatSend &message,
+		    time_point now);
+		void handle_voice(
+		    player_session &player,
+		    const protocol::ClientVoiceFrame &message,
+		    time_point now);
+		[[nodiscard]] bool handle_admin_chat(
+		    player_session &player,
+		    std::string_view text,
+		    time_point now);
+		void send_chat_message(
+		    connection_id connection,
+		    player_id sender,
+		    std::string_view display_name,
+		    std::string text,
+		    protocol::ChatChannel channel,
+		    time_point now);
+		void send_system_message(
+		    player_session &player,
+		    std::string text,
+		    time_point now,
+		    protocol::ChatChannel channel = protocol::CHAT_CHANNEL_SYSTEM);
+		void send_spatial_chat(
+		    const player_session &sender,
+		    std::string text,
+		    protocol::ChatChannel channel,
+		    float range_m,
+		    time_point now);
+		[[nodiscard]] bool teleport_player(
+		    player_session &target,
+		    const protocol::TransformState &destination,
+		    std::string reason,
 		    time_point now);
 		void handle_ping(
 		    player_session &player,
@@ -313,6 +365,7 @@ namespace kcd2o::server
 		token_generator m_generate_token;
 		account_authenticator m_authenticate_account;
 		world_store m_store;
+		permission_store m_permissions;
 		npc_registry m_npcs;
 		property::service m_properties;
 		std::uint64_t m_server_tick{};
@@ -340,7 +393,7 @@ namespace kcd2o::server
 		bool m_animal_npcs_disabled{};
 		std::uint64_t m_environment_revision{1};
 		std::uint64_t m_weather_revision{1};
-		double m_environment_anchor_hours{};
+		double m_environment_anchor_world_seconds{};
 		float m_environment_time_scale{};
 		std::uint32_t m_environment_weather_id{};
 		std::uint32_t m_environment_weather_transition_ms{};

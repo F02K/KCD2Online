@@ -2,6 +2,7 @@
 
 #include "kcse/client_api.hpp"
 #include "multiplayer/client.hpp"
+#include "multiplayer/emote_catalog.hpp"
 #include "multiplayer/runtime.hpp"
 
 #include <string>
@@ -19,6 +20,7 @@ namespace kcd2o::kcse
 		[[nodiscard]] bool connect(const client_options &options) const;
 		void disconnect() const;
 		[[nodiscard]] bool send_chat(std::string text) const;
+		[[nodiscard]] bool play_emote(emote_kind kind) const;
 		[[nodiscard]] bool select_avatar(std::string archetype_id) const;
 		[[nodiscard]] bool attempt_sleep() const;
 		[[nodiscard]] bool request_respawn() const;

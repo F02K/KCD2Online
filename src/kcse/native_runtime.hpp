@@ -4,6 +4,7 @@
 #include "kcse/native_entity_backend.hpp"
 #include "kcse/native_profile_backend.hpp"
 #include "kcse/native_remote_avatar_backend.hpp"
+#include "kcse/native_voice.hpp"
 
 #include <KCSE/KCSEAPI.h>
 
@@ -94,7 +95,15 @@ namespace kcd2o::kcse
 		    const protocol::TransformState &spawn) override;
 		[[nodiscard]] bool local_player_dead() const;
 		[[nodiscard]] bool local_player_laying() const;
+		[[nodiscard]] bool play_emote(std::string_view fragment);
 		void show_multiplayer_notice(std::string_view message) override;
+		void set_voice_active(bool active) override;
+		[[nodiscard]] voice_capture_state voice_status() const noexcept;
+		[[nodiscard]] std::vector<protocol::ClientVoiceFrame>
+		poll_outbound_voice() override;
+		void receive_voice(
+		    const protocol::ServerVoiceFrame &frame) override;
+		void reset_voice() override;
 
 		[[nodiscard]] std::optional<protocol::TransformState>
 		local_transform() const;
@@ -167,6 +176,9 @@ namespace kcd2o::kcse
 		std::string m_local_animation_fragment;
 		std::uint64_t m_animation_sequence{};
 		std::uint64_t m_animation_started_at_ms{};
+		std::string m_explicit_animation_fragment;
+		std::chrono::steady_clock::time_point
+		    m_explicit_animation_ends_at{};
 		std::string m_diagnostic;
 		bool m_transition_safe{};
 		std::string m_transition_blocker;
@@ -181,6 +193,7 @@ namespace kcd2o::kcse
 		bool m_level_load_complete{};
 		bool m_probe_transform_verified{};
 		bool m_probe_complete{};
+		std::uint64_t m_native_weather_revision{};
 		std::atomic<bool> m_probe_failed{};
 		bool m_preparation_active{};
 		std::uint32_t m_preparation_frames{};
@@ -203,5 +216,6 @@ namespace kcd2o::kcse
 		native_profile_backend m_profiles;
 		native_remote_avatar_backend m_remote_backend;
 		remote_avatar_manager m_remote_avatars;
+		native_voice m_voice;
 	};
 }

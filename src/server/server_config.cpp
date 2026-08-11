@@ -84,6 +84,8 @@ namespace kcd2o::server
 		if (const auto *auth = document["auth"].as_table())
 		{
 			config.account_auth_enabled = (*auth)["enabled"].value_or(false);
+			config.account_whitelist_enabled =
+			    (*auth)["whitelist_enabled"].value_or(false);
 			config.account_service_url = (*auth)["service_url"].value_or(
 			    config.account_service_url);
 			config.account_server_id = (*auth)["server_id"].value_or(std::string{});
@@ -191,6 +193,49 @@ namespace kcd2o::server
 		    (*server)["max_player_speed_mps"].value_or(config.max_player_speed_mps);
 		config.movement_tolerance_m =
 		    (*server)["movement_tolerance_m"].value_or(config.movement_tolerance_m);
+		if (const auto *chat = document["chat"].as_table())
+		{
+			config.chat_whisper_range_m = static_cast<float>(
+			    (*chat)["whisper_range_m"].value_or(
+			        static_cast<double>(config.chat_whisper_range_m)));
+			config.chat_say_range_m = static_cast<float>(
+			    (*chat)["say_range_m"].value_or(
+			        static_cast<double>(config.chat_say_range_m)));
+			config.chat_shout_range_m = static_cast<float>(
+			    (*chat)["shout_range_m"].value_or(
+			        static_cast<double>(config.chat_shout_range_m)));
+			config.chat_ooc_enabled = (*chat)["ooc_enabled"].value_or(true);
+		}
+		if (const auto *voice = document["voice"].as_table())
+		{
+			config.voice_enabled = (*voice)["enabled"].value_or(true);
+			config.voice_whisper_range_m = static_cast<float>(
+			    (*voice)["whisper_range_m"].value_or(
+			        static_cast<double>(config.voice_whisper_range_m)));
+			config.voice_normal_range_m = static_cast<float>(
+			    (*voice)["normal_range_m"].value_or(
+			        static_cast<double>(config.voice_normal_range_m)));
+			config.voice_shout_range_m = static_cast<float>(
+			    (*voice)["shout_range_m"].value_or(
+			        static_cast<double>(config.voice_shout_range_m)));
+			config.voice_max_frames_per_second = checked_integer(
+			    *voice,
+			    "max_frames_per_second",
+			    config.voice_max_frames_per_second);
+		}
+		if (const auto *permissions = document["permissions"].as_table())
+		{
+			if (const auto *owners = (*permissions)["owners"].as_array())
+			{
+				for (const auto &owner : *owners)
+				{
+					const auto value = owner.value<std::string>();
+					if (!value)
+						throw std::runtime_error("[permissions].owners must contain only UUID strings");
+					config.permission_owners.push_back(*value);
+				}
+			}
+		}
 		config.world_directory =
 		    (*server)["world_directory"].value_or(config.world_directory.string());
 		config.starter_profile_path =
@@ -318,6 +363,11 @@ namespace kcd2o::server
 			throw std::runtime_error(
 			    "enabled [auth] requires service_url, identity_file, and public_address; explicit server_id and key must be provided together");
 		}
+		if (config.account_whitelist_enabled && !config.account_auth_enabled)
+		{
+			throw std::runtime_error(
+			    "[auth].whitelist_enabled requires [auth].enabled");
+		}
 		if (config.level_id.empty() || config.level_id.size() > 128)
 		{
 			throw std::runtime_error("level_id must contain 1 to 128 bytes");
@@ -347,6 +397,35 @@ namespace kcd2o::server
 		    || config.movement_tolerance_m < 0.0F)
 		{
 			throw std::runtime_error("movement limits must be finite and valid");
+		}
+		if (!std::isfinite(config.chat_whisper_range_m)
+		    || !std::isfinite(config.chat_say_range_m)
+		    || !std::isfinite(config.chat_shout_range_m)
+		    || config.chat_whisper_range_m <= 0.0F
+		    || config.chat_say_range_m < config.chat_whisper_range_m
+		    || config.chat_shout_range_m < config.chat_say_range_m
+		    || config.chat_shout_range_m > 250.0F)
+		{
+			throw std::runtime_error(
+			    "chat ranges must be finite, positive, ordered, and no greater than 250m");
+		}
+		if (!std::isfinite(config.voice_whisper_range_m)
+		    || !std::isfinite(config.voice_normal_range_m)
+		    || !std::isfinite(config.voice_shout_range_m)
+		    || config.voice_whisper_range_m <= 0.0F
+		    || config.voice_normal_range_m < config.voice_whisper_range_m
+		    || config.voice_shout_range_m < config.voice_normal_range_m
+		    || config.voice_shout_range_m > 250.0F
+		    || config.voice_max_frames_per_second < 50
+		    || config.voice_max_frames_per_second > 100)
+		{
+			throw std::runtime_error(
+			    "voice ranges or frame-rate limit are invalid");
+		}
+		for (const auto &owner : config.permission_owners)
+		{
+			if (!is_uuid(owner))
+				throw std::runtime_error("[permissions].owners contains an invalid UUID");
 		}
 		if (!std::isfinite(config.initial_time_of_day_hours)
 		    || config.initial_time_of_day_hours < 0.0

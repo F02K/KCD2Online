@@ -3,9 +3,11 @@
 #include "property/catalog.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 namespace kcd2o::server
@@ -58,6 +60,15 @@ namespace kcd2o::server
 			        std::chrono::system_clock::now().time_since_epoch())
 			        .count());
 		}
+
+		protocol::NetworkRole network_role(std::string_view role)
+		{
+			if (role == "supporter") return protocol::NETWORK_ROLE_SUPPORTER;
+			if (role == "moderator") return protocol::NETWORK_ROLE_MODERATOR;
+			if (role == "admin") return protocol::NETWORK_ROLE_ADMIN;
+			if (role == "owner") return protocol::NETWORK_ROLE_OWNER;
+			return protocol::NETWORK_ROLE_USER;
+		}
 	}
 
 	server_core::server_core(
@@ -69,10 +80,12 @@ namespace kcd2o::server
 	        { return random_hex(32); }),
 	    m_authenticate_account(std::move(authenticate_account)),
 	    m_store(m_config),
+	    m_permissions(m_config.world_directory, m_config.permission_owners),
 	    m_npcs(m_store.manifest().level_id, m_config.npc_world_catalog_path),
 	    m_human_npcs_disabled(m_config.disable_human_npcs),
 	    m_animal_npcs_disabled(m_config.disable_animal_npcs),
-	    m_environment_anchor_hours(m_config.initial_time_of_day_hours),
+	    m_environment_anchor_world_seconds(
+	        m_config.initial_time_of_day_hours * seconds_per_hour),
 	    m_environment_time_scale(m_config.time_scale),
 	    m_environment_weather_id(m_config.weather_id),
 	    m_environment_weather_transition_ms(
@@ -295,6 +308,9 @@ namespace kcd2o::server
 				handle_activity_end(
 				    *player,
 				    envelope.client_activity_end());
+				break;
+			case protocol::Envelope::kClientVoiceFrame:
+				handle_voice(*player, envelope.client_voice_frame(), now);
 				break;
 			default:
 				reject(
@@ -742,6 +758,57 @@ namespace kcd2o::server
 		broadcast_system_message(std::move(text), now);
 	}
 
+	bool server_core::grant_permission(
+	    player_id id,
+	    std::string permission,
+	    std::string &error)
+	{
+		const auto found = m_players.find(id);
+		if (found == m_players.end() || found->second.dummy
+		    || found->second.profile.persistent_id().empty())
+		{
+			error = "unknown persistent player";
+			return false;
+		}
+		const auto scope = permission;
+		const auto accepted = m_permissions.grant(
+		    found->second.profile.persistent_id(), std::move(permission), error);
+		m_permissions.audit(
+		    "console", "permission.grant", found->second.profile.persistent_id(),
+		    accepted ? "allowed" : "failed", scope);
+		return accepted;
+	}
+
+	bool server_core::revoke_permission(
+	    player_id id,
+	    std::string_view permission,
+	    std::string &error)
+	{
+		const auto found = m_players.find(id);
+		if (found == m_players.end() || found->second.dummy
+		    || found->second.profile.persistent_id().empty())
+		{
+			error = "unknown persistent player";
+			return false;
+		}
+		const auto accepted = m_permissions.revoke(
+		    found->second.profile.persistent_id(), permission, error);
+		m_permissions.audit(
+		    "console", "permission.revoke", found->second.profile.persistent_id(),
+		    accepted ? "allowed" : "failed", permission);
+		return accepted;
+	}
+
+	std::vector<std::string> server_core::permissions(player_id id) const
+	{
+		const auto found = m_players.find(id);
+		if (found == m_players.end() || found->second.dummy)
+			return {};
+		if (found->second.network_full_permissions)
+			return {"*"};
+		return m_permissions.list(found->second.profile.persistent_id());
+	}
+
 	void server_core::broadcast_system_message(
 	    std::string text,
 	    time_point now,
@@ -757,6 +824,7 @@ namespace kcd2o::server
 		chat->set_display_name("Server");
 		chat->set_text(std::move(text));
 		chat->set_server_time_ms(milliseconds(now));
+		chat->set_channel(protocol::CHAT_CHANNEL_SYSTEM);
 		broadcast(std::move(envelope), reliability::reliable, except);
 	}
 
@@ -953,7 +1021,8 @@ namespace kcd2o::server
 			    player.has_transform,
 			    player.last_sequence,
 			    player.movement_mode,
-			    player.dummy});
+			    player.dummy,
+			    player.network_role});
 		}
 		std::ranges::sort(result, {}, &player_view::id);
 		return result;
@@ -983,10 +1052,13 @@ namespace kcd2o::server
 		        && now > m_environment_anchor_time
 		    ? now - m_environment_anchor_time
 		    : clock::duration::zero();
-		state.set_time_of_day_hours(project_time_of_day_hours(
-		    m_environment_anchor_hours,
+		const auto world_time_seconds = project_world_time_seconds(
+		    m_environment_anchor_world_seconds,
 		    m_environment_time_scale,
-		    elapsed));
+		    elapsed);
+		state.set_world_time_seconds(world_time_seconds);
+		state.set_time_of_day_hours(normalize_time_of_day_hours(
+		    world_time_seconds / seconds_per_hour));
 		state.set_time_scale(m_environment_time_scale);
 		state.set_server_time_ms(milliseconds(now));
 		state.set_weather_id(m_environment_weather_id);
@@ -1004,7 +1076,9 @@ namespace kcd2o::server
 		if (circular_time_distance_hours(current, hours)
 		    < 0.000001)
 			return false;
-		m_environment_anchor_hours = hours;
+		m_environment_anchor_world_seconds = next_world_time_at_hour(
+		    current_environment(now).world_time_seconds(),
+		    hours);
 		m_environment_anchor_time = now;
 		++m_environment_revision;
 		broadcast_environment(now);
@@ -1019,8 +1093,8 @@ namespace kcd2o::server
 		advance_environment_clock(now);
 		if (std::abs(m_environment_time_scale - scale) < 0.000001F)
 			return false;
-		m_environment_anchor_hours =
-		    current_environment(now).time_of_day_hours();
+		m_environment_anchor_world_seconds =
+		    current_environment(now).world_time_seconds();
 		m_environment_anchor_time = now;
 		m_environment_time_scale = scale;
 		++m_environment_revision;
@@ -1097,7 +1171,8 @@ namespace kcd2o::server
 			    "Address Library identity does not match the server allowlist");
 			return;
 		}
-		if (hello.password() != m_config.password)
+		if (!m_config.account_auth_enabled
+		    && hello.password() != m_config.password)
 		{
 			reject_hello(
 			    protocol::REJECT_REASON_AUTHENTICATION_FAILED,
@@ -1119,9 +1194,21 @@ namespace kcd2o::server
 			    "display name must contain 3 to 32 UTF-8 characters");
 			return;
 		}
+		const auto normalized_name = lowercase_ascii(hello.display_name());
+		if (normalized_name.starts_with("[owner]")
+		    || normalized_name.starts_with("[admin]")
+		    || normalized_name.starts_with("[moderator]")
+		    || normalized_name.starts_with("[support]"))
+		{
+			reject_hello(
+			    protocol::REJECT_REASON_MALFORMED_MESSAGE,
+			    "display name uses a reserved network staff marker");
+			return;
+		}
 		auto &pending = m_pending.at(connection);
 		pending.display_name = hello.display_name();
 		pending.content_hash = hello.content_hash();
+		pending.password_accepted = hello.password() == m_config.password;
 		pending.stage = pending_stage::authenticate;
 		pending.deadline =
 		    now + std::chrono::seconds(m_config.handshake_timeout_seconds);
@@ -1145,7 +1232,7 @@ namespace kcd2o::server
 				            && entry.second.persisted.has_value();
 			        }));
 		};
-		if (message.enroll()
+		if (message.enroll() && !m_config.account_auth_enabled
 		    && reserved_slots() >= m_config.max_players)
 		{
 			reject(
@@ -1160,10 +1247,10 @@ namespace kcd2o::server
 		if (m_config.account_auth_enabled)
 		{
 			std::string auth_error;
-			const auto account_id = m_authenticate_account
+			const auto identity = m_authenticate_account
 			    ? m_authenticate_account(message.access_token(), auth_error)
 			    : std::nullopt;
-			if (!account_id)
+			if (!identity)
 			{
 				reject(
 				    connection,
@@ -1171,10 +1258,29 @@ namespace kcd2o::server
 				    auth_error.empty() ? "KCD2Online authentication failed" : auth_error);
 				return;
 			}
-			profile = m_store.find_by_persistent_id(*account_id);
+			if (!pending.password_accepted && !identity->join_bypass)
+			{
+				reject(
+				    connection,
+				    protocol::REJECT_REASON_AUTHENTICATION_FAILED,
+				    "authentication failed");
+				return;
+			}
+			if (m_config.account_whitelist_enabled
+			    && !identity->join_bypass && !identity->whitelisted)
+			{
+				reject(
+				    connection,
+				    protocol::REJECT_REASON_AUTHENTICATION_FAILED,
+				    "account is not on this server's whitelist");
+				return;
+			}
+			pending.network = *identity;
+			profile = m_store.find_by_persistent_id(identity->account_id);
 			if (!profile)
 			{
-				if (reserved_slots() >= m_config.max_players)
+				if (!identity->join_bypass
+				    && reserved_slots() >= m_config.max_players)
 				{
 					reject(connection, protocol::REJECT_REASON_SERVER_FULL, "server is full");
 					return;
@@ -1185,13 +1291,14 @@ namespace kcd2o::server
 				    pending.display_name,
 				    m_store.manifest().level_id);
 				apply_default_avatar(created);
-				created.set_persistent_id(*account_id);
+				created.set_persistent_id(identity->account_id);
 				if (m_store.manifest().spawn_valid)
 				{
 					created.set_transform_valid(true);
 					*created.mutable_last_transform() = m_store.manifest().spawn;
 				}
-				profile = persisted_profile{hash_token(*account_id), std::move(created)};
+				profile = persisted_profile{
+				    hash_token(identity->account_id), std::move(created)};
 				enrolled_profile = true;
 				m_store.save_profile(profile->identity_hash, profile->profile);
 			}
@@ -1324,6 +1431,7 @@ namespace kcd2o::server
 		}
 		const auto id = profile->profile.player_id();
 		if (!m_players.contains(id)
+		    && !(pending.network && pending.network->join_bypass)
 		    && reserved_slots() >= m_config.max_players)
 		{
 			reject(
@@ -1487,6 +1595,7 @@ namespace kcd2o::server
 		}
 
 		auto persisted = *pending.persisted;
+		auto authenticated_network = pending.network;
 		m_pending.erase(connection);
 
 		player_session session;
@@ -1495,6 +1604,14 @@ namespace kcd2o::server
 		session.resume_token = m_generate_token();
 		session.identity_hash = persisted.identity_hash;
 		session.connection = connection;
+		if (authenticated_network)
+		{
+			session.network_role = authenticated_network->network_role;
+			session.network_full_permissions =
+			    authenticated_network->full_permissions;
+			session.network_chat_muted = authenticated_network->chat_muted;
+			session.network_voice_muted = authenticated_network->voice_muted;
+		}
 		session.profile = std::move(persisted.profile);
 		session.avatar = message.avatar();
 		if (!avatar_allowed(session.avatar))
@@ -1513,7 +1630,11 @@ namespace kcd2o::server
 			session.has_transform = true;
 			session.transform = session.profile.last_transform();
 			// Sequences are scoped to a transport/client process. Persist the
-			// pose, but start sequence validation fresh after authentication.
+			// pose, but start both the accepted and published stream fresh after
+			// authentication. Otherwise PlayerJoined advertises the persisted
+			// high sequence and observers reject the new client's low sequences.
+			session.transform.set_sequence(0);
+			session.transform.set_client_time_ms(0);
 			session.last_sequence = 0;
 		}
 		const auto reconnecting = m_players.contains(session.id);
@@ -2384,6 +2505,19 @@ namespace kcd2o::server
 		{
 			return;
 		}
+		if (player.frozen)
+		{
+			protocol::Envelope correction;
+			*correction.mutable_state_correction()
+			     ->mutable_accepted_transform() = player.frozen_transform;
+			correction.mutable_state_correction()->set_reason(
+			    "player movement is frozen by a game master");
+			queue(
+			    *player.connection,
+			    std::move(correction),
+			    reliability::reliable);
+			return;
+		}
 		if (player.has_transform)
 		{
 			const auto seconds = std::clamp(
@@ -2510,6 +2644,11 @@ namespace kcd2o::server
 	    const protocol::ChatSend &message,
 	    time_point now)
 	{
+		if (player.network_chat_muted)
+		{
+			send_system_message(player, "Dein Netzwerk-Chat ist stummgeschaltet.", now);
+			return;
+		}
 		if (!is_valid_chat(message.text()))
 		{
 			return;
@@ -2524,13 +2663,416 @@ namespace kcd2o::server
 			return;
 		}
 		player.chat_times.push_back(now);
+
+		auto text = std::string_view(message.text());
+		while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+			text.remove_prefix(1);
+		while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+			text.remove_suffix(1);
+		if (text.empty())
+			return;
+
+		auto split_command = [](std::string_view input)
+		{
+			const auto separator = input.find_first_of(" \t");
+			auto command = input.substr(0, separator);
+			auto body = separator == std::string_view::npos
+			    ? std::string_view{}
+			    : input.substr(separator + 1);
+			while (!body.empty() && std::isspace(static_cast<unsigned char>(body.front())))
+				body.remove_prefix(1);
+			return std::pair{command, body};
+		};
+
+		protocol::ChatChannel channel = protocol::CHAT_CHANNEL_SAY;
+		float range = m_config.chat_say_range_m;
+		if (text.front() == '/')
+		{
+			const auto [raw_command, body] = split_command(text);
+			const auto command = lower_ascii(raw_command);
+			if (command == "/w" || command == "/whisper")
+			{
+				channel = protocol::CHAT_CHANNEL_WHISPER;
+				range = m_config.chat_whisper_range_m;
+			}
+			else if (command == "/s" || command == "/say")
+			{
+				channel = protocol::CHAT_CHANNEL_SAY;
+				range = m_config.chat_say_range_m;
+			}
+			else if (command == "/y" || command == "/shout")
+			{
+				channel = protocol::CHAT_CHANNEL_SHOUT;
+				range = m_config.chat_shout_range_m;
+			}
+			else if (command == "/me")
+			{
+				channel = protocol::CHAT_CHANNEL_EMOTE;
+				range = m_config.chat_say_range_m;
+			}
+			else if (command == "/do")
+			{
+				channel = protocol::CHAT_CHANNEL_SCENE;
+				range = m_config.chat_say_range_m;
+			}
+			else if (command == "/ooc")
+			{
+				if (!m_config.chat_ooc_enabled)
+				{
+					send_system_message(player, "Der OOC-Kanal ist deaktiviert.", now);
+					return;
+				}
+				if (body.empty())
+				{
+					send_system_message(player, "Verwendung: /ooc <Nachricht>", now);
+					return;
+				}
+				protocol::Envelope envelope;
+				auto *chat = envelope.mutable_chat_broadcast();
+				chat->set_player_id(player.id);
+				chat->set_display_name(player.display_name);
+				chat->set_text(body);
+				chat->set_server_time_ms(milliseconds(now));
+				chat->set_channel(protocol::CHAT_CHANNEL_OOC);
+				chat->set_network_role(network_role(player.network_role));
+				broadcast(std::move(envelope), reliability::reliable);
+				return;
+			}
+			else
+			{
+				(void)handle_admin_chat(player, text, now);
+				return;
+			}
+			if (body.empty())
+			{
+				send_system_message(player, "Nach dem Chatbefehl fehlt eine Nachricht.", now);
+				return;
+			}
+			text = body;
+		}
+
+		send_spatial_chat(player, std::string(text), channel, range, now);
+	}
+
+	void server_core::handle_voice(
+	    player_session &player,
+	    const protocol::ClientVoiceFrame &message,
+	    time_point now)
+	{
+		if (player.network_voice_muted || !m_config.voice_enabled || !player.connection
+		    || !player.has_transform)
+			return;
+
+		const auto cutoff = now - std::chrono::seconds(1);
+		while (!player.voice_frame_times.empty()
+		    && player.voice_frame_times.front() < cutoff)
+			player.voice_frame_times.pop_front();
+		if (player.voice_frame_times.size()
+		    >= m_config.voice_max_frames_per_second)
+			return;
+		player.voice_frame_times.push_back(now);
+
+		float range = m_config.voice_normal_range_m;
+		switch (message.range())
+		{
+		case protocol::VOICE_RANGE_WHISPER:
+			range = m_config.voice_whisper_range_m;
+			break;
+		case protocol::VOICE_RANGE_SHOUT:
+			range = m_config.voice_shout_range_m;
+			break;
+		default:
+			break;
+		}
+
+		protocol::Envelope envelope;
+		auto *voice = envelope.mutable_server_voice_frame();
+		voice->set_player_id(player.id);
+		voice->set_sequence(message.sequence());
+		voice->set_capture_time_ms(message.capture_time_ms());
+		voice->set_range(message.range());
+		voice->set_opus(message.opus());
+		voice->set_visemes(message.visemes());
+		voice->set_end_of_talkspurt(message.end_of_talkspurt());
+
+		const auto &origin = player.transform.position();
+		const auto range_squared = range * range;
+		for (const auto &[id, recipient] : m_players)
+		{
+			if (id == player.id || !recipient.connection
+			    || !recipient.has_transform)
+				continue;
+			const auto &position = recipient.transform.position();
+			const auto dx = position.x() - origin.x();
+			const auto dy = position.y() - origin.y();
+			const auto dz = position.z() - origin.z();
+			if (dx * dx + dy * dy + dz * dz <= range_squared)
+				queue(
+				    *recipient.connection,
+				    envelope,
+				    reliability::unreliable);
+		}
+	}
+
+	void server_core::send_chat_message(
+	    connection_id connection,
+	    player_id sender,
+	    std::string_view display_name,
+	    std::string text,
+	    protocol::ChatChannel channel,
+	    time_point now)
+	{
+		if (!is_valid_chat(text))
+			return;
 		protocol::Envelope envelope;
 		auto *chat = envelope.mutable_chat_broadcast();
-		chat->set_player_id(player.id);
-		chat->set_display_name(player.display_name);
-		chat->set_text(message.text());
+		chat->set_player_id(sender);
+		chat->set_display_name(display_name);
+		chat->set_text(std::move(text));
 		chat->set_server_time_ms(milliseconds(now));
-		broadcast(std::move(envelope), reliability::reliable);
+		chat->set_channel(channel);
+		if (const auto found = m_players.find(sender);
+		    found != m_players.end())
+			chat->set_network_role(network_role(found->second.network_role));
+		queue(connection, std::move(envelope), reliability::reliable);
+	}
+
+	void server_core::send_system_message(
+	    player_session &player,
+	    std::string text,
+	    time_point now,
+	    protocol::ChatChannel channel)
+	{
+		if (player.connection)
+			send_chat_message(*player.connection, 0, "Server", std::move(text), channel, now);
+	}
+
+	void server_core::send_spatial_chat(
+	    const player_session &sender,
+	    std::string text,
+	    protocol::ChatChannel channel,
+	    float range_m,
+	    time_point now)
+	{
+		if (!sender.has_transform)
+		{
+			if (sender.connection)
+				send_chat_message(
+				    *sender.connection, 0, "Server",
+				    "Lokaler Chat ist erst nach dem Weltbeitritt verfuegbar.",
+				    protocol::CHAT_CHANNEL_SYSTEM, now);
+			return;
+		}
+		const auto &origin = sender.transform.position();
+		const auto range_squared = range_m * range_m;
+		for (const auto &[id, recipient] : m_players)
+		{
+			if (!recipient.connection || !recipient.has_transform)
+				continue;
+			const auto &position = recipient.transform.position();
+			const auto dx = position.x() - origin.x();
+			const auto dy = position.y() - origin.y();
+			const auto dz = position.z() - origin.z();
+			if (dx * dx + dy * dy + dz * dz <= range_squared)
+			{
+				send_chat_message(
+				    *recipient.connection, sender.id, sender.display_name,
+				    text, channel, now);
+			}
+		}
+	}
+
+	bool server_core::teleport_player(
+	    player_session &target,
+	    const protocol::TransformState &destination,
+	    std::string reason,
+	    time_point now)
+	{
+		if (!target.connection || !target.has_transform
+		    || !is_finite_transform(destination))
+			return false;
+		target.transform = destination;
+		target.transform.set_sequence(++target.last_sequence);
+		target.transform.set_client_time_ms(milliseconds(now));
+		target.transform.mutable_velocity()->set_x(0.0F);
+		target.transform.mutable_velocity()->set_y(0.0F);
+		target.transform.mutable_velocity()->set_z(0.0F);
+		target.last_transform_at = now;
+		target.movement_mode = protocol::MOVEMENT_MODE_IDLE;
+		if (target.frozen)
+			target.frozen_transform = target.transform;
+		protocol::Envelope correction;
+		*correction.mutable_state_correction()->mutable_accepted_transform() =
+		    target.transform;
+		correction.mutable_state_correction()->set_reason(std::move(reason));
+		queue(*target.connection, std::move(correction), reliability::reliable);
+		return true;
+	}
+
+	bool server_core::handle_admin_chat(
+	    player_session &player,
+	    std::string_view text,
+	    time_point now)
+	{
+		std::istringstream input{std::string(text)};
+		std::string command;
+		input >> command;
+		command = lower_ascii(command);
+		const auto actor = player.profile.persistent_id();
+		auto require = [&](std::string_view scope, std::string_view action, std::string_view target = {})
+		{
+			if (player.network_full_permissions
+			    || m_permissions.has(actor, scope))
+				return true;
+			m_permissions.audit(actor, action, target, "denied", scope);
+			send_system_message(player, "Dafuer fehlt die Berechtigung: " + std::string(scope), now, protocol::CHAT_CHANNEL_ADMIN);
+			return false;
+		};
+		auto parse_target = [&](player_id id) -> player_session *
+		{
+			const auto found = m_players.find(id);
+			return found == m_players.end() ? nullptr : &found->second;
+		};
+
+		if (command == "/adminhelp")
+		{
+			send_system_message(
+			    player,
+			    "GM: /players, /announce, /kick, /goto, /bring, /freeze, /unfreeze, /perm",
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+			return true;
+		}
+		if (command == "/players")
+		{
+			if (!require("admin.players", "players.list"))
+				return true;
+			for (const auto &entry : players())
+				send_system_message(player, std::to_string(entry.id) + " - " + entry.display_name + (entry.connected ? " [online]" : " [reconnecting]"), now, protocol::CHAT_CHANNEL_ADMIN);
+			m_permissions.audit(actor, "players.list", "", "allowed");
+			return true;
+		}
+		if (command == "/announce")
+		{
+			if (!require("admin.announce", "announce"))
+				return true;
+			std::string body;
+			std::getline(input >> std::ws, body);
+			if (body.empty())
+			{
+				m_permissions.audit(actor, "announce", "all", "failed", "missing text");
+				send_system_message(player, "Verwendung: /announce <Text>", now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			protocol::Envelope envelope;
+			auto *chat = envelope.mutable_chat_broadcast();
+			chat->set_player_id(0);
+			chat->set_display_name("Spielleitung");
+			chat->set_text(body);
+			chat->set_server_time_ms(milliseconds(now));
+			chat->set_channel(protocol::CHAT_CHANNEL_ANNOUNCEMENT);
+			broadcast(std::move(envelope), reliability::reliable);
+			m_permissions.audit(actor, "announce", "all", "allowed", body);
+			return true;
+		}
+
+		player_id target_id{};
+		if (command == "/kick")
+		{
+			if (!require("admin.kick", "player.kick"))
+				return true;
+			input >> target_id;
+			auto *target = parse_target(target_id);
+			std::string reason;
+			std::getline(input >> std::ws, reason);
+			if (!target || target->dummy)
+			{
+				m_permissions.audit(actor, "player.kick", std::to_string(target_id), "failed", "unknown player");
+				send_system_message(player, "Unbekannte Spieler-ID.", now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			m_permissions.audit(actor, "player.kick", target->profile.persistent_id(), "allowed", reason);
+			kick(target_id, reason.empty() ? "Von der Spielleitung entfernt" : reason, now);
+			return true;
+		}
+		if (command == "/goto" || command == "/bring")
+		{
+			if (!require("admin.teleport", command == "/goto" ? "player.goto" : "player.bring"))
+				return true;
+			input >> target_id;
+			auto *target = parse_target(target_id);
+			if (!target || !target->has_transform || !player.has_transform)
+			{
+				m_permissions.audit(actor, command == "/goto" ? "player.goto" : "player.bring", std::to_string(target_id), "failed", "position unavailable");
+				send_system_message(player, "Spieler oder Position nicht verfuegbar.", now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			auto &moving = command == "/goto" ? player : *target;
+			const auto &destination = command == "/goto" ? target->transform : player.transform;
+			const auto accepted = teleport_player(moving, destination, "Teleport durch Spielleitung", now);
+			m_permissions.audit(actor, command == "/goto" ? "player.goto" : "player.bring", target->profile.persistent_id(), accepted ? "allowed" : "failed");
+			return true;
+		}
+		if (command == "/freeze" || command == "/unfreeze")
+		{
+			if (!require("admin.freeze", command == "/freeze" ? "player.freeze" : "player.unfreeze"))
+				return true;
+			input >> target_id;
+			auto *target = parse_target(target_id);
+			if (!target || !target->connection || !target->has_transform)
+			{
+				m_permissions.audit(actor, command == "/freeze" ? "player.freeze" : "player.unfreeze", std::to_string(target_id), "failed", "position unavailable");
+				send_system_message(player, "Spieler oder Position nicht verfuegbar.", now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			target->frozen = command == "/freeze";
+			if (target->frozen)
+				target->frozen_transform = target->transform;
+			m_permissions.audit(actor, target->frozen ? "player.freeze" : "player.unfreeze", target->profile.persistent_id(), "allowed");
+			send_system_message(player, target->display_name + (target->frozen ? " wurde eingefroren." : " wurde freigegeben."), now, protocol::CHAT_CHANNEL_ADMIN);
+			return true;
+		}
+		if (command == "/perm")
+		{
+			if (!require("admin.permissions", "permission.manage"))
+				return true;
+			std::string action;
+			std::string scope;
+			input >> action >> target_id >> scope;
+			action = lower_ascii(action);
+			auto *target = parse_target(target_id);
+			if (!target || target->dummy || (action != "list" && scope.empty()))
+			{
+				m_permissions.audit(actor, "permission." + action, std::to_string(target_id), "failed", "invalid arguments");
+				send_system_message(player, "Verwendung: /perm <list|grant|revoke> <Spieler-ID> [Scope]", now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			const auto target_persistent = target->profile.persistent_id();
+			if (action == "list")
+			{
+				auto scopes = m_permissions.list(target_persistent);
+				std::string joined = scopes.empty() ? "(keine)" : scopes.front();
+				for (std::size_t index = 1; index < scopes.size(); ++index)
+					joined += ", " + scopes[index];
+				send_system_message(player, target->display_name + ": " + joined, now, protocol::CHAT_CHANNEL_ADMIN);
+				m_permissions.audit(actor, "permission.list", target_persistent, "allowed");
+				return true;
+			}
+			std::string error;
+			const auto accepted = action == "grant"
+			    ? m_permissions.grant(target_persistent, scope, error)
+			    : action == "revoke"
+			        ? m_permissions.revoke(target_persistent, scope, error)
+			        : false;
+			if (action != "grant" && action != "revoke")
+				error = "unbekannte Aktion";
+			m_permissions.audit(actor, "permission." + action, target_persistent, accepted ? "allowed" : "failed", scope);
+			send_system_message(player, accepted ? "Berechtigungen aktualisiert." : "Fehler: " + error, now, protocol::CHAT_CHANNEL_ADMIN);
+			return true;
+		}
+
+		m_permissions.audit(actor, "admin.unknown", "", "failed", command);
+		send_system_message(player, "Unbekannter Befehl. /adminhelp zeigt GM-Befehle.", now, protocol::CHAT_CHANNEL_ADMIN);
+		return false;
 	}
 
 	void server_core::handle_ping(
@@ -2598,7 +3140,9 @@ namespace kcd2o::server
 		    && m_sleeping_players.size() >= effective_sleep_requirement())
 		{
 			advance_environment_clock(now);
-			m_environment_anchor_hours = m_config.sleep_wake_hour;
+			m_environment_anchor_world_seconds = next_world_time_at_hour(
+			    current_environment(now).world_time_seconds(),
+			    m_config.sleep_wake_hour);
 			m_environment_anchor_time = now;
 			++m_environment_revision;
 			broadcast_environment(now);
@@ -2836,6 +3380,7 @@ namespace kcd2o::server
 		accepted->set_max_players(m_config.max_players);
 		accepted->set_server_name(m_config.name);
 		accepted->set_level_id(m_store.manifest().level_id);
+		accepted->set_network_role(network_role(player.network_role));
 		accepted->set_profile_snapshot_interval_seconds(
 		    m_config.profile_snapshot_interval_seconds);
 		*accepted->mutable_avatar_policy() = avatar_policy();
@@ -3453,6 +3998,7 @@ namespace kcd2o::server
 		if (!player.profile.persistent_id().empty())
 			snapshot.set_persistent_id(player.profile.persistent_id());
 		snapshot.set_display_name(player.display_name);
+		snapshot.set_network_role(network_role(player.network_role));
 		snapshot.set_transform_valid(player.has_transform);
 		snapshot.set_connected(
 		    player.dummy || player.connection.has_value());

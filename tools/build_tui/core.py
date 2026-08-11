@@ -1132,6 +1132,20 @@ def client_deployment_layout(
         targets.append(
             (language_readme, Path("Mods") / "KCD2Online" / "Lang" / "README.md")
         )
+    bundled_mod_root = result.dll_path.parent / "Mods" / "KCD2Online"
+    mod_manifest = bundled_mod_root / "mod.manifest"
+    if mod_manifest.is_file():
+        targets.append(
+            (mod_manifest, Path("Mods") / "KCD2Online" / "mod.manifest")
+        )
+    game_localization_root = bundled_mod_root / "Localization"
+    targets.extend(
+        (
+            path,
+            Path("Mods") / "KCD2Online" / "Localization" / path.name,
+        )
+        for path in sorted(game_localization_root.glob("*_xml.pak"))
+    )
     return tuple(targets)
 
 

@@ -454,6 +454,18 @@ class PackagingTests(unittest.TestCase):
             project / "data" / "lang" / "de.lang",
             bundled_languages / "de.lang",
         )
+        bundled_mod = artifacts / "Mods" / "KCD2Online"
+        (bundled_mod / "Localization").mkdir()
+        (bundled_mod / "mod.manifest").write_text(
+            "<kcd_mod><info><modid>kcd2online</modid></info></kcd_mod>\n",
+            encoding="utf-8",
+        )
+        (bundled_mod / "Localization" / "English_xml.pak").write_bytes(
+            b"english-localization"
+        )
+        (bundled_mod / "Localization" / "German_xml.pak").write_bytes(
+            b"german-localization"
+        )
 
         names = {
             "d3d12_.dll": b"frontend",
@@ -522,6 +534,19 @@ class PackagingTests(unittest.TestCase):
                     encoding="utf-8"
                 ),
                 "menu.title=Mehrspieler\n",
+            )
+            self.assertTrue(
+                (game / "Mods" / "KCD2Online" / "mod.manifest").is_file()
+            )
+            self.assertEqual(
+                (
+                    game
+                    / "Mods"
+                    / "KCD2Online"
+                    / "Localization"
+                    / "German_xml.pak"
+                ).read_bytes(),
+                b"german-localization",
             )
             self.assertEqual(
                 (package.server_root / "KCD2OnlineServer.exe").read_bytes(), b"server"

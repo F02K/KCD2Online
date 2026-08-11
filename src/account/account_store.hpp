@@ -21,6 +21,9 @@ namespace kcd2o::account
 		std::string credential_id;
 		std::vector<std::byte> private_key_blob;
 		std::string recovery_code;
+		std::string username;
+		std::string display_name;
+		std::string locale{"en"};
 
 		[[nodiscard]] bool has_identity() const noexcept;
 	};

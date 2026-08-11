@@ -3,7 +3,7 @@
 Experimental multiplayer for Kingdom Come: Deliverance II.
 
 > [!WARNING]
-> KCD2Online **v0.1.3 is a prototype**, not a production-ready multiplayer mod.
+> KCD2Online **v0.1.4 is a prototype**, not a production-ready multiplayer mod.
 > Expect breaking changes, incomplete world simulation, compatibility limits,
 > and loss of multiplayer-world data while development continues. Use test
 > saves and keep backups of anything important.
@@ -12,7 +12,7 @@ Experimental multiplayer for Kingdom Come: Deliverance II.
 
 | | |
 | --- | --- |
-| Current version | **0.1.3** |
+| Current version | **0.1.4** |
 | Development stage | Prototype / technical preview |
 | Networking | Direct IP, dedicated authoritative server |
 | Platform | Windows x64 |
@@ -28,7 +28,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 > NPC synchronization is still unreliable. A known bug can cause the same NPC
 > to spawn multiple times, so NPC sync is not yet suitable for normal play.
 
-## What works in v0.1.3
+## What works in v0.1.4
 
 - Direct-IP client/server connection with authentication and reconnect support
 - Native main-menu onboarding for the anonymous KCD2Online account service,
@@ -114,7 +114,7 @@ Every successful build also creates a clean package tree under
 `out/package/<debug|release>/`:
 
 ```text
-client/   install-ready game tree and KCD2Online-Client-v0.1.3.zip
+client/   install-ready game tree and KCD2Online-Client-v0.1.4.zip
 server/   dedicated server, configuration, data, symbols, and audit tool
 tests/    test executables and their symbols only
 SHA256SUMS.txt
@@ -191,9 +191,24 @@ terrain. Native weapon actions are excluded until their runtime path is verified
    server bootstrap starts KCD2's native New Game path directly in the configured
    level. From the pause menu, an already loaded matching level is adopted.
 
+In game, `Enter` opens RP chat. Plain text is local `/say`; `/w`, `/y`, `/me`,
+`/do`, and `/ooc` select whisper, shout, character action, scene description,
+and global out-of-character chat. Hold `G`, point at an entry, and release it to
+play one of the audited bow, cheer, point, or surrender emotes.
+
+Proximity VOIP uses the Windows communications microphone. Hold `V` for normal
+speech, `Ctrl+V` to whisper, or `Shift+V` to shout. Remote speech is decoded as
+Opus and played through KCD2's running FMOD system as a 3D sound at the remote
+player's head position.
+
+Dedicated-server operators can bootstrap GM access with `permission grant
+<player_id> admin.*`. Grants follow the player's persistent UUID and are stored
+under the configured world directory. `/adminhelp` lists the in-game GM tools.
+
 The in-game UI follows KCD2's current `g_language` setting. Editable UTF-8
 translations are installed in `<game-root>\Mods\KCD2Online\Lang\`; English is the
-fallback when no file exists for the selected game language.
+fallback when no file exists for the selected game language. Native controls-page
+labels are bundled separately as normal KCD2 localization PAKs.
 
 The client waits for `NewGame`, `PreDataLoaded`, `DataLoaded`, the target
 `wh_sys_BaseLevelId`, the local actor, and the native capability probe before it
@@ -211,7 +226,8 @@ For manual deployment:
    `<game-root>\Mods\KCD2Online\KCSE\Plugins\`.
 4. Copy the matching Address Library table to
    `<game-root>\KCSE\addresslib\`.
-5. Copy `data\lang\*.lang` to `<game-root>\Mods\KCD2Online\Lang\`.
+5. Copy the generated `Mods\KCD2Online\Lang`, `Localization`, and `mod.manifest`
+   entries from the build output into `<game-root>\Mods\KCD2Online\`.
 
 The default Steam binary directory is:
 

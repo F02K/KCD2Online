@@ -1,5 +1,7 @@
 #include "kcse/client_api.hpp"
+#include "multiplayer/emote_catalog.hpp"
 #include "kcse/join_trace.hpp"
+#include "kcse/native_keybinds.hpp"
 #include "kcse/native_runtime.hpp"
 #include "multiplayer/client.hpp"
 #include "multiplayer/protocol.hpp"
@@ -41,7 +43,6 @@ namespace
 
 	bool install_activity_hooks()
 	{
-		KCSE::AllocTrampoline(1 << 10);
 		g_original_blacksmithing_start =
 		    REL::Relocation<>{REL::ID(380114), 0x2E}.write_call<5>(
 		        blacksmithing_start_hook);
@@ -80,6 +81,22 @@ namespace
 	std::uint32_t narrow_count(std::size_t count) noexcept
 	{
 		return static_cast<std::uint32_t>(std::min<std::size_t>(count, std::numeric_limits<std::uint32_t>::max()));
+	}
+
+	std::string staff_display_name(
+	    kcd2o::protocol::NetworkRole role,
+	    std::string_view display_name)
+	{
+		std::string_view badge;
+		switch (role)
+		{
+		case kcd2o::protocol::NETWORK_ROLE_OWNER: badge = "OWNER"; break;
+		case kcd2o::protocol::NETWORK_ROLE_ADMIN: badge = "ADMIN"; break;
+		case kcd2o::protocol::NETWORK_ROLE_MODERATOR: badge = "MOD"; break;
+		case kcd2o::protocol::NETWORK_ROLE_SUPPORTER: badge = "SUPPORT"; break;
+		default: return std::string(display_name);
+		}
+		return std::format("[{}] {}", badge, display_name);
 	}
 
 	bool remote_sync_due(frame_clock::time_point now, const kcd2o::client_update_rates &rates)
@@ -309,7 +326,9 @@ namespace
 			{
 				snapshots.push_back({
 				    .id = player.id,
-				    .display_name = player.display_name,
+				    .display_name = staff_display_name(
+				        player.network_role,
+				        player.display_name),
 				    .connected = player.connected,
 				    .has_transform = player.has_transform,
 				    .transform = player.transform,
@@ -597,6 +616,26 @@ namespace
 		}
 	}
 
+	std::uint32_t __cdecl abi_play_emote(std::uint32_t kind) noexcept
+	{
+		try
+		{
+			if (!g_client || !g_runtime
+			    || g_client->status().state != kcd2o::client_state::connected)
+				return 0;
+			const auto *emote = kcd2o::find_emote(
+			    static_cast<kcd2o::emote_kind>(kind));
+			return emote && g_runtime->play_emote(emote->fragment) ? 1U : 0U;
+		}
+		catch (...)
+		{
+			KCD2Online_JOIN_TRACE(
+			    "join.abi-play-emote.exception",
+			    "type=unknown");
+			return 0;
+		}
+	}
+
 	std::uint32_t __cdecl abi_select_avatar(
 	    const char *archetype_id) noexcept
 	{
@@ -698,6 +737,20 @@ namespace
 			    status.sleeping_players_required;
 			result->dead = status.dead ? 1U : 0U;
 			result->respawn_pending = status.respawn_pending ? 1U : 0U;
+			if (g_runtime)
+			{
+				const auto voice = g_runtime->voice_status();
+				result->voice_recording = voice.recording ? 1U : 0U;
+				result->voice_speaking = voice.speaking ? 1U : 0U;
+				result->voice_level = voice.level;
+				result->voice_range = static_cast<std::uint32_t>(voice.range);
+			}
+			const auto keybinds = kcd2o::kcse::native_keybinds::state();
+			result->native_keybinds = keybinds.available ? 1U : 0U;
+			result->chat_action_generation = keybinds.chat_generation;
+			result->emote_action_held = keybinds.emote_held ? 1U : 0U;
+			result->network_role = static_cast<std::uint32_t>(
+			    status.network_role);
 			return 1;
 		}
 		catch (...)
@@ -734,6 +787,8 @@ namespace
 				copy_text(
 				    output[index].display_name,
 				    players[index].display_name);
+				output[index].network_role = static_cast<std::uint32_t>(
+				    players[index].network_role);
 			}
 			return narrow_count(count);
 		}
@@ -765,10 +820,14 @@ namespace
 				output[index].player_id = entries[index].sender;
 				output[index].server_time_ms =
 				    entries[index].server_time_ms;
+				output[index].channel = static_cast<std::uint32_t>(
+				    entries[index].channel);
 				copy_text(
 				    output[index].display_name,
 				    entries[index].display_name);
 				copy_text(output[index].text, entries[index].text);
+				output[index].network_role = static_cast<std::uint32_t>(
+				    entries[index].network_role);
 			}
 			return narrow_count(count);
 		}
@@ -829,6 +888,7 @@ namespace
 	    abi_connect,
 	    abi_disconnect,
 	    abi_send_chat,
+	    abi_play_emote,
 	    abi_select_avatar,
 	    abi_attempt_sleep,
 	    abi_request_respawn,
@@ -863,6 +923,8 @@ KCSE_EXPORT bool KCSEPlugin_Load(const KCSE::IKCSEInterface *kcse)
 	// so its network thread is never joined from DLL_PROCESS_DETACH.
 	g_runtime = new kcd2o::kcse::native_runtime(*kcse);
 	g_client = new kcd2o::multiplayer_client(*g_runtime);
+	KCSE::AllocTrampoline(1 << 10);
+	(void)kcd2o::kcse::native_keybinds::install();
 	if (!install_activity_hooks())
 	{
 		delete g_client;

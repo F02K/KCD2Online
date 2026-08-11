@@ -147,16 +147,17 @@ class StartupSafetyTests(unittest.TestCase):
             "begin_native_unload", sandbox[environment_failure:environment_success]
         )
 
-    def test_environment_cvar_override_restores_engine_flags(self) -> None:
+    def test_environment_uses_forward_only_calendar_world_time(self) -> None:
         source = (
             PROJECT_ROOT / "src" / "kcse" / "native_runtime.cpp"
         ).read_text(encoding="utf-8")
-        self.assertIn("environment_cvar_override_mask", source)
-        self.assertIn("cvar->ClearFlags(*overridden_flags)", source)
-        self.assertIn(
-            "cvar->SetFlags(current_flags | *overridden_flags)", source
-        )
-        self.assertIn('"join.environment.cvar.applied"', source)
+        self.assertIn("Calendar.GetWorldTime()", source)
+        self.assertIn("Calendar.SetWorldTime(target)", source)
+        self.assertIn("Calendar.SetWorldTimeRatio", source)
+        self.assertIn("Calendar.SetWorldTimeRatio(0)", source)
+        self.assertNotIn("Calendar.SetWorldTimePaused", source)
+        self.assertNotIn('"e_TimeOfDay"', source)
+        self.assertNotIn('"e_TimeOfDaySpeed"', source)
 
     def test_home_marker_resolution_is_constant_time_and_throttled(self) -> None:
         source = (

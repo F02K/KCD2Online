@@ -6,6 +6,7 @@
 #endif
 #include "kcse/client_api.hpp"
 #include "kcse/client_proxy.hpp"
+#include "multiplayer/emote_catalog.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -35,6 +36,11 @@ namespace big::ingame_chat
 		std::atomic_bool g_cancel_requested{};
 		std::atomic_bool g_submit_requested{};
 		std::atomic_bool g_enter_down{};
+		std::atomic_bool g_emote_open{};
+		std::atomic_bool g_emote_submit_requested{};
+		std::atomic_bool g_emote_key_down{};
+		std::atomic_int g_emote_selection{-1};
+		std::atomic_bool g_native_bindings_active{};
 
 		struct chat_view_state
 		{
@@ -58,6 +64,30 @@ namespace big::ingame_chat
 		{
 			color.w *= alpha;
 			return color;
+		}
+
+		void draw_wheel_segment(ImDrawList *draw, ImVec2 center, float radius, float inner_radius, float middle_angle, ImU32 fill, ImU32 outline, float outline_width)
+		{
+			constexpr float pi       = 3.14159265F;
+			constexpr int arc_steps  = 16;
+			const auto angle_padding = 0.035F;
+			const auto start         = middle_angle - pi * 0.25F + angle_padding;
+			const auto end           = middle_angle + pi * 0.25F - angle_padding;
+
+			for (int step = 0; step < arc_steps; ++step)
+			{
+				const auto angle0 = start + (end - start) * static_cast<float>(step) / arc_steps;
+				const auto angle1 = start + (end - start) * static_cast<float>(step + 1) / arc_steps;
+				const ImVec2 points[] = {{center.x + std::cos(angle0) * inner_radius, center.y + std::sin(angle0) * inner_radius}, {center.x + std::cos(angle0) * radius, center.y + std::sin(angle0) * radius}, {center.x + std::cos(angle1) * radius, center.y + std::sin(angle1) * radius}, {center.x + std::cos(angle1) * inner_radius, center.y + std::sin(angle1) * inner_radius}};
+				draw->AddConvexPolyFilled(points, 4, fill);
+			}
+
+			draw->PathArcTo(center, radius, start, end, arc_steps);
+			draw->PathStroke(outline, 0, outline_width);
+			for (const auto angle : {start, end})
+			{
+				draw->AddLine({center.x + std::cos(angle) * inner_radius, center.y + std::sin(angle) * inner_radius}, {center.x + std::cos(angle) * radius, center.y + std::sin(angle) * radius}, outline, outline_width);
+			}
 		}
 
 		void trim_to_input_capacity(std::string &text)
@@ -125,6 +155,34 @@ namespace big::ingame_chat
 			{
 				return "Enter: send   Esc: close";
 			}
+			if (key == "emote.bow")
+			{
+				return "Bow";
+			}
+			if (key == "emote.cheer")
+			{
+				return "Cheer";
+			}
+			if (key == "emote.point")
+			{
+				return "Point";
+			}
+			if (key == "emote.surrender")
+			{
+				return "Surrender";
+			}
+			if (key == "emote.wheel.title")
+			{
+				return "CHOOSE EMOTE";
+			}
+			if (key == "emote.wheel.hint")
+			{
+				return "MOVE MOUSE  |  RELEASE TO PLAY";
+			}
+			if (key == "emote.wheel.cancel")
+			{
+				return "ESC TO CANCEL";
+			}
 			return "Write a message...";
 #endif
 		}
@@ -133,18 +191,198 @@ namespace big::ingame_chat
 		{
 			const auto server     = entry.sender == 0;
 			const auto local      = entry.sender == local_player && local_player != 0;
+			const auto ooc        = entry.channel == kcd2o::protocol::CHAT_CHANNEL_OOC;
+			const auto quiet      = entry.channel == kcd2o::protocol::CHAT_CHANNEL_WHISPER;
+			const auto loud       = entry.channel == kcd2o::protocol::CHAT_CHANNEL_SHOUT;
 			const auto name_color = server ? ImVec4(0.88F, 0.65F, 0.27F, alpha) :
+			                        ooc    ? ImVec4(0.58F, 0.72F, 0.82F, alpha) :
+			                        quiet  ? ImVec4(0.62F, 0.74F, 0.58F, alpha) :
+			                        loud   ? ImVec4(0.92F, 0.58F, 0.35F, alpha) :
 			                        local  ? ImVec4(0.83F, 0.73F, 0.48F, alpha) :
 			                                 ImVec4(0.72F, 0.68F, 0.58F, alpha);
 			const auto text_color = ImVec4(0.93F, 0.90F, 0.82F, alpha);
+			const char *staff_badge = "";
+			auto staff_color = ImVec4(0.72F, 0.68F, 0.58F, alpha);
+			switch (entry.network_role)
+			{
+			case kcd2o::protocol::NETWORK_ROLE_OWNER:
+				staff_badge = "[OWNER] ";
+				staff_color = ImVec4(1.00F, 0.76F, 0.22F, alpha);
+				break;
+			case kcd2o::protocol::NETWORK_ROLE_ADMIN:
+				staff_badge = "[ADMIN] ";
+				staff_color = ImVec4(0.96F, 0.34F, 0.25F, alpha);
+				break;
+			case kcd2o::protocol::NETWORK_ROLE_MODERATOR:
+				staff_badge = "[MOD] ";
+				staff_color = ImVec4(0.34F, 0.70F, 0.98F, alpha);
+				break;
+			case kcd2o::protocol::NETWORK_ROLE_SUPPORTER:
+				staff_badge = "[SUPPORT] ";
+				staff_color = ImVec4(0.31F, 0.85F, 0.53F, alpha);
+				break;
+			default: break;
+			}
+			const char *prefix    = "";
+			switch (entry.channel)
+			{
+			case kcd2o::protocol::CHAT_CHANNEL_WHISPER:      prefix = "[Fluestern] "; break;
+			case kcd2o::protocol::CHAT_CHANNEL_SHOUT:        prefix = "[Rufen] "; break;
+			case kcd2o::protocol::CHAT_CHANNEL_OOC:          prefix = "[OOC] "; break;
+			case kcd2o::protocol::CHAT_CHANNEL_ANNOUNCEMENT: prefix = "[Ankuendigung] "; break;
+			case kcd2o::protocol::CHAT_CHANNEL_ADMIN:        prefix = "[GM] "; break;
+			default:                                         break;
+			}
 
+			if (*staff_badge != '\0')
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, staff_color);
+				ImGui::TextUnformatted(staff_badge);
+				ImGui::PopStyleColor();
+				ImGui::SameLine(0.0F, 0.0F);
+			}
 			ImGui::PushStyleColor(ImGuiCol_Text, name_color);
+			ImGui::TextUnformatted(prefix);
+			ImGui::SameLine(0.0F, 0.0F);
+			if (entry.channel == kcd2o::protocol::CHAT_CHANNEL_EMOTE)
+			{
+				ImGui::TextUnformatted("* ");
+			}
+			ImGui::SameLine(0.0F, 0.0F);
 			ImGui::TextUnformatted(entry.display_name.c_str());
 			ImGui::PopStyleColor();
 			ImGui::SameLine(0.0F, 0.0F);
 			ImGui::PushStyleColor(ImGuiCol_Text, text_color);
-			ImGui::TextWrapped(": %s", entry.text.c_str());
+			const auto roleplay_action = entry.channel == kcd2o::protocol::CHAT_CHANNEL_EMOTE || entry.channel == kcd2o::protocol::CHAT_CHANNEL_SCENE;
+			ImGui::TextWrapped(roleplay_action ? " %s" : ": %s", entry.text.c_str());
 			ImGui::PopStyleColor();
+		}
+
+		void draw_emote_wheel(kcd2o::kcse::ui_client_proxy &client)
+		{
+			constexpr float pi   = 3.14159265F;
+			const auto *viewport = ImGui::GetMainViewport();
+			const auto center =
+			    ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5F, viewport->WorkPos.y + viewport->WorkSize.y * 0.5F);
+			const auto scale     = std::clamp(viewport->WorkSize.y / 1080.0F, 0.78F, 1.25F);
+			const auto radius    = 156.0F * scale;
+			const auto dead_zone = 49.0F * scale;
+			const auto mouse     = ImGui::GetIO().MousePos;
+			const auto mouse_valid = ImGui::IsMousePosValid(&mouse);
+			const auto dx        = mouse_valid ? mouse.x - center.x : 0.0F;
+			const auto dy        = mouse_valid ? mouse.y - center.y : 0.0F;
+			const auto distance  = std::sqrt(dx * dx + dy * dy);
+			const auto pointer_distance = std::min(
+			    distance, radius - 10.0F * scale);
+			const auto direction = distance > 0.001F
+			    ? ImVec2(dx / distance, dy / distance)
+			    : ImVec2(0.0F, 0.0F);
+			const auto pointer = ImVec2(
+			    center.x + direction.x * pointer_distance,
+			    center.y + direction.y * pointer_distance);
+			int selected         = -1;
+			if (pointer_distance >= dead_zone)
+			{
+				if (std::abs(dx) >= std::abs(dy))
+				{
+					selected = dx < 0.0F ? 0 : 1;
+				}
+				else
+				{
+					selected = dy < 0.0F ? 2 : 3;
+				}
+			}
+			g_emote_selection.store(selected, std::memory_order_release);
+
+			auto *draw = ImGui::GetForegroundDrawList();
+			draw->AddRectFilled(viewport->WorkPos,
+			                    {viewport->WorkPos.x + viewport->WorkSize.x, viewport->WorkPos.y + viewport->WorkSize.y},
+			                    IM_COL32(7, 6, 5, 68));
+			draw->AddCircleFilled(center, radius + 13.0F * scale, IM_COL32(5, 4, 3, 105), 64);
+			draw->AddCircleFilled(center, radius + 4.0F * scale, IM_COL32(21, 17, 12, 238), 64);
+
+			const float angles[]     = {pi, 0.0F, -pi * 0.5F, pi * 0.5F};
+			const ImVec2 positions[] = {{center.x - radius * 0.66F, center.y},
+			                            {center.x + radius * 0.66F, center.y},
+			                            {center.x, center.y - radius * 0.66F},
+			                            {center.x, center.y + radius * 0.66F}};
+
+			for (std::size_t index = 0; index < kcd2o::emote_catalog.size(); ++index)
+			{
+				const auto active = selected == static_cast<int>(index);
+				if (active)
+				{
+					draw_wheel_segment(draw, center, radius + 9.0F * scale, dead_zone, angles[index], IM_COL32(117, 76, 28, 78), IM_COL32(189, 132, 54, 90), 2.0F * scale);
+				}
+				draw_wheel_segment(draw, center, active ? radius + 4.0F * scale : radius, dead_zone, angles[index], active ? IM_COL32(151, 101, 38, 248) : IM_COL32(48, 39, 28, 238), active ? IM_COL32(225, 172, 87, 245) : IM_COL32(107, 87, 58, 205), (active ? 2.2F : 1.2F) * scale);
+			}
+
+			draw->AddCircleFilled(center, dead_zone - 2.0F * scale, IM_COL32(15, 12, 9, 252), 48);
+			draw->AddCircle(center, dead_zone, IM_COL32(190, 139, 65, 235), 48, 2.0F * scale);
+			draw->AddCircle(center, dead_zone - 7.0F * scale, IM_COL32(76, 59, 38, 220), 48, 1.0F * scale);
+			if (distance > 0.001F)
+			{
+				draw->AddLine(
+				    center,
+				    pointer,
+				    selected >= 0 ? IM_COL32(218, 166, 81, 150)
+				                  : IM_COL32(133, 118, 88, 115),
+				    1.4F * scale);
+			}
+			draw->AddCircleFilled(
+			    pointer,
+			    5.0F * scale,
+			    selected >= 0 ? IM_COL32(250, 210, 126, 255)
+			                  : IM_COL32(190, 177, 145, 235),
+			    20);
+			draw->AddCircle(
+			    pointer,
+			    7.5F * scale,
+			    selected >= 0 ? IM_COL32(59, 38, 16, 225)
+			                  : IM_COL32(42, 35, 25, 190),
+			    20,
+			    1.4F * scale);
+
+			for (std::size_t index = 0; index < kcd2o::emote_catalog.size(); ++index)
+			{
+				const auto active = selected == static_cast<int>(index);
+				const auto label  = chat_text(kcd2o::emote_catalog[index].label);
+				const auto size   = ImGui::CalcTextSize(label.c_str());
+				const auto label_position = ImVec2(positions[index].x - size.x * 0.5F, positions[index].y - size.y * 0.5F);
+				if (active)
+				{
+					draw->AddText({label_position.x + 1.0F * scale, label_position.y + 2.0F * scale},
+					              IM_COL32(25, 16, 7, 190),
+					              label.c_str());
+				}
+				draw->AddText(label_position,
+				              active ? IM_COL32(255, 238, 196, 255) : IM_COL32(208, 196, 168, 245),
+				              label.c_str());
+			}
+
+			const auto title      = chat_text("emote.wheel.title");
+			const auto title_size = ImGui::CalcTextSize(title.c_str());
+			draw->AddText({center.x - title_size.x * 0.5F, center.y - radius - 39.0F * scale},
+			              IM_COL32(231, 214, 178, 245),
+			              title.c_str());
+
+			const auto hint      = chat_text("emote.wheel.hint");
+			const auto hint_size = ImGui::CalcTextSize(hint.c_str());
+			draw->AddText({center.x - hint_size.x * 0.5F, center.y + radius + 24.0F * scale}, IM_COL32(207, 196, 169, 235), hint.c_str());
+			const auto cancel      = chat_text("emote.wheel.cancel");
+			const auto cancel_size = ImGui::CalcTextSize(cancel.c_str());
+			draw->AddText({center.x - cancel_size.x * 0.5F, center.y + radius + 44.0F * scale},
+			              IM_COL32(142, 132, 112, 220),
+			              cancel.c_str());
+
+			if (g_emote_submit_requested.exchange(false, std::memory_order_acq_rel))
+			{
+				const auto choice = g_emote_selection.exchange(-1, std::memory_order_acq_rel);
+				if (choice >= 0 && static_cast<std::size_t>(choice) < kcd2o::emote_catalog.size())
+				{
+					(void)client.play_emote(kcd2o::emote_catalog[choice].kind);
+				}
+			}
 		}
 
 		float closed_alpha(const chat_view_state &state, double now)
@@ -156,6 +394,66 @@ namespace big::ingame_chat
 			}
 			return std::clamp(static_cast<float>(1.0 - (age - message_hold_seconds) / message_fade_seconds), 0.0F, 1.0F);
 		}
+
+		void draw_voice_indicator(const kcd2o::client_status &status)
+		{
+			static float displayed_level{};
+			const auto target    = status.voice_recording ? status.voice_level : 0.0F;
+			const auto response  = target > displayed_level ? 0.38F : 0.16F;
+			displayed_level     += (target - displayed_level) * response;
+			if (!status.voice_recording && displayed_level < 0.01F)
+			{
+				displayed_level = 0.0F;
+				return;
+			}
+
+			const auto *viewport = ImGui::GetMainViewport();
+			const auto scale     = std::clamp(viewport->WorkSize.y / 1080.0F, 0.78F, 1.25F);
+			const auto size      = ImVec2(68.0F * scale, 28.0F * scale);
+			const auto center =
+			    ImVec2(viewport->WorkPos.x + 38.0F * scale + size.x * 0.5F, viewport->WorkPos.y + viewport->WorkSize.y - 46.0F * scale);
+			const auto minimum = ImVec2(center.x - size.x * 0.5F, center.y - size.y * 0.5F);
+			const auto maximum = ImVec2(minimum.x + size.x, minimum.y + size.y);
+			auto *draw         = ImGui::GetForegroundDrawList();
+
+			ImVec4 tint = ImVec4(0.76F, 0.61F, 0.34F, 1.0F);
+			if (status.voice_range == kcd2o::protocol::VOICE_RANGE_WHISPER)
+			{
+				tint = ImVec4(0.55F, 0.68F, 0.52F, 1.0F);
+			}
+			else if (status.voice_range == kcd2o::protocol::VOICE_RANGE_SHOUT)
+			{
+				tint = ImVec4(0.86F, 0.48F, 0.27F, 1.0F);
+			}
+			const auto active     = status.voice_speaking || displayed_level >= 0.08F;
+			const auto foreground = ImGui::ColorConvertFloat4ToU32(with_alpha(tint, active ? 0.92F : 0.60F));
+			const auto quiet      = ImGui::ColorConvertFloat4ToU32(with_alpha(tint, active ? 0.38F : 0.18F));
+
+			draw->AddRectFilled(minimum, maximum, IM_COL32(18, 15, 12, active ? 154 : 118), 14.0F * scale);
+			draw->AddRect(minimum, maximum, quiet, 14.0F * scale, 0, 1.0F * scale);
+
+			const auto microphone = ImVec2(minimum.x + 21.0F * scale, center.y - 1.0F * scale);
+			draw->AddRectFilled({microphone.x - 3.0F * scale, microphone.y - 7.0F * scale},
+			                    {microphone.x + 3.0F * scale, microphone.y + 3.0F * scale},
+			                    foreground,
+			                    3.0F * scale);
+			draw->PathArcTo({microphone.x, microphone.y + 1.0F * scale}, 7.0F * scale, 0.0F, 3.14159265F, 10);
+			draw->PathStroke(foreground, 0, 1.4F * scale);
+			draw->AddLine({microphone.x, microphone.y + 8.0F * scale}, {microphone.x, microphone.y + 11.0F * scale}, foreground, 1.4F * scale);
+			draw->AddLine({microphone.x - 4.0F * scale, microphone.y + 11.0F * scale},
+			              {microphone.x + 4.0F * scale, microphone.y + 11.0F * scale},
+			              foreground,
+			              1.4F * scale);
+
+			const auto phase = static_cast<float>(ImGui::GetTime() * 4.0);
+			const float factors[] = {0.58F + 0.12F * std::sin(phase), 0.90F + 0.10F * std::sin(phase + 1.7F), 0.70F + 0.14F * std::sin(phase + 3.1F)};
+			for (std::size_t index{}; index < 3; ++index)
+			{
+				const auto height = (2.0F + 13.0F * displayed_level * factors[index]) * scale;
+				const auto x      = minimum.x + (40.0F + 7.0F * static_cast<float>(index)) * scale;
+				draw->AddRectFilled({x, center.y - height * 0.5F}, {x + 3.0F * scale, center.y + height * 0.5F}, active ? foreground : quiet, 1.5F * scale);
+			}
+		}
 	} // namespace
 
 	void render(bool mod_gui_open)
@@ -163,12 +461,19 @@ namespace big::ingame_chat
 		auto &client         = kcd2o::kcse::ui_client();
 		const auto status    = client.status();
 		const auto connected = status.state == kcd2o::client_state::connected;
+		static std::uint32_t chat_action_generation{};
+		static bool emote_action_held{};
+		g_native_bindings_active.store(status.native_keybinds, std::memory_order_release);
 		g_can_open.store(connected && !mod_gui_open, std::memory_order_release);
 
 		auto &state = view_state();
 		if (!connected || mod_gui_open)
 		{
+			chat_action_generation = status.chat_action_generation;
+			emote_action_held      = status.emote_action_held;
 			close_chat(state, mod_gui_open || !connected);
+			g_emote_open.store(false, std::memory_order_release);
+			g_emote_submit_requested.store(false, std::memory_order_release);
 			if (!connected)
 			{
 				state.history_size        = 0;
@@ -187,11 +492,43 @@ namespace big::ingame_chat
 
 		const auto history = client.chat_history();
 		const auto now     = ImGui::GetTime();
+		if (status.native_keybinds)
+		{
+			if (status.chat_action_generation != chat_action_generation)
+			{
+				chat_action_generation = status.chat_action_generation;
+				if (!g_open.load(std::memory_order_acquire))
+				{
+					g_open.store(true, std::memory_order_release);
+					g_focus_requested.store(true, std::memory_order_release);
+				}
+			}
+			if (status.emote_action_held != emote_action_held)
+			{
+				emote_action_held = status.emote_action_held;
+				if (emote_action_held && !g_open.load(std::memory_order_acquire))
+				{
+					g_emote_open.store(true, std::memory_order_release);
+				}
+				else if (g_emote_open.exchange(false, std::memory_order_acq_rel))
+				{
+					g_emote_submit_requested.store(true, std::memory_order_release);
+				}
+			}
+		}
 		if (history_changed(state, history))
 		{
 			state.last_activity_time = now;
 			state.scroll_to_bottom   = true;
 		}
+
+		const auto emote_open = g_emote_open.load(std::memory_order_acquire);
+		if (emote_open || g_emote_submit_requested.load(std::memory_order_acquire))
+		{
+			draw_emote_wheel(client);
+		}
+
+		draw_voice_indicator(status);
 
 		const auto open = g_open.load(std::memory_order_acquire);
 		if (!open && history.empty())
@@ -339,6 +676,9 @@ namespace big::ingame_chat
 		if (message == WM_KILLFOCUS)
 		{
 			g_enter_down.store(false, std::memory_order_release);
+			g_emote_key_down.store(false, std::memory_order_release);
+			g_emote_open.store(false, std::memory_order_release);
+			g_emote_submit_requested.store(false, std::memory_order_release);
 			if (g_open.load(std::memory_order_acquire))
 			{
 				g_cancel_requested.store(true, std::memory_order_release);
@@ -350,6 +690,30 @@ namespace big::ingame_chat
 		{
 			g_cancel_requested.store(true, std::memory_order_release);
 			return;
+		}
+		if (message == WM_KEYDOWN && wparam == VK_ESCAPE && g_emote_open.exchange(false, std::memory_order_acq_rel))
+		{
+			g_emote_selection.store(-1, std::memory_order_release);
+			return;
+		}
+
+		if (!g_native_bindings_active.load(std::memory_order_acquire) && wparam == 'G')
+		{
+			if (message == WM_KEYUP)
+			{
+				g_emote_key_down.store(false, std::memory_order_release);
+				if (g_emote_open.exchange(false, std::memory_order_acq_rel))
+				{
+					g_emote_submit_requested.store(true, std::memory_order_release);
+				}
+				return;
+			}
+			if (message == WM_KEYDOWN && !g_emote_key_down.exchange(true, std::memory_order_acq_rel) && g_can_open.load(std::memory_order_acquire)
+			    && !g_open.load(std::memory_order_acquire))
+			{
+				g_emote_open.store(true, std::memory_order_release);
+				return;
+			}
 		}
 
 		if (wparam != VK_RETURN)
@@ -371,7 +735,7 @@ namespace big::ingame_chat
 		{
 			g_submit_requested.store(true, std::memory_order_release);
 		}
-		else if (g_can_open.load(std::memory_order_acquire))
+		else if (!g_native_bindings_active.load(std::memory_order_acquire) && g_can_open.load(std::memory_order_acquire))
 		{
 			g_open.store(true, std::memory_order_release);
 			g_focus_requested.store(true, std::memory_order_release);
@@ -381,6 +745,15 @@ namespace big::ingame_chat
 	bool blocks_game_input() noexcept
 	{
 		return g_open.load(std::memory_order_acquire) || g_cancel_requested.load(std::memory_order_acquire)
-		       || g_submit_requested.load(std::memory_order_acquire);
+		       || g_submit_requested.load(std::memory_order_acquire) || g_emote_open.load(std::memory_order_acquire)
+		       || g_emote_submit_requested.load(std::memory_order_acquire);
+	}
+
+	bool allows_blocked_input(std::uint32_t input_state) noexcept
+	{
+		constexpr std::uint32_t released = 1U << 1;
+		return g_native_bindings_active.load(std::memory_order_acquire)
+		       && g_emote_open.load(std::memory_order_acquire)
+		       && (input_state & released) != 0;
 	}
 } // namespace big::ingame_chat

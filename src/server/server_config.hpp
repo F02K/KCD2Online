@@ -31,6 +31,7 @@ namespace kcd2o::server
 		std::string password;
 		std::uint32_t max_players{8};
 		bool account_auth_enabled{};
+		bool account_whitelist_enabled{};
 		std::string account_service_url{"https://api.kingdom-online.cc"};
 		std::string account_server_id;
 		std::string account_server_key;
@@ -63,6 +64,16 @@ namespace kcd2o::server
 		    std::string(npc::default_soul_id)};
 		float max_player_speed_mps{15.0F};
 		float movement_tolerance_m{2.0F};
+		float chat_whisper_range_m{3.0F};
+		float chat_say_range_m{15.0F};
+		float chat_shout_range_m{40.0F};
+		bool chat_ooc_enabled{true};
+		bool voice_enabled{true};
+		float voice_whisper_range_m{3.0F};
+		float voice_normal_range_m{15.0F};
+		float voice_shout_range_m{40.0F};
+		std::uint32_t voice_max_frames_per_second{60};
+		std::vector<std::string> permission_owners;
 		std::filesystem::path world_directory{"world"};
 		std::filesystem::path starter_profile_path{"starter_profile.toml"};
 		// Generated from the audited retail level PAKs and shipped beside the

@@ -12,4 +12,5 @@ namespace big::ingame_chat
 	void on_window_message(std::uint32_t message, std::uintptr_t wparam) noexcept;
 
 	[[nodiscard]] bool blocks_game_input() noexcept;
+	[[nodiscard]] bool allows_blocked_input(std::uint32_t input_state) noexcept;
 } // namespace big::ingame_chat

@@ -49,6 +49,9 @@ namespace big::native_multiplayer_menu
 		constexpr std::string_view account_details_button = "KCD2Online.Account.Details";
 		constexpr std::string_view account_copy_button = "KCD2Online.Account.Copy";
 		constexpr std::string_view account_disable_button = "KCD2Online.Account.Disable";
+		constexpr std::string_view account_username_button = "KCD2Online.Account.Username";
+		constexpr std::string_view account_display_name_button = "KCD2Online.Account.DisplayName";
+		constexpr std::string_view account_refresh_button = "KCD2Online.Account.Refresh";
 		constexpr std::string_view refresh_button = "KCD2Online.Servers.Refresh";
 		constexpr std::string_view favorite_button = "KCD2Online.Server.Favorite";
 		constexpr std::string_view browser_back_button = "KCD2Online.Server.Back";
@@ -59,6 +62,8 @@ namespace big::native_multiplayer_menu
 			none,
 			name,
 			password,
+			account_username,
+			account_display_name,
 		};
 
 		struct state;
@@ -248,6 +253,8 @@ namespace big::native_multiplayer_menu
 			edit_field editing{edit_field::none};
 			std::string edit_original;
 			std::string password;
+			std::string account_username;
+			std::string account_display_name;
 			std::string selected_server_id;
 			std::string queued_button;
 			std::string local_feedback_key;
@@ -311,16 +318,31 @@ namespace big::native_multiplayer_menu
 			{
 			case edit_field::name: return settings.display_name;
 			case edit_field::password: return value.password;
+			case edit_field::account_username: return value.account_username;
+			case edit_field::account_display_name: return value.account_display_name;
 			case edit_field::none: break;
 			}
 			return value.password;
 		}
 
-		void persist_edit(edit_field field)
+		void persist_edit(
+		    edit_field field,
+		    const std::string &account_username,
+		    const std::string &account_display_name)
 		{
 			auto &settings = kcd2o::ui_settings();
 			if (field == edit_field::name)
 				settings.persist_display_name();
+			else if (field == edit_field::account_username
+			    || field == edit_field::account_display_name)
+			{
+				const auto account = kcd2o::account::service().status();
+				kcd2o::account::service().update_profile(
+				    settings.account_service_url,
+				    account_username,
+				    account_display_name,
+				    account.locale);
+			}
 		}
 
 		std::string short_account_id(std::string_view account_id)
@@ -348,13 +370,21 @@ namespace big::native_multiplayer_menu
 
 		void show_account_page()
 		{
+			kcd2o::account::service().ensure_profile(
+			    kcd2o::ui_settings().account_service_url);
 			auto &value = menu_state();
 			void *menu{};
 			bool details{};
+			edit_field editing{};
+			std::string edited_username;
+			std::string edited_display_name;
 			{
 				std::scoped_lock lock(value.mutex);
 				menu = value.menu;
 				details = value.account_details;
+				editing = value.editing;
+				edited_username = value.account_username;
+				edited_display_name = value.account_display_name;
 				value.page_open = false;
 				value.death_page_open = false;
 				value.rebuild_requested = false;
@@ -383,7 +413,7 @@ namespace big::native_multiplayer_menu
 				    ingame_ui::localized("account.info.details_title"),
 				    paragraphs({
 				        ingame_ui::localized("account.info.identity"),
-				        ingame_ui::localized("account.info.no_profile"),
+				        ingame_ui::localized("account.info.profile"),
 				        ingame_ui::localized("account.info.device"),
 				        ingame_ui::localized("account.info.required")}),
 				    scroll_hint};
@@ -402,7 +432,7 @@ namespace big::native_multiplayer_menu
 				    ingame_ui::localized("account.info.setup_title"),
 				    paragraphs({
 				        ingame_ui::localized("account.info.intro"),
-				        ingame_ui::localized("account.info.no_profile"),
+				        ingame_ui::localized("account.info.profile"),
 				        ingame_ui::localized("account.info.consent")}),
 				    scroll_hint};
 				page.add_button(std::string(account_accept_button), ingame_ui::localized("account.action.accept"));
@@ -426,30 +456,54 @@ namespace big::native_multiplayer_menu
 				    scroll_hint};
 				break;
 			case account_state::ready:
+			{
+				const auto edit_prefix = ingame_ui::localized("menu.field.edit_prefix") + " ";
+				const auto unset = ingame_ui::localized("account.value.unset");
+				const auto &visible_username = editing == edit_field::account_username
+				    ? edited_username : account.username;
+				const auto &visible_display_name = editing == edit_field::account_display_name
+				    ? edited_display_name : account.display_name;
 				page.information = ingame_ui::information_panel{
 				    ingame_ui::localized("account.info.ready_title"),
 				    paragraphs({
 				        ingame_ui::localized("account.status.ready"),
 				        ingame_ui::localized(
-				            "account.id", {{"id", account.account_id}})}),
+				            "account.id", {{"id", account.account_id}}),
+				        account.busy ? ingame_ui::localized("account.status.syncing") : std::string{},
+				        account.error_detail.empty() ? std::string{}
+				            : ingame_ui::localized("account.error.detail", {{"detail", account.error_detail}})}),
 				    scroll_hint};
+				page.add_button(
+				    std::string(account_username_button),
+				    (editing == edit_field::account_username ? edit_prefix : std::string{})
+				        + ingame_ui::localized("account.field.username", {{"value", visible_username.empty() ? unset : visible_username}}),
+				    account.busy);
+				page.add_button(
+				    std::string(account_display_name_button),
+				    (editing == edit_field::account_display_name ? edit_prefix : std::string{})
+				        + ingame_ui::localized("account.field.display_name", {{"value", visible_display_name.empty() ? unset : visible_display_name}}),
+				    account.busy);
 				page.add_button(
 				    std::string(account_copy_button),
 				    ingame_ui::localized("account.action.copy"),
-				    false,
+				    account.busy,
 				    0,
 				    ingame_ui::localized("account.action.copy_tooltip"));
 				page.add_button(std::string(account_continue_button), ingame_ui::localized("account.action.continue"));
+				page.add_button(std::string(account_refresh_button), ingame_ui::localized("account.action.refresh"), account.busy);
 				page.add_button(std::string(account_disable_button), ingame_ui::localized("account.action.disable"));
-				page.selected_button = account_continue_button;
+				page.selected_button = editing == edit_field::account_username ? account_username_button
+				    : editing == edit_field::account_display_name ? account_display_name_button
+				    : account_continue_button;
 				break;
+			}
 			case account_state::error:
 				page.information = ingame_ui::information_panel{
 				    ingame_ui::localized("account.info.error_title"),
-				    ingame_ui::localized(
+				    paragraphs({ingame_ui::localized(
 				        account.error_key.empty()
 				            ? "account.error.service"
-				            : account.error_key),
+				            : account.error_key), account.error_detail}),
 				    scroll_hint};
 				page.add_button(std::string(account_retry_button), ingame_ui::localized("account.action.retry"));
 				page.add_button(std::string(account_decline_button), ingame_ui::localized("account.action.decline"));
@@ -729,7 +783,14 @@ namespace big::native_multiplayer_menu
 		void begin_edit(edit_field field)
 		{
 			auto &value = menu_state();
+			const auto account = kcd2o::account::service().status();
 			std::scoped_lock lock(value.mutex);
+			if (field == edit_field::account_username
+			    || field == edit_field::account_display_name)
+			{
+				value.account_username = account.username;
+				value.account_display_name = account.display_name;
+			}
 			value.editing = field;
 			value.edit_original = edited_value(value);
 			value.local_feedback_key.clear();
@@ -750,7 +811,9 @@ namespace big::native_multiplayer_menu
 				std::scoped_lock lock(value.mutex);
 				auto &settings = kcd2o::ui_settings();
 				settings.persist_display_name();
-				options.display_name = settings.display_name;
+				const auto account = kcd2o::account::service().status();
+				options.display_name = account.display_name.empty()
+				    ? settings.display_name : account.display_name;
 				options.password = value.password;
 				options.account_service_url = settings.account_service_url;
 				selected_id = value.selected_server_id;
@@ -858,6 +921,22 @@ namespace big::native_multiplayer_menu
 				const auto account = kcd2o::account::service().status();
 				if (!account.account_id.empty())
 					(void)set_clipboard_text(account.account_id);
+				show_account_page();
+			}
+			else if (button == account_username_button)
+			{
+				begin_edit(edit_field::account_username);
+				show_account_page();
+			}
+			else if (button == account_display_name_button)
+			{
+				begin_edit(edit_field::account_display_name);
+				show_account_page();
+			}
+			else if (button == account_refresh_button)
+			{
+				kcd2o::account::service().refresh_profile(
+				    kcd2o::ui_settings().account_service_url);
 				show_account_page();
 			}
 			else if (button == name_button)
@@ -1134,7 +1213,12 @@ namespace big::native_multiplayer_menu
 			}
 			if (account_page_open)
 			{
-				if (kcd2o::account::service().status().revision
+				bool account_rebuild{};
+				{
+					std::scoped_lock lock(value.mutex);
+					account_rebuild = value.rebuild_requested;
+				}
+				if (account_rebuild || kcd2o::account::service().status().revision
 				    != last_account_revision)
 					show_account_page();
 				return;
@@ -1154,7 +1238,9 @@ namespace big::native_multiplayer_menu
 				{
 					std::scoped_lock lock(value.mutex);
 					auto &settings = kcd2o::ui_settings();
-					options.display_name = settings.display_name;
+					const auto account = kcd2o::account::service().status();
+					options.display_name = account.display_name.empty()
+					    ? settings.display_name : account.display_name;
 					options.password = value.password;
 					options.account_service_url = settings.account_service_url;
 					selected_id = value.selected_server_id;
@@ -1262,7 +1348,8 @@ namespace big::native_multiplayer_menu
 			}
 
 			std::scoped_lock lock(value.mutex);
-			if (!value.page_open || value.editing == edit_field::none)
+			if ((!value.page_open && !value.account_page_open)
+			    || value.editing == edit_field::none)
 				return false;
 
 			auto &text = edited_value(value);
@@ -1281,7 +1368,8 @@ namespace big::native_multiplayer_menu
 				const auto field = value.editing;
 				value.editing = edit_field::none;
 				value.rebuild_requested = true;
-				persist_edit(field);
+				persist_edit(
+				    field, value.account_username, value.account_display_name);
 				return true;
 			}
 			if (message == WM_KEYDOWN && wparam == VK_BACK)
@@ -1329,6 +1417,7 @@ namespace big::native_multiplayer_menu
 	{
 		auto &value = menu_state();
 		std::scoped_lock lock(value.mutex);
-		return value.page_open && value.editing != edit_field::none;
+		return (value.page_open || value.account_page_open)
+		    && value.editing != edit_field::none;
 	}
 }

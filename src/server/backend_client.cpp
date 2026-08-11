@@ -40,6 +40,32 @@ namespace kcd2o::server
 			if (result.path == L"/") result.path.clear();
 			return result;
 		}
+
+		std::string optional_string(
+		    const nlohmann::json &json,
+		    const char *name,
+		    std::string fallback = {})
+		{
+			const auto found = json.find(name);
+			return found != json.end() && found->is_string()
+			    ? found->get<std::string>() : std::move(fallback);
+		}
+
+		std::string authentication_error(const nlohmann::json &response)
+		{
+			const auto code = optional_string(response, "error", "invalid_token");
+			if (code == "expired_token")
+				return "KCD2Online login expired; please join again";
+			if (code == "invalid_audience")
+				return "KCD2Online login was issued for another server; refresh the server list and join again";
+			if (code == "identity_unavailable")
+				return "KCD2Online account is unavailable, banned, suspended, or its device credential is incomplete";
+			if (code == "token_revoked" || code == "session_revoked")
+				return "KCD2Online login was revoked; please join again";
+			if (code == "server_access_denied")
+				return "KCD2Online account is banned from this server";
+			return "KCD2Online access token was rejected (" + code + ")";
+		}
 	}
 
 	backend_client::backend_client(std::string base_url, std::string server_id, std::string api_key) :
@@ -70,16 +96,31 @@ namespace kcd2o::server
 		return result;
 	}
 
-	std::optional<std::string> backend_client::introspect(std::string_view token, std::string &error) const
+	std::optional<network_identity> backend_client::introspect(std::string_view token, std::string &error) const
 	{
 		try
 		{
 			if (token.empty()) { error = "KCD2Online access token is missing"; return std::nullopt; }
 			const auto response = nlohmann::json::parse(post("/v1/server/tokens/introspect", nlohmann::json{{"accessToken", token}}.dump()));
-			if (!response.value("active", false)) { error = "KCD2Online access token is invalid or expired"; return std::nullopt; }
-			const auto account = response.value("accountId", std::string{});
-			if (account.empty()) { error = "KCD2Online response has no account ID"; return std::nullopt; }
-			return account;
+			if (!response.value("active", false)) { error = authentication_error(response); return std::nullopt; }
+			network_identity identity{
+			    optional_string(response, "accountId"),
+			    optional_string(response, "networkRole", "user"),
+			    optional_string(response, "displayName"),
+			    response.value("joinBypass", false),
+			    response.value("fullPermissions", false),
+			    response.value("whitelisted", false),
+			    response.value("chatMuted", false),
+			    response.value("voiceMuted", false)};
+			if (identity.account_id.empty()) { error = "KCD2Online response has no account ID"; return std::nullopt; }
+			if (identity.network_role != "user" && identity.network_role != "supporter"
+			    && identity.network_role != "moderator" && identity.network_role != "admin"
+			    && identity.network_role != "owner")
+			{
+				error = "KCD2Online response has an invalid network role";
+				return std::nullopt;
+			}
+			return identity;
 		}
 		catch (const std::exception &exception) { error = std::string("KCD2Online authentication unavailable: ") + exception.what(); return std::nullopt; }
 	}
@@ -91,7 +132,9 @@ namespace kcd2o::server
 			(void)post("/v1/server/heartbeat", nlohmann::json{
 			    {"name", data.name}, {"address", data.address}, {"version", data.version},
 			    {"playerCount", data.player_count}, {"maxPlayers", data.max_players},
-			    {"passwordProtected", data.password_protected}, {"levelId", data.level_id}}.dump());
+			    {"passwordProtected", data.password_protected}, {"levelId", data.level_id},
+			    {"ownerAccountIds", data.owner_account_ids},
+			    {"activeAccountIds", data.active_account_ids}}.dump());
 			return true;
 		}
 		catch (const std::exception &exception) { error = exception.what(); return false; }

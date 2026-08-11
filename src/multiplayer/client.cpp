@@ -25,6 +25,20 @@ namespace kcd2o
 		constexpr auto environment_correction_interval =
 		    std::chrono::seconds{1};
 
+		std::chrono::milliseconds weather_refresh_interval(float time_scale)
+		{
+			if (time_scale <= 0.0F)
+				return std::chrono::minutes{5};
+			// Vanilla may choose another preset after four game hours. Reassert
+			// the authoritative profile after at most half that interval.
+			const auto milliseconds = static_cast<std::int64_t>(
+			    7'200'000.0 / static_cast<double>(time_scale));
+			return std::chrono::milliseconds{std::clamp<std::int64_t>(
+			    milliseconds,
+			    2'000,
+			    300'000)};
+		}
+
 		std::uint64_t milliseconds(std::chrono::steady_clock::time_point value)
 		{
 			return static_cast<std::uint64_t>(
@@ -157,6 +171,10 @@ namespace kcd2o
 				return "ServerNpcMotion";
 			case protocol::Envelope::kServerNpcGameplayUpdate:
 				return "ServerNpcGameplayUpdate";
+			case protocol::Envelope::kClientVoiceFrame:
+				return "ClientVoiceFrame";
+			case protocol::Envelope::kServerVoiceFrame:
+				return "ServerVoiceFrame";
 			case protocol::Envelope::PAYLOAD_NOT_SET: return "PayloadNotSet";
 			}
 			return "InvalidEnvelopePayload";
@@ -361,6 +379,7 @@ namespace kcd2o
 			m_weather_revision                  = 0;
 			m_sleep_revision                    = 0;
 			m_last_environment_applied          = {};
+			m_last_weather_applied              = {};
 			m_resume_token.clear();
 			m_pending_connect = std::move(options);
 			if (!transition_state_locked(client_state::runtime_preflight))
@@ -589,6 +608,7 @@ namespace kcd2o
 			m_weather_revision = 0;
 			m_sleep_revision = 0;
 			m_last_environment_applied = {};
+			m_last_weather_applied = {};
 			m_pending_avatar.reset();
 			m_desired_avatar.reset();
 			m_local_activity.reset();
@@ -653,6 +673,8 @@ namespace kcd2o
 		}
 		if (manual_disconnect)
 		{
+			m_runtime.set_voice_active(false);
+			m_runtime.reset_voice();
 			KCD2Online_JOIN_TRACE(
 			    "join.disconnect.game-thread.begin",
 			    std::format(
@@ -723,6 +745,7 @@ namespace kcd2o
 		}
 		if (avatar_update)
 			queue_network(avatar_command{std::move(*avatar_update)});
+		m_runtime.set_voice_active(connected);
 		if (connected && canonical_level_id(current_level) != canonical_level_id(expected_level))
 		{
 			set_state(client_state::disconnected, "loaded level no longer matches the server");
@@ -774,6 +797,8 @@ namespace kcd2o
 		}
 		if (connected)
 		{
+			for (auto &voice : m_runtime.poll_outbound_voice())
+				queue_network(voice_command{std::move(voice)});
 			queue_world_object_updates(std::move(world_objects));
 			queue_world_item_updates(std::move(world_items));
 			queue_npc_observations(std::move(npc_observations), now);
@@ -1151,6 +1176,8 @@ namespace kcd2o
 							            accepted.player_id();
 							        m_status.server_name =
 							            accepted.server_name();
+							        m_status.network_role =
+							            accepted.network_role();
 							        m_status.level_id = accepted.level_id();
 							        m_update_rates.tick_rate =
 							            accepted.tick_rate();
@@ -1349,12 +1376,18 @@ namespace kcd2o
 						        // delay messages behind world or NPC updates.
 						        const auto &message = envelope->chat_broadcast();
 						        std::scoped_lock lock(m_chat_mutex);
-						        m_chat.push_back({message.player_id(), message.display_name(), message.text(), message.server_time_ms()});
+						        m_chat.push_back({message.player_id(), message.display_name(), message.text(), message.server_time_ms(), message.channel(), message.network_role()});
 						        while (m_chat.size() > 200)
 						        {
 							        m_chat.pop_front();
 						        }
-						        return;
+								return;
+					        }
+					        else if (envelope->has_server_voice_frame())
+					        {
+								m_runtime.receive_voice(
+								    envelope->server_voice_frame());
+								return;
 					        }
 
 					        if (!server_message_requires_game_thread(envelope->payload_case()))
@@ -1581,6 +1614,16 @@ namespace kcd2o
 				    envelope,
 				    reliability::reliable);
 			}
+			else if constexpr (
+			    std::is_same_v<type, voice_command>)
+			{
+				protocol::Envelope envelope;
+				*envelope.mutable_client_voice_frame() =
+				    std::move(typed.message);
+				(void)send_envelope(
+				    envelope,
+				    reliability::unreliable);
+			}
 					    },
 					    command);
 				}
@@ -1677,8 +1720,12 @@ namespace kcd2o
 			final_error = m_status.error;
 		}
 		if (transitioned && state == client_state::disconnected)
+		{
+			m_runtime.set_voice_active(false);
+			m_runtime.reset_voice();
 			kcse::join_trace::finish_join(
 			    final_error.empty() ? "disconnected" : final_error);
+		}
 		return transitioned;
 	}
 
@@ -1729,6 +1776,7 @@ namespace kcd2o
 			m_profile_update_pending = false;
 			m_avatar_update_pending = false;
 			m_status.local_player_id = 0;
+			m_status.network_role = protocol::NETWORK_ROLE_USER;
 			m_status.ping_ms = -1;
 			m_status.packet_loss_percent = 0.0F;
 			m_world_objects.clear();
@@ -1745,6 +1793,8 @@ namespace kcd2o
 			m_environment_revision = 0;
 			m_weather_revision = 0;
 			m_sleep_revision = 0;
+			m_last_environment_applied = {};
+			m_last_weather_applied = {};
 			m_status.sleeping = false;
 			m_status.sleeping_players = 0;
 			m_status.sleeping_players_required = 1;
@@ -2059,7 +2109,7 @@ namespace kcd2o
 				m_status.error = "home marker is waiting for the native map runtime";
 			for (const auto &player : envelope.server_accepted().players())
 			{
-				accept_snapshot_player(player, now);
+				accept_snapshot_player(player, now, true);
 			}
 			KCD2Online_JOIN_TRACE(
 			    "join.game-envelope.server-accepted.applied",
@@ -2067,6 +2117,10 @@ namespace kcd2o
 			        "players={}",
 			        envelope.server_accepted().players_size()));
 			kcse::join_trace::finish_join("connected");
+			lock.unlock();
+			m_runtime.show_multiplayer_notice(
+			    "VOIP: V = sprechen, Strg+V = fluestern, Umschalt+V = rufen.");
+			lock.lock();
 		}
 		else if (envelope.has_server_home_marker_updated())
 		{
@@ -2157,6 +2211,7 @@ namespace kcd2o
 			m_environment_revision = bootstrap.environment().revision();
 			m_weather_revision = bootstrap.environment().weather_revision();
 			m_last_environment_applied = now;
+			m_last_weather_applied = now;
 			m_world_objects.clear();
 			m_pending_world_objects.clear();
 			m_deferred_world_objects.clear();
@@ -2173,7 +2228,10 @@ namespace kcd2o
 		}
 		else if (envelope.has_player_joined())
 		{
-			accept_snapshot_player(envelope.player_joined().player(), now);
+			accept_snapshot_player(
+			    envelope.player_joined().player(),
+			    now,
+			    true);
 		}
 		else if (envelope.has_player_left())
 		{
@@ -2191,14 +2249,29 @@ namespace kcd2o
 			        == std::chrono::steady_clock::time_point{}
 			    || now - m_last_environment_applied
 			        >= environment_correction_interval;
+			const bool weather_changed =
+			    environment.weather_revision() > m_weather_revision;
+			const bool weather_current =
+			    environment.weather_revision() == m_weather_revision;
+			const bool weather_refresh_due =
+			    m_last_weather_applied
+			        == std::chrono::steady_clock::time_point{}
+			    || now - m_last_weather_applied
+			        >= weather_refresh_interval(environment.time_scale());
 			if (environment_changed
-			    || (environment_current && environment_correction_due))
+			    || (environment_current
+			        && (environment_correction_due
+			            || (weather_current && weather_refresh_due))))
 			{
 				const auto state = environment;
+				const bool apply_weather =
+				    weather_changed
+				    || (environment_current && weather_current
+				        && weather_refresh_due);
 				lock.unlock();
 				const bool applied = m_runtime.apply_environment_state(
 				    state,
-				    state.weather_revision() > m_weather_revision);
+				    apply_weather);
 				lock.lock();
 				if (!applied)
 				{
@@ -2215,6 +2288,8 @@ namespace kcd2o
 				m_weather_revision = std::max(
 				    m_weather_revision,
 				    state.weather_revision());
+				if (apply_weather)
+					m_last_weather_applied = now;
 			}
 			KCD2Online_JOIN_TRACE(
 			    "join.snapshot.apply.begin",
@@ -2237,10 +2312,12 @@ namespace kcd2o
 			const auto state = envelope.server_environment_updated().state();
 			if (state.revision() <= m_environment_revision)
 				return;
+			const bool apply_weather =
+			    state.weather_revision() > m_weather_revision;
 			lock.unlock();
 			const bool applied = m_runtime.apply_environment_state(
 			    state,
-			    state.weather_revision() > m_weather_revision);
+			    apply_weather);
 			lock.lock();
 			if (!applied)
 			{
@@ -2253,6 +2330,8 @@ namespace kcd2o
 			m_environment_revision = state.revision();
 			m_weather_revision = state.weather_revision();
 			m_last_environment_applied = now;
+			if (apply_weather)
+				m_last_weather_applied = now;
 		}
 		else if (envelope.has_server_sleep_state())
 		{
@@ -2731,7 +2810,9 @@ namespace kcd2o
 			    message.player_id(),
 			    message.display_name(),
 			    message.text(),
-			    message.server_time_ms()});
+			    message.server_time_ms(),
+			    message.channel(),
+			    message.network_role()});
 			while (m_chat.size() > 200)
 			{
 				m_chat.pop_front();
@@ -3069,13 +3150,43 @@ namespace kcd2o
 				const auto &from    = player.history[0];
 				const auto &to      = player.history[1];
 				const auto duration = std::chrono::duration<float>(to.received_at - from.received_at).count();
-				const auto elapsed =
-				    std::chrono::duration<float>(target - from.received_at).count();
-				const auto factor = duration <= 0.0F
-				    ? 1.0F
-				    : std::clamp(elapsed / duration, 0.0F, 1.0F);
-				rendered = interpolate(from.transform, to.transform, factor);
-				mode = factor < 0.5F ? from.mode : to.mode;
+				if (target <= to.received_at)
+				{
+					const auto elapsed = std::chrono::duration<float>(
+					    target - from.received_at).count();
+					const auto factor = duration <= 0.0F
+					    ? 1.0F
+					    : std::clamp(elapsed / duration, 0.0F, 1.0F);
+					rendered = interpolate(
+					    from.transform, to.transform, factor);
+					mode = factor < 0.5F ? from.mode : to.mode;
+				}
+				else
+				{
+					// Keep the Avatar moving briefly beyond the newest packet. Prefer
+					// its explicit velocity; derive it from the last two rendered
+					// samples when an older sender did not provide one.
+					auto newest = to.transform;
+					const auto wire_speed = std::hypot(
+					    newest.velocity().x(), newest.velocity().y());
+					if (wire_speed < 0.05F && duration > 0.001F)
+					{
+						auto *velocity = newest.mutable_velocity();
+						velocity->set_x((to.transform.position().x()
+						    - from.transform.position().x()) / duration);
+						velocity->set_y((to.transform.position().y()
+						    - from.transform.position().y()) / duration);
+						velocity->set_z((to.transform.position().z()
+						    - from.transform.position().z()) / duration);
+					}
+					const auto seconds = std::clamp(
+					    std::chrono::duration<float>(
+					        target - to.received_at).count(),
+					    0.0F,
+					    0.06F);
+					rendered = extrapolate(newest, seconds);
+					mode = to.mode;
+				}
 				connected = to.connected;
 			}
 			else if (player.history.size() == 1
@@ -3085,7 +3196,7 @@ namespace kcd2o
 				    std::chrono::duration<float>(
 				        target - player.history.front().received_at)
 				        .count(),
-				    0.25F);
+				    0.06F);
 				rendered = extrapolate(player.history.front().transform, seconds);
 			}
 
@@ -3109,16 +3220,31 @@ namespace kcd2o
 
 	void multiplayer_client::accept_snapshot_player(
 	    const protocol::PlayerSnapshot &snapshot,
-	    std::chrono::steady_clock::time_point now)
+	    std::chrono::steady_clock::time_point now,
+	    bool reset_transform_stream)
 	{
 		if (snapshot.player_id() == m_status.local_player_id)
 		{
 			return;
 		}
 		auto &player = m_remote_players[snapshot.player_id()];
+		if (reset_transform_stream)
+		{
+			KCD2Online_JOIN_TRACE(
+			    "join.remote-transform.stream-reset",
+			    std::format(
+			        "player_id={} previous_sequence={} buffered={}",
+			        snapshot.player_id(),
+			        player.transform_sequence.value(),
+			        player.history.size()));
+			player.history.clear();
+			player.transform_sequence.reset();
+			player.rendered.has_transform = false;
+		}
 		player.display_name = snapshot.display_name();
 		player.rendered.id = snapshot.player_id();
 		player.rendered.display_name = snapshot.display_name();
+		player.rendered.network_role = snapshot.network_role();
 		player.rendered.connected = snapshot.connected();
 		if (snapshot.has_avatar())
 		{
@@ -3136,13 +3262,10 @@ namespace kcd2o
 			return;
 		}
 		const auto sequence = snapshot.transform().sequence();
-		if (player.has_transform_sequence
-		    && sequence <= player.last_transform_sequence)
+		if (!player.transform_sequence.accept(sequence))
 		{
 			return;
 		}
-		player.has_transform_sequence = true;
-		player.last_transform_sequence = sequence;
 		player.history.push_back({
 		    now,
 		    snapshot.transform(),

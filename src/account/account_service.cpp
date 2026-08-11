@@ -18,6 +18,9 @@ namespace kcd2o::account
 			m_store = std::make_unique<account_store>();
 			const auto &stored = m_store->value();
 			m_account_id = stored.account_id;
+			m_username = stored.username;
+			m_display_name = stored.display_name;
+			m_locale = stored.locale.empty() ? "en" : stored.locale;
 			switch (stored.consent)
 			{
 			case consent_choice::undecided:
@@ -55,7 +58,16 @@ namespace kcd2o::account
 	account_status account_service::status() const
 	{
 		std::scoped_lock lock(m_mutex);
-		return {m_state, m_account_id, m_error_key, m_revision};
+		return {
+		    m_state,
+		    m_account_id,
+		    m_error_key,
+		    m_error_detail,
+		    m_username,
+		    m_display_name,
+		    m_locale,
+		    m_busy,
+		    m_revision};
 	}
 
 	void account_service::accept(std::string service_url)
@@ -74,11 +86,13 @@ namespace kcd2o::account
 					m_state = account_state::ready;
 					m_account_id = stored.account_id;
 					m_error_key.clear();
+					m_error_detail.clear();
 					bump_revision();
 					return;
 				}
 				m_state = account_state::registering;
 				m_error_key.clear();
+				m_error_detail.clear();
 				bump_revision();
 			}
 			catch (const std::exception &exception)
@@ -114,12 +128,14 @@ namespace kcd2o::account
 					    m_state = account_state::ready;
 					    m_account_id = registered.account_id;
 					    m_error_key.clear();
+					    m_error_detail.clear();
 					    bump_revision();
 				    }
 				    catch (const std::exception &exception)
 				    {
 					    const std::string detail = exception.what();
 					    const auto key = detail.find("already exists") != std::string::npos
+					            || detail.find("registration_unavailable") != std::string::npos
 					        ? "account.error.existing_device"
 					        : "account.error.service";
 					    std::scoped_lock lock(m_mutex);
@@ -137,7 +153,7 @@ namespace kcd2o::account
 	void account_service::decline()
 	{
 		std::scoped_lock lock(m_mutex);
-		if (m_state == account_state::registering || !m_store)
+		if (m_state == account_state::registering || m_busy || !m_store)
 			return;
 		try
 		{
@@ -146,6 +162,7 @@ namespace kcd2o::account
 			m_store->replace(std::move(stored));
 			m_state = account_state::declined;
 			m_error_key.clear();
+			m_error_detail.clear();
 			bump_revision();
 		}
 		catch (const std::exception &exception)
@@ -154,10 +171,118 @@ namespace kcd2o::account
 		}
 	}
 
+	void account_service::ensure_profile(std::string service_url)
+	{
+		{
+			std::scoped_lock lock(m_mutex);
+			if (m_state != account_state::ready || m_profile_refresh_attempted)
+				return;
+			m_profile_refresh_attempted = true;
+		}
+		refresh_profile(std::move(service_url));
+	}
+
+	void account_service::refresh_profile(std::string service_url)
+	{
+		account_record stored;
+		{
+			std::scoped_lock lock(m_mutex);
+			if (m_state != account_state::ready || m_busy || !m_store)
+				return;
+			stored = m_store->value();
+			m_profile_refresh_attempted = true;
+			m_busy = true;
+			m_error_detail.clear();
+			bump_revision();
+		}
+		m_worker = std::jthread(
+		    [this, service_url = std::move(service_url), stored = std::move(stored)](
+		        std::stop_token stop) mutable
+		    {
+			    try
+			    {
+				    const auto profile = account_api(service_url).get_profile(stored);
+				    if (stop.stop_requested())
+					    return;
+				    stored.username = profile.username;
+				    stored.display_name = profile.display_name;
+				    stored.locale = profile.locale;
+				    m_store->replace(stored);
+				    std::scoped_lock lock(m_mutex);
+				    m_username = profile.username;
+				    m_display_name = profile.display_name;
+				    m_locale = profile.locale;
+				    m_busy = false;
+				    m_error_detail.clear();
+				    bump_revision();
+			    }
+			    catch (const std::exception &exception)
+			    {
+				    std::scoped_lock lock(m_mutex);
+				    m_busy = false;
+				    m_error_detail = exception.what();
+				    bump_revision();
+			    }
+		    });
+	}
+
+	void account_service::update_profile(
+	    std::string service_url,
+	    std::string username,
+	    std::string display_name,
+	    std::string locale)
+	{
+		account_record stored;
+		{
+			std::scoped_lock lock(m_mutex);
+			if (m_state != account_state::ready || m_busy || !m_store)
+				return;
+			stored = m_store->value();
+			m_busy = true;
+			m_error_detail.clear();
+			bump_revision();
+		}
+		m_worker = std::jthread(
+		    [this,
+		     service_url = std::move(service_url),
+		     stored = std::move(stored),
+		     username = std::move(username),
+		     display_name = std::move(display_name),
+		     locale = std::move(locale)](std::stop_token stop) mutable
+		    {
+			    try
+			    {
+				    const auto profile = account_api(service_url).update_profile(
+				        stored, username, display_name, locale);
+				    if (stop.stop_requested())
+					    return;
+				    stored.username = profile.username;
+				    stored.display_name = profile.display_name;
+				    stored.locale = profile.locale;
+				    m_store->replace(stored);
+				    std::scoped_lock lock(m_mutex);
+				    m_username = profile.username;
+				    m_display_name = profile.display_name;
+				    m_locale = profile.locale;
+				    m_busy = false;
+				    m_error_detail.clear();
+				    bump_revision();
+			    }
+			    catch (const std::exception &exception)
+			    {
+				    std::scoped_lock lock(m_mutex);
+				    m_busy = false;
+				    m_error_detail = exception.what();
+				    bump_revision();
+			    }
+		    });
+	}
+
 	void account_service::set_error(std::string key, std::string detail)
 	{
 		m_state = account_state::error;
 		m_error_key = std::move(key);
+		m_error_detail = detail;
 		bump_revision();
 		const auto message = std::string("KCD2Online account service: ")
 		    + std::move(detail) + "\n";

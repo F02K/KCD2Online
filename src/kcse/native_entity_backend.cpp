@@ -24,6 +24,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cmath>
 #include <format>
@@ -1597,8 +1598,15 @@ namespace kcd2o::kcse
 				actor->SetMaxHealth(state.gameplay().max_health());
 				if (!local_authority && desired + 0.001F < current
 				    && actor->m_pSoul)
+				{
+					// C_CombatSoul::DealDamage copies the full 0x48-byte effect
+					// descriptor unconditionally. A null pointer therefore crashes in
+					// WHGame before the scripted-damage event can be dispatched.
+					std::array<std::uint8_t, 0x48> empty_effect{};
 					actor->m_pSoul->m_combatSoul.DealDamage(
-					    0.0F, current - desired, 0, false, nullptr);
+					    0.0F, current - desired, 0, false,
+					    empty_effect.data());
+				}
 				if (!local_authority)
 					actor->m_health = desired;
 				if (!local_authority

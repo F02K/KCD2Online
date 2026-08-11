@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include "server/network_identity.hpp"
 
 namespace kcd2o::server
 {
@@ -17,6 +20,8 @@ namespace kcd2o::server
 		std::uint64_t max_players{};
 		bool password_protected{};
 		std::string level_id;
+		std::vector<std::string> owner_account_ids;
+		std::vector<std::string> active_account_ids;
 	};
 
 	struct server_credentials
@@ -31,7 +36,7 @@ namespace kcd2o::server
 		backend_client(std::string base_url, std::string server_id, std::string api_key);
 		[[nodiscard]] server_credentials register_server(
 		    const heartbeat_data &data) const;
-		[[nodiscard]] std::optional<std::string> introspect(
+		[[nodiscard]] std::optional<network_identity> introspect(
 		    std::string_view access_token,
 		    std::string &error) const;
 		[[nodiscard]] bool heartbeat(const heartbeat_data &data, std::string &error) const;

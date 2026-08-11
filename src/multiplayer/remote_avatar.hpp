@@ -621,9 +621,11 @@ namespace kcd2o
 				    result,
 				    candidate_status.diagnostic.empty()
 				        ? std::string{"native candidate materialization timed out"}
-				        : "native candidate materialization timed out: "
-				            + candidate_status.diagnostic);
+					        : "native candidate materialization timed out: "
+					            + candidate_status.diagnostic);
 			}
+			if (is_pending_remote_avatar_state(candidate_status.state))
+				return true;
 			if (!m_backend.update(
 			        *entry.candidate,
 			        player,
@@ -639,9 +641,6 @@ namespace kcd2o
 			}
 			entry.candidate_revision = player.avatar.revision();
 			++result.updated;
-			if (candidate_status.state != remote_avatar_state::ready)
-				return true;
-
 			m_backend.remove(entry.active);
 			++result.removed;
 			entry.active = *entry.candidate;
@@ -733,9 +732,11 @@ namespace kcd2o
 				    result,
 				    active_status.diagnostic.empty()
 				        ? std::string{"native active-avatar materialization timed out"}
-				        : "native active-avatar materialization timed out: "
-				            + active_status.diagnostic);
+					        : "native active-avatar materialization timed out: "
+					            + active_status.diagnostic);
 			}
+			if (is_pending_remote_avatar_state(active_status.state))
+				return true;
 
 			const auto rendered = entry.active_fallback
 			    ? fallback_snapshot(player)

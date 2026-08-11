@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -32,6 +33,7 @@ namespace
 		std::cout
 		    << "Commands: status, players, kick <player_id> [reason], "
 		       "say <text>, profile claim <player_id>, "
+		       "permission <list|grant|revoke> <player_id> [scope], "
 		       "dummy spawn [name], dummy remove <player_id>, "
 		       "entities <all|humans|animals> <disable|enable>, "
 		       "entities status, time <hours>, timescale <ratio>, "
@@ -109,7 +111,9 @@ int main(int argc, char **argv)
 					     0,
 					     config.max_players,
 					     !config.password.empty(),
-					     config.level_id});
+					     config.level_id,
+					     config.permission_owners,
+					     {}});
 					kcd2o::server::save_server_credentials(
 					    config.account_identity_file,
 					    *credentials);
@@ -202,6 +206,8 @@ int main(int argc, char **argv)
 		          << config.port << " for level " << config.level_id << '\n';
 		print_help();
 		std::atomic<std::uint64_t> published_player_count{};
+		std::mutex published_accounts_mutex;
+		std::vector<std::string> published_account_ids;
 		std::jthread heartbeat_worker;
 		if (backend)
 		{
@@ -212,6 +218,11 @@ int main(int argc, char **argv)
 				    std::condition_variable_any wait_condition;
 				    do
 				    {
+					    std::vector<std::string> active_account_ids;
+					    {
+						    std::scoped_lock lock(published_accounts_mutex);
+						    active_account_ids = published_account_ids;
+					    }
 					    std::string error;
 					    if (!backend->heartbeat(
 					            {config.name,
@@ -220,7 +231,9 @@ int main(int argc, char **argv)
 					             published_player_count.load(std::memory_order_relaxed),
 					             config.max_players,
 					             !config.password.empty(),
-					             config.level_id},
+					             config.level_id,
+					             config.permission_owners,
+					             std::move(active_account_ids)},
 					            error))
 						    std::cerr << "server browser heartbeat failed: " << error << '\n';
 					    std::unique_lock lock(wait_mutex);
@@ -421,6 +434,37 @@ int main(int argc, char **argv)
 					    reason.empty() ? "kicked by server" : reason,
 					    now());
 				}
+				else if (command == "permission")
+				{
+					std::string action;
+					kcd2o::player_id id{};
+					std::string scope;
+					input >> action >> id >> scope;
+					if (action == "list" && id != 0)
+					{
+						const auto scopes = core.permissions(id);
+						if (scopes.empty())
+							std::cout << "no permissions or unknown player\n";
+						else
+						{
+							for (const auto &entry : scopes)
+								std::cout << entry << '\n';
+						}
+					}
+					else if ((action == "grant" || action == "revoke")
+					    && id != 0 && !scope.empty())
+					{
+						std::string error;
+						const auto accepted = action == "grant"
+						    ? core.grant_permission(id, scope, error)
+						    : core.revoke_permission(id, scope, error);
+						std::cout << (accepted ? "permission updated" : "permission update failed: " + error) << '\n';
+					}
+					else
+					{
+						std::cout << "usage: permission <list|grant|revoke> <player_id> [scope]\n";
+					}
+				}
 				else if (command == "say")
 				{
 					std::string text;
@@ -611,9 +655,21 @@ int main(int argc, char **argv)
 			}
 
 			const auto tick_now = now();
+			const auto published_players = core.players();
 			published_player_count.store(
-			    static_cast<std::uint64_t>(core.players().size()),
+			    static_cast<std::uint64_t>(published_players.size()),
 			    std::memory_order_relaxed);
+			{
+				std::vector<std::string> active_account_ids;
+				active_account_ids.reserve(published_players.size());
+				for (const auto &player : published_players)
+				{
+					if (player.connected && !player.dummy && !player.persistent_id.empty())
+						active_account_ids.push_back(player.persistent_id);
+				}
+				std::scoped_lock lock(published_accounts_mutex);
+				published_account_ids = std::move(active_account_ids);
+			}
 			if (tick_now >= next_tick)
 			{
 				core.tick(tick_now);

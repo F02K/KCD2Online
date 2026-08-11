@@ -190,5 +190,20 @@ namespace kcd2o
 		virtual void show_multiplayer_notice(std::string_view)
 		{
 		}
+		virtual void set_voice_active(bool)
+		{
+		}
+		[[nodiscard]] virtual std::vector<protocol::ClientVoiceFrame>
+		poll_outbound_voice()
+		{
+			return {};
+		}
+		virtual void receive_voice(
+		    const protocol::ServerVoiceFrame &)
+		{
+		}
+		virtual void reset_voice()
+		{
+		}
 	};
 }

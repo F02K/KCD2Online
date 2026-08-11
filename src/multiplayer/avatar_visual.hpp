@@ -10,6 +10,15 @@
 
 namespace kcd2o
 {
+	// An empty equipment list is an authoritative visual state: the character
+	// intentionally wears no items. It must not be replaced with starter/default
+	// equipment merely because there is no definition to resolve.
+	[[nodiscard]] inline bool avatar_requests_no_equipment(
+	    const protocol::AvatarDescriptor &avatar) noexcept
+	{
+		return avatar.equipment().empty();
+	}
+
 	[[nodiscard]] inline bool avatar_weapon_should_draw(
 	    const protocol::AvatarDescriptor &avatar) noexcept
 	{

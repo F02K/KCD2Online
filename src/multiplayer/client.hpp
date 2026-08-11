@@ -3,6 +3,7 @@
 #include "multiplayer/game_command_queue.hpp"
 #include "multiplayer/identity_store.hpp"
 #include "multiplayer/networking.hpp"
+#include "multiplayer/remote_transform_sequence.hpp"
 #include "multiplayer/runtime.hpp"
 #include "multiplayer/client_state.hpp"
 
@@ -38,6 +39,8 @@ namespace kcd2o
 		std::string display_name;
 		std::string text;
 		std::uint64_t server_time_ms{};
+		protocol::ChatChannel channel{protocol::CHAT_CHANNEL_SAY};
+		protocol::NetworkRole network_role{protocol::NETWORK_ROLE_USER};
 	};
 
 	struct remote_player_view
@@ -52,6 +55,7 @@ namespace kcd2o
 		bool has_avatar{};
 		protocol::PlayerActivity activity;
 		bool has_activity{};
+		protocol::NetworkRole network_role{protocol::NETWORK_ROLE_USER};
 	};
 
 	struct client_status
@@ -73,6 +77,14 @@ namespace kcd2o
 		std::uint32_t sleeping_players_required{1};
 		bool dead{};
 		bool respawn_pending{};
+		bool voice_recording{};
+		bool voice_speaking{};
+		float voice_level{};
+		protocol::VoiceRange voice_range{protocol::VOICE_RANGE_NORMAL};
+		bool native_keybinds{};
+		std::uint32_t chat_action_generation{};
+		bool emote_action_held{};
+		protocol::NetworkRole network_role{protocol::NETWORK_ROLE_USER};
 	};
 
 	struct client_update_rates
@@ -188,6 +200,10 @@ namespace kcd2o
 		{
 			protocol::ClientActivityEnd message;
 		};
+		struct voice_command
+		{
+			protocol::ClientVoiceFrame message;
+		};
 		using network_command = std::variant<
 		    connect_command,
 		    disconnect_command,
@@ -205,7 +221,8 @@ namespace kcd2o
 		    death_command,
 		    respawn_command,
 		    activity_start_command,
-		    activity_end_command>;
+		    activity_end_command,
+		    voice_command>;
 
 		struct timed_transform
 		{
@@ -220,8 +237,7 @@ namespace kcd2o
 			std::string display_name;
 			std::deque<timed_transform> history;
 			remote_player_view rendered;
-			bool has_transform_sequence{};
-			std::uint64_t last_transform_sequence{};
+			remote_transform_sequence transform_sequence;
 		};
 
 		void network_loop(std::stop_token stop);
@@ -249,7 +265,8 @@ namespace kcd2o
 		void update_interpolation(std::chrono::steady_clock::time_point now);
 		void accept_snapshot_player(
 		    const protocol::PlayerSnapshot &snapshot,
-		    std::chrono::steady_clock::time_point now);
+		    std::chrono::steady_clock::time_point now,
+		    bool reset_transform_stream = false);
 		[[nodiscard]] static protocol::TransformState interpolate(
 		    const protocol::TransformState &from,
 		    const protocol::TransformState &to,
@@ -308,6 +325,7 @@ namespace kcd2o
 		std::uint64_t m_weather_revision{};
 		std::uint64_t m_sleep_revision{};
 		std::chrono::steady_clock::time_point m_last_environment_applied{};
+		std::chrono::steady_clock::time_point m_last_weather_applied{};
 
 		mutable std::mutex m_network_mutex;
 		std::deque<network_command> m_network_commands;

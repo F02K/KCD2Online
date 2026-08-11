@@ -52,6 +52,7 @@ int main()
 		        const auto lane = static_cast<traffic_lane>(lane_index);
 		        const auto delivery = lane == traffic_lane::player_realtime
 		                || lane == traffic_lane::npc_realtime
+		                || lane == traffic_lane::voice_realtime
 		            ? reliability::unreliable
 		            : reliability::reliable;
 		        std::string error;
@@ -124,6 +125,7 @@ int main()
 				const auto lane = static_cast<traffic_lane>(lane_index);
 				const auto delivery = lane == traffic_lane::player_realtime
 				        || lane == traffic_lane::npc_realtime
+				        || lane == traffic_lane::voice_realtime
 				    ? reliability::unreliable
 				    : reliability::reliable;
 				std::string error;

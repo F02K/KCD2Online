@@ -1,4 +1,5 @@
 #include "multiplayer/protocol.hpp"
+#include "multiplayer/emote_catalog.hpp"
 #include "multiplayer/world_catalog.hpp"
 
 #include <cassert>
@@ -17,6 +18,7 @@ namespace
 		kcd2o::protocol::EnvironmentState state;
 		state.set_revision(1);
 		state.set_time_of_day_hours(8.0);
+		state.set_world_time_seconds(8.0 * kcd2o::seconds_per_hour);
 		state.set_time_scale(15.0F);
 		state.set_server_time_ms(1);
 		state.set_weather_id(1);
@@ -77,6 +79,16 @@ int main()
 	lane_message.mutable_client_profile_update();
 	assert(lane_for(lane_message) == traffic_lane::ordered_state);
 	lane_message.Clear();
+	auto *voice_lane = lane_message.mutable_client_voice_frame();
+	voice_lane->set_sequence(1);
+	voice_lane->set_capture_time_ms(1);
+	voice_lane->set_opus("opus");
+	voice_lane->set_visemes(std::string(voice_viseme_count, '\0'));
+	assert(lane_for(lane_message) == traffic_lane::voice_realtime);
+	assert(encode(lane_message, reliability::unreliable));
+	voice_lane->set_visemes("short");
+	assert(!encode(lane_message, reliability::unreliable));
+	lane_message.Clear();
 	assert(lane_for(lane_message) == traffic_lane::ordered_state);
 
 	protocol::Envelope envelope;
@@ -105,7 +117,7 @@ int main()
 	const auto decoded = decode(encoded->bytes, &error);
 	assert(decoded);
 	assert(decoded->client_hello().display_name() == "Henry");
-	assert(decoded->client_hello().version() == "0.1.3");
+	assert(decoded->client_hello().version() == "0.1.4");
 	auto incompatible = envelope;
 	incompatible.mutable_client_hello()->set_version("0.0.8");
 	assert(encode(incompatible, reliability::reliable, &error));
@@ -146,6 +158,16 @@ int main()
 	animation->set_fragment("CombatAttack");
 	assert(!is_finite_transform(value));
 	animation->set_fragment("Jump");
+	for (const auto &emote : emote_catalog)
+	{
+		auto emote_transform = transform(1.0F, 0.0F, 1);
+		auto *emote_animation = emote_transform.mutable_animation();
+		emote_animation->set_sequence(1);
+		emote_animation->set_fragment(emote.fragment);
+		emote_animation->set_active(true);
+		assert(is_finite_transform(emote_transform));
+		assert(find_emote(emote.kind) == &emote);
+	}
 	value.mutable_position()->set_x(std::numeric_limits<float>::infinity());
 	assert(!is_finite_transform(value));
 
@@ -563,6 +585,12 @@ int main()
 	    23.5,
 	    600.0F,
 	    std::chrono::seconds(126)) - 20.5) < 0.000001);
+	assert(std::abs(project_world_time_seconds(
+	    23.5 * seconds_per_hour,
+	    600.0F,
+	    std::chrono::seconds(126)) - 160'200.0) < 0.000001);
+	assert(std::abs(next_world_time_at_hour(20.5 * seconds_per_hour, 6.25)
+	    - 108'900.0) < 0.000001);
 	assert(circular_time_distance_hours(23.9, 0.1) < 0.21);
 	protocol::Envelope environment_update;
 	*environment_update.mutable_server_environment_updated()->mutable_state() =
@@ -573,8 +601,14 @@ int main()
 	*environment_update.mutable_server_environment_updated()->mutable_state() =
 	    valid_environment;
 	assert(!encode(environment_update, reliability::reliable, &error));
+	valid_environment = environment();
+	valid_environment.set_world_time_seconds(0.0);
+	assert(!is_valid_environment_state(valid_environment));
+	valid_environment = environment();
+	valid_environment.set_world_time_seconds(-1.0);
+	assert(!is_valid_environment_state(valid_environment));
 
-	assert(kcd2o_version == "0.1.3");
+	assert(kcd2o_version == "0.1.4");
 	auto unknown_address_library = *runtime;
 	unknown_address_library.set_address_library_sha256(std::string(64, '0'));
 	assert(is_valid_address_library_identity(unknown_address_library));

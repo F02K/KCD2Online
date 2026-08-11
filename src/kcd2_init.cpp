@@ -16,6 +16,8 @@
 #include <pugixml.hpp>
 #include <threads/thread_pool.hpp>
 
+#include <CryEngine/CryCommon/SInputEvent.h>
+
 extern "C"
 {
 #include <ldo.h>
@@ -369,8 +371,14 @@ namespace big
 
 	static void hook_PostInputEvent(char **a1, __int64 a2, __int64 a3, __int64 a4)
 	{
-		if (native_multiplayer_menu::blocks_game_input()
-		    || ingame_chat::blocks_game_input())
+		if (native_multiplayer_menu::blocks_game_input())
+		{
+			return;
+		}
+		const auto *event = reinterpret_cast<const Offsets::SInputEvent *>(a2);
+		if (ingame_chat::blocks_game_input()
+		    && (!event || !ingame_chat::allows_blocked_input(
+		                      static_cast<std::uint32_t>(event->state))))
 		{
 			return;
 		}

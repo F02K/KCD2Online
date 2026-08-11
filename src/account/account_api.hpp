@@ -24,6 +24,15 @@ namespace kcd2o::account
 		long long expires_at_unix_seconds{};
 	};
 
+	struct account_profile
+	{
+		std::string account_id;
+		std::string username;
+		std::string display_name;
+		std::string locale{"en"};
+		std::string network_role{"user"};
+	};
+
 	struct public_server
 	{
 		std::string id;
@@ -49,6 +58,13 @@ namespace kcd2o::account
 		[[nodiscard]] login_result login(
 		    const account_record &account,
 		    std::string_view audience) const;
+		[[nodiscard]] account_profile get_profile(
+		    const account_record &account) const;
+		[[nodiscard]] account_profile update_profile(
+		    const account_record &account,
+		    std::string_view username,
+		    std::string_view display_name,
+		    std::string_view locale) const;
 		[[nodiscard]] std::vector<public_server> list_servers() const;
 
 	private:
@@ -56,6 +72,11 @@ namespace kcd2o::account
 		    std::string_view path,
 		    std::string_view body) const;
 		[[nodiscard]] std::string get_json(std::string_view path) const;
+		[[nodiscard]] std::string request_json(
+		    std::wstring_view method,
+		    std::string_view path,
+		    std::string_view body,
+		    std::string_view access_token = {}) const;
 
 		std::string m_base_url;
 	};

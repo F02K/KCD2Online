@@ -185,20 +185,32 @@ namespace kcd2o::account
 		    std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 		if ((!input && !input.eof()) || encrypted_text.empty())
 			throw std::runtime_error("Account store is empty or unreadable");
+		input.close();
 		auto plaintext = unprotect({
 		    reinterpret_cast<const std::byte *>(encrypted_text.data()),
 		    encrypted_text.size()});
 		secure_text_guard erase_plaintext{plaintext};
+		bool migrate{};
 		try
 		{
 			const auto json = nlohmann::json::parse(plaintext);
-			if (json.at("version").get<int>() != 1)
+			const auto version = json.at("version").get<int>();
+			if (version != 1 && version != 2)
 				throw std::runtime_error("Unsupported account store version");
+			migrate = version == 1;
 			account_record loaded;
 			loaded.consent = parse_consent(json.at("consent").get<std::string>());
 			loaded.account_id = json.value("accountId", "");
 			loaded.credential_id = json.value("credentialId", "");
 			loaded.recovery_code = json.value("recoveryCode", "");
+			if (version >= 2)
+			{
+				loaded.username = json.value("username", "");
+				loaded.display_name = json.value("displayName", "");
+				loaded.locale = json.value("locale", "en");
+				if (loaded.locale.empty())
+					loaded.locale = "en";
+			}
 			const auto private_key = json.value("privateKey", "");
 			if (!private_key.empty())
 				loaded.private_key_blob = base64url_decode(private_key);
@@ -213,17 +225,22 @@ namespace kcd2o::account
 			throw std::runtime_error(
 			    std::string("Account store is malformed: ") + exception.what());
 		}
+		if (migrate)
+			save(m_value);
 	}
 
 	void account_store::save(const account_record &value) const
 	{
 		nlohmann::json json{
-		    {"version", 1},
+		    {"version", 2},
 		    {"consent", consent_name(value.consent)},
 		    {"accountId", value.account_id},
 		    {"credentialId", value.credential_id},
 		    {"privateKey", base64url_encode(value.private_key_blob)},
-		    {"recoveryCode", value.recovery_code}};
+		    {"recoveryCode", value.recovery_code},
+		    {"username", value.username},
+		    {"displayName", value.display_name},
+		    {"locale", value.locale.empty() ? "en" : value.locale}};
 		auto plaintext = json.dump();
 		secure_text_guard erase_plaintext{plaintext};
 		const auto encrypted = protect(plaintext);

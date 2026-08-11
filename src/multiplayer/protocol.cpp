@@ -181,6 +181,29 @@ namespace kcd2o
 
 		bool valid_envelope(const protocol::Envelope &envelope)
 		{
+			const auto valid_voice_payload = [](const auto &message, bool server)
+			{
+				if constexpr (requires { message.player_id(); })
+				{
+					if (server && message.player_id() == 0)
+						return false;
+				}
+				if (message.sequence() == 0
+				    || !protocol::VoiceRange_IsValid(
+				        static_cast<int>(message.range()))
+				    || message.visemes().size() != voice_viseme_count
+				    || message.opus().size() > max_voice_opus_bytes)
+					return false;
+				return message.end_of_talkspurt()
+				    ? message.opus().empty()
+				    : !message.opus().empty();
+			};
+			if (envelope.has_client_voice_frame())
+				return valid_voice_payload(
+				    envelope.client_voice_frame(), false);
+			if (envelope.has_server_voice_frame())
+				return valid_voice_payload(
+				    envelope.server_voice_frame(), true);
 			if (envelope.has_client_npc_discovery())
 			{
 				const auto &message = envelope.client_npc_discovery();
@@ -634,7 +657,9 @@ namespace kcd2o
 			{
 				return is_valid_display_name(
 				           envelope.chat_broadcast().display_name())
-				    && is_valid_chat(envelope.chat_broadcast().text());
+				    && is_valid_chat(envelope.chat_broadcast().text())
+				    && protocol::ChatChannel_IsValid(
+				        envelope.chat_broadcast().channel());
 			}
 			return true;
 		}
@@ -657,6 +682,10 @@ namespace kcd2o
 		case protocol::Envelope::kServerNpcSnapshot:
 		case protocol::Envelope::kServerNpcMotion:
 			return traffic_lane::npc_realtime;
+
+		case protocol::Envelope::kClientVoiceFrame:
+		case protocol::Envelope::kServerVoiceFrame:
+			return traffic_lane::voice_realtime;
 
 		default:
 			return traffic_lane::ordered_state;

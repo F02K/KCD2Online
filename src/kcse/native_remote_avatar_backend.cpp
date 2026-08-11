@@ -4,6 +4,7 @@
 #include "kcse/native_remote_avatar_equipment.hpp"
 #include "kcse/join_trace.hpp"
 #include "multiplayer/avatar_visual.hpp"
+#include "multiplayer/emote_catalog.hpp"
 
 #include "npc/equipment_catalog.hpp"
 
@@ -15,8 +16,6 @@
 #include <framework/GuidUtils.h>
 #include <game/S_GameContext.h>
 #include <rpgmodule/C_Soul.h>
-#include <rpgmodule/C_SoulList.h>
-#include <crysystem/CEntity.h>
 #include <crysystem/SSystemGlobalEnvironment.h>
 #include <crysystem/ScriptAnyValue.h>
 #include <Offsets/vtables/IEntity.h>
@@ -34,24 +33,14 @@ namespace kcd2o::kcse
 {
 	namespace
 	{
-		constexpr std::uint32_t entity_flag_calc_physics = 1U << 7;
-		constexpr std::uint32_t entity_flag_client_only = 1U << 8;
-		constexpr std::uint32_t entity_flag_has_ai = 1U << 13;
-		constexpr std::uint32_t entity_flag_trigger_areas = 1U << 14;
-		constexpr std::uint32_t entity_flag_no_save = 1U << 15;
-		constexpr std::uint32_t entity_flag_clientside_state = 1U << 17;
-		constexpr std::uint32_t entity_flag_no_proximity = 1U << 19;
-		constexpr std::uint32_t entity_flag_never_network_static = 1U << 22;
-		constexpr std::uint32_t remote_actor_creation_flags =
-		    entity_flag_client_only | entity_flag_no_save
-		    | entity_flag_clientside_state
-		    | entity_flag_never_network_static;
 		// Soul.GetNameStringId() reads the CryString stored at C_Soul+0x3E8.
 		// This is the name consumed by the target/interaction HUD; IEntity::GetName()
 		// is only the engine's technical entity identifier.
 		constexpr std::uintptr_t soul_display_name_string_id_offset = 0x3E8;
-		constexpr auto remote_motion_keepalive =
-		    std::chrono::milliseconds(250);
+		constexpr auto remote_motion_retry =
+		    std::chrono::milliseconds(500);
+		constexpr auto remote_avatar_spawn_timeout =
+		    std::chrono::seconds(10);
 		constexpr auto remote_native_validation_interval =
 		    std::chrono::seconds(1);
 		std::chrono::steady_clock::time_point
@@ -89,40 +78,6 @@ namespace kcd2o::kcse
 			return std::min(direct, negated) > rotation_epsilon;
 		}
 
-		bool velocity_changed(
-		    const protocol::Vec3 &left,
-		    const protocol::Vec3 &right)
-		{
-			constexpr float velocity_epsilon_squared = 0.0025F;
-			const auto dx = left.x() - right.x();
-			const auto dy = left.y() - right.y();
-			const auto dz = left.z() - right.z();
-			return dx * dx + dy * dy + dz * dz
-			    > velocity_epsilon_squared;
-		}
-
-		bool locomotion_changed(
-		    const protocol::LocomotionState &left,
-		    const protocol::LocomotionState &right)
-		{
-			return std::abs(left.speed() - right.speed()) > 0.05F
-			    || std::abs(left.yaw_rate() - right.yaw_rate()) > 0.05F
-			    || left.strafing() != right.strafing()
-			    || velocity_changed(
-			        left.local_velocity(), right.local_velocity())
-			    || velocity_changed(
-			        left.facing_direction(), right.facing_direction());
-		}
-
-		Quat native_rotation(const protocol::Quaternion &rotation)
-		{
-			return Quat(
-			    rotation.w(),
-			    rotation.x(),
-			    rotation.y(),
-			    rotation.z());
-		}
-
 		Vec3 native_position(const protocol::Vec3 &position)
 		{
 			return Vec3(position.x(), position.y(), position.z());
@@ -141,36 +96,6 @@ namespace kcd2o::kcse
 			return environment && environment->pEntitySystem
 			    ? environment->pEntitySystem->GetEntity(entity_id)
 			    : nullptr;
-		}
-
-		enum class locomotion_request_result
-		{
-			applied,
-			rejected,
-			faulted
-		};
-
-		locomotion_request_result guarded_request_locomotion(
-		    wh::entitymodule::C_Actor &actor,
-		    const SMultiplayerLocomotionRequest &request) noexcept
-		{
-#ifdef _WIN32
-			__try
-			{
-				return actor.RequestLocomotion(request)
-				    ? locomotion_request_result::applied
-				    : locomotion_request_result::rejected;
-			}
-			__except(KCD2Online_JOIN_SEH_FILTER(
-			    "join.remote-animation.locomotion.seh"))
-			{
-				return locomotion_request_result::faulted;
-			}
-#else
-			return actor.RequestLocomotion(request)
-			    ? locomotion_request_result::applied
-			    : locomotion_request_result::rejected;
-#endif
 		}
 
 		enum class weapon_action_result
@@ -241,73 +166,6 @@ namespace kcd2o::kcse
 			return result;
 		}
 
-		protocol::TransformState smooth_transform_target(
-		    Offsets::IEntity &entity,
-		    const protocol::TransformState &target,
-		    float seconds,
-		    bool &needs_write)
-		{
-			auto result = target;
-			const auto *matrix = entity.GetWorldTMPtr();
-			if (!matrix)
-			{
-				needs_write = true;
-				return result;
-			}
-			const protocol::Vec3 current_position = [&]
-			{
-				protocol::Vec3 value;
-				value.set_x(matrix->m03);
-				value.set_y(matrix->m13);
-				value.set_z(matrix->m23);
-				return value;
-			}();
-			const auto dx = target.position().x() - current_position.x();
-			const auto dy = target.position().y() - current_position.y();
-			const auto dz = target.position().z() - current_position.z();
-			const auto error = std::sqrt(dx * dx + dy * dy + dz * dz);
-			if (error > 5.0F)
-			{
-				needs_write = true;
-				return result;
-			}
-
-			needs_write = true;
-			const auto factor = std::clamp(
-			    1.0F - std::exp(-14.0F * std::clamp(seconds, 0.0F, 0.1F)),
-			    0.08F,
-			    0.7F);
-			auto *position = result.mutable_position();
-			if (error < 0.025F)
-				*position = current_position;
-			else
-			{
-				position->set_x(current_position.x() + dx * factor);
-				position->set_y(current_position.y() + dy * factor);
-				position->set_z(current_position.z() + dz * factor);
-			}
-
-			const Quat current(*matrix);
-			const auto &desired = target.rotation();
-			auto dot = current.v.x * desired.x()
-			    + current.v.y * desired.y()
-			    + current.v.z * desired.z()
-			    + current.w * desired.w();
-			if (error < 0.025F && std::abs(dot) > 0.99995F)
-			{
-				needs_write = false;
-				return result;
-			}
-			const auto sign = dot < 0.0F ? -1.0F : 1.0F;
-			auto *rotation = result.mutable_rotation();
-			rotation->set_x(current.v.x + (desired.x() * sign - current.v.x) * factor);
-			rotation->set_y(current.v.y + (desired.y() * sign - current.v.y) * factor);
-			rotation->set_z(current.v.z + (desired.z() * sign - current.v.z) * factor);
-			rotation->set_w(current.w + (desired.w() * sign - current.w) * factor);
-			(void)normalize_rotation(rotation);
-			return result;
-		}
-
 		bool remote_semantics_api_ready() noexcept
 		{
 			auto *environment = SSystemGlobalEnvironment::GetInstance();
@@ -362,40 +220,153 @@ namespace kcd2o::kcse
 #endif
 		}
 
-		Offsets::IActor *guarded_create_actor(
-		    Offsets::IActorSystem *actor_system,
-		    const char *name,
-		    const Vec3 *position,
-		    const Quat *rotation,
-		    const Vec3 *scale) noexcept
+		std::optional<int> take_remote_script_result(
+		    const char *global_name) noexcept
 		{
+			auto *environment = SSystemGlobalEnvironment::GetInstance();
+			if (!environment || !environment->pScriptSystem || !global_name)
+				return std::nullopt;
 #ifdef _WIN32
 			__try
 			{
-				return actor_system->CreateActor(
-				    0,
-				    name,
-				    "NPC",
-				    position,
-				    rotation,
-				    scale,
-				    remote_actor_creation_flags);
+				ScriptAnyValue value;
+				int result{};
+				const bool read = environment->pScriptSystem->GetGlobalAny(
+				    global_name, value);
+				if (read)
+					(void)value.CopyTo(result);
+				environment->pScriptSystem->SetGlobalToNull(global_name);
+				return read ? std::optional<int>{result} : std::nullopt;
 			}
 			__except(KCD2Online_JOIN_SEH_FILTER(
-			    "join.remote-spawn.CreateActor.seh"))
+			    "remote-player-script-result.seh"))
 			{
-				return nullptr;
+				return std::nullopt;
 			}
 #else
-			return actor_system->CreateActor(
-			    0,
-			    name,
-			    "NPC",
-			    position,
-			    rotation,
-			    scale,
-			    remote_actor_creation_flags);
+			ScriptAnyValue value;
+			int result{};
+			const bool read = environment->pScriptSystem->GetGlobalAny(
+			    global_name, value);
+			if (read)
+				(void)value.CopyTo(result);
+			environment->pScriptSystem->SetGlobalToNull(global_name);
+			return read ? std::optional<int>{result} : std::nullopt;
 #endif
+		}
+
+		bool queue_avatar_spawn(
+		    std::string_view name,
+		    std::string_view class_name,
+		    std::string_view shared_soul_guid,
+		    const Vec3 &position) noexcept
+		{
+			constexpr auto result_name =
+			    "KCD2Online_RemoteAvatarSpawnResult";
+			const auto script = std::format(
+			    "{}=0 local ok,code=pcall(function() "
+			    "KCD2Online_AvatarSpawnRequests="
+			    "KCD2Online_AvatarSpawnRequests or {{}} "
+			    "KCD2Online_AvatarSpawnRequests[{}]=true "
+			    "Script.SetTimer(1,function() "
+			    "local requests=KCD2Online_AvatarSpawnRequests "
+			    "if not requests or not requests[{}] then return end "
+			    "requests[{}]=nil "
+				    "System.LogAlways('[KCD2Online] Avatar spawn begin '..{}) "
+				    "local entity=nil local backend='none' local spawnError='none' "
+				    "if XGenAIModule and type(XGenAIModule.SpawnEntity)=='function' then "
+				    "backend='xgen' local spawned,xgenError=pcall(function() "
+				    "XGenAIModule.SpawnEntity{{Name={},ClassName={},"
+				    "Pos={{{:.9g},{:.9g},{:.9g}}},SharedSoulGuid={}}} end) "
+				    "if spawned then entity=System.GetEntityByName({}) "
+				    "else spawnError=xgenError end end "
+				    "if not entity and System and type(System.SpawnEntity)=='function' then "
+				    "backend='system' local spawned,systemResult=pcall(System.SpawnEntity,{{"
+				    "class={},position={{x={:.9g},y={:.9g},z={:.9g}}},name={},"
+				    "properties={{esFaction='Civilians',guidSharedSoulId={}}}}}) "
+				    "if spawned then entity=System.GetEntityByName({}) "
+				    "if not entity and type(systemResult)=='table' then entity=systemResult end "
+				    "else spawnError=systemResult end end "
+				    "local entityId=entity and entity.id or 0 "
+				    "System.LogAlways('[KCD2Online] Avatar spawn end '..{}.."
+				    "' backend='..backend..' ok='..tostring(entityId~=0).."
+				    "' entity_id='..tostring(entityId)..' error='..tostring(spawnError)) end) "
+				    "return 1 end) {}=ok and code or -1",
+			    result_name,
+			    lua_string(name),
+			    lua_string(name),
+			    lua_string(name),
+			    lua_string(name),
+			    lua_string(name),
+			    lua_string(class_name),
+			    position.x,
+			    position.y,
+				    position.z,
+				    lua_string(shared_soul_guid),
+				    lua_string(name),
+				    lua_string(class_name),
+				    position.x,
+				    position.y,
+				    position.z,
+				    lua_string(name),
+				    lua_string(shared_soul_guid),
+				    lua_string(name),
+				    lua_string(name),
+				    result_name);
+			if (!execute_remote_script(script))
+				return false;
+			const auto result = take_remote_script_result(result_name);
+			return result && *result == 1;
+		}
+
+		void cancel_avatar_spawn(std::string_view name) noexcept
+		{
+			if (name.empty())
+				return;
+			(void)execute_remote_script(std::format(
+			    "if KCD2Online_AvatarSpawnRequests then "
+			    "KCD2Online_AvatarSpawnRequests[{}]=nil end",
+			    lua_string(name)));
+		}
+
+		void queue_avatar_remove(std::string_view name) noexcept
+		{
+			if (name.empty())
+				return;
+			(void)execute_remote_script(std::format(
+			    "Script.SetTimer(1,function() local e=System.GetEntityByName({}) "
+			    "if e then pcall(function() System.RemoveEntity(e.id) end) end end)",
+			    lua_string(name)));
+		}
+
+		std::optional<int> start_avatar_animation(
+		    std::uint32_t entity_id,
+		    std::string_view clip,
+		    bool loop) noexcept
+		{
+			constexpr auto result_name =
+			    "KCD2Online_RemoteAvatarAnimationResult";
+			const auto script = std::format(
+			    "{}=0 local ok,code=pcall(function() "
+			    "local e=System.GetEntity({}) "
+			    "if not e or type(e.StartAnimation)~='function' then return -1 end "
+			    "local length=0 "
+			    "if e.GetAnimationLength then pcall(function() "
+			    "length=e:GetAnimationLength(0,{}) or 0 end) end "
+			    "if length<=0 then return -4 end "
+			    "local started=e:StartAnimation(0,{},0,0.15,1.0,{}) "
+			    "if e.ForceCharacterUpdate then e:ForceCharacterUpdate(0,true) end "
+			    "return started and 1 or -2 end) "
+			    "{}=ok and code or -3",
+			    result_name,
+			    entity_id,
+			    lua_string(clip),
+			    lua_string(clip),
+			    loop ? "true" : "false",
+			    result_name);
+			if (!execute_remote_script(script))
+				return std::nullopt;
+			return take_remote_script_result(result_name);
 		}
 	}
 
@@ -443,166 +414,80 @@ namespace kcd2o::kcse
 		m_probe_polls = 0;
 	}
 
+	std::uint32_t native_remote_avatar_backend::entity_id_for(
+	    player_id player) const noexcept
+	{
+		for (const auto &[handle, avatar] : m_avatars)
+		{
+			(void)handle;
+			if (avatar.player == player && !avatar.failed)
+				return avatar.entity_id;
+		}
+		return 0;
+	}
+
 	native_remote_avatar_backend::active_probe_result
 	native_remote_avatar_backend::poll_active_probe(
 	    const protocol::TransformState &origin,
 	    std::string &error)
 	{
-		if (!m_probe_avatar)
-		{
-			if (!available())
-			{
-				error = diagnostic();
-				return active_probe_result::failed;
-			}
-			auto *database = wh::entitymodule::C_ItemDatabase::GetInstance();
-			if (!database)
-			{
-				error = "active probe has no native item database";
-				return active_probe_result::failed;
-			}
-			auto &catalog = npc::runtime_equipment_catalog();
-			const npc::equipment_definition *probe_equipment =
-			    catalog.find(probe_equipment_definition_id);
-			auto is_native_item = [database](
-			                          const npc::equipment_definition *candidate)
-			{
-				if (!candidate)
-					return false;
-				CryGUID guid{};
-				return wh::ParseGuid(
-				           candidate->definition_id.c_str(),
-				           guid)
-				    && database->FindClassByGuid(guid);
-			};
-			if (!is_native_item(probe_equipment))
-				probe_equipment = nullptr;
-			if (!probe_equipment)
-			{
-				for (const auto &candidate : catalog.entries())
-				{
-					if (candidate.equipped_slot == "PrimaryMainHand"
-					    && candidate.weapon
-					        == npc::weapon_class::one_handed
-					    && is_native_item(&candidate))
-					{
-						probe_equipment = &candidate;
-						break;
-					}
-				}
-			}
-			if (!probe_equipment)
-			{
-				error =
-				    "active probe found no native equipment definition";
-				return active_probe_result::failed;
-			}
-			KCD2Online_JOIN_TRACE(
-			    "join.native-probe.equipment-selected",
-			    std::format(
-			        "definition_id={} equipped_slot={} weapon_class={}",
-			        probe_equipment->definition_id,
-			        probe_equipment->equipped_slot,
-			        static_cast<int>(probe_equipment->weapon)));
-
-			m_probe_snapshot = {};
-			m_probe_snapshot.id =
-			    std::numeric_limits<std::uint64_t>::max();
-			m_probe_snapshot.display_name = "KCD2Online native ABI probe";
-			m_probe_snapshot.connected = true;
-			m_probe_snapshot.has_transform = true;
-			m_probe_snapshot.transform = origin;
-			m_probe_snapshot.movement_mode =
-			    protocol::MOVEMENT_MODE_IDLE;
-			m_probe_snapshot.has_avatar = true;
-			m_probe_snapshot.avatar.set_archetype_id(
-			    npc::default_soul_id);
-			m_probe_snapshot.avatar.set_revision(1);
-			m_probe_snapshot.avatar.set_stance(
-			    protocol::AVATAR_STANCE_RELAXED);
-			m_probe_snapshot.avatar.set_weapon_class(
-			    protocol_weapon_class(probe_equipment->weapon));
-			m_probe_snapshot.avatar.set_weapon_drawn(false);
-			auto *equipment =
-			    m_probe_snapshot.avatar.add_equipment();
-			equipment->set_definition_id(
-			    probe_equipment->definition_id);
-			equipment->set_equipped_slot(
-			    probe_equipment->equipped_slot);
-
-			m_probe_avatar = spawn(m_probe_snapshot);
-			if (!m_probe_avatar)
-			{
-				error = diagnostic();
-				return active_probe_result::failed;
-			}
-			if (auto *value = find(*m_probe_avatar))
-			{
-				if (auto *entity = resolve_entity(value->entity_id))
-				{
-					entity->Activate(false);
-					entity->Hide(true);
-				}
-			}
-			return active_probe_result::pending;
-		}
-
-		if (++m_probe_polls > 600)
-		{
-			error = "active native Avatar probe timed out";
-			reset_active_probe();
-			return active_probe_result::failed;
-		}
-		const auto lifecycle = status(*m_probe_avatar);
-		if (is_pending_remote_avatar_state(lifecycle.state))
-			return active_probe_result::pending;
-		if (lifecycle.state == remote_avatar_state::failed)
-		{
-			error = lifecycle.diagnostic;
-			reset_active_probe();
-			return active_probe_result::failed;
-		}
-		if (!update(*m_probe_avatar, m_probe_snapshot, true))
+		(void)origin;
+		// The Lua scheduler creates a live, asynchronously initialized NPC through
+		// XGen when its tool-only binding exists, or System.SpawnEntity otherwise.
+		// The old CreateActor probe immediately deactivated, equipped and removed
+		// that actor during world start. Reusing that lifecycle for XGen can race
+		// its Human/Soul registration and tear down an entity still referenced by
+		// the engine. Validate the non-mutating prerequisites here; the first real
+		// remote Avatar performs the complete spawn/equipment runtime validation.
+		if (!available())
 		{
 			error = diagnostic();
-			if (const auto *value = find(*m_probe_avatar);
-			    value && !value->failure.empty())
-				error = value->failure;
-			reset_active_probe();
 			return active_probe_result::failed;
 		}
-
-		auto *value = find(*m_probe_avatar);
-		auto *actor = value ? resolve_actor(value->entity_id) : nullptr;
-		auto *soul = actor ? actor->m_pSoul : nullptr;
-		auto *inventory =
-		    soul ? soul->m_inventorySoul.GetInventory() : nullptr;
-		if (!value || !inventory || value->item_instances.size() != 1)
+		auto *database = wh::entitymodule::C_ItemDatabase::GetInstance();
+		if (!database)
 		{
-			error =
-			    "active native probe did not create exactly one item";
-			reset_active_probe();
+			error = "Avatar preflight has no native item database";
 			return active_probe_result::failed;
 		}
-		auto *item = find_inventory_item(
-		    *inventory, value->item_instances.front().instance_id);
-		if (!item || (item->m_flags & native_item_equipped) == 0)
+		auto &catalog = npc::runtime_equipment_catalog();
+		const npc::equipment_definition *probe_equipment =
+		    catalog.find(probe_equipment_definition_id);
+		auto is_native_item = [database](
+		                          const npc::equipment_definition *candidate)
 		{
-			error = "active native probe item was not equipped";
-			reset_active_probe();
-			return active_probe_result::failed;
-		}
-
-		const auto entity_id = value->entity_id;
-		const auto handle = *m_probe_avatar;
-		m_probe_avatar.reset();
-		remove(handle);
-		if (resolve_entity(entity_id))
+			if (!candidate)
+				return false;
+			CryGUID guid{};
+			return wh::ParseGuid(
+			           candidate->definition_id.c_str(), guid)
+			    && database->FindClassByGuid(guid);
+		};
+		if (!is_native_item(probe_equipment))
+			probe_equipment = nullptr;
+		if (!probe_equipment)
 		{
-			error =
-			    "active native probe entity survived forced removal";
+			for (const auto &candidate : catalog.entries())
+			{
+				if (candidate.equipped_slot == "PrimaryMainHand"
+				    && candidate.weapon == npc::weapon_class::one_handed
+				    && is_native_item(&candidate))
+				{
+					probe_equipment = &candidate;
+					break;
+				}
+			}
+		}
+		if (!probe_equipment)
+		{
+			error = "Avatar preflight found no native equipment definition";
 			return active_probe_result::failed;
 		}
+		KCD2Online_JOIN_TRACE(
+		    "join.native-probe.prerequisites-ok",
+		    std::format(
+		        "definition_id={} xgen_spawn_deferred=true",
+		        probe_equipment->definition_id));
 		m_probe_polls = 0;
 		error.clear();
 		return active_probe_result::succeeded;
@@ -616,7 +501,7 @@ namespace kcd2o::kcse
 		    "join.remote-backend.precheck",
 		    std::format(
 		        "game_context={} actor_system={} environment={} "
-		        "entity_system={} soul_list={}",
+		        "entity_system={} script_system={}",
 		        static_cast<void *>(context),
 		        context
 		            ? static_cast<void *>(context->m_pActorSystem)
@@ -625,14 +510,14 @@ namespace kcd2o::kcse
 		        environment
 		            ? static_cast<void *>(environment->pEntitySystem)
 		            : nullptr,
-		        static_cast<void *>(
-		            wh::rpgmodule::C_SoulList::GetInstance())));
+		        environment
+		            ? static_cast<void *>(environment->pScriptSystem)
+		            : nullptr));
 		if (!context || !context->m_pActorSystem || !environment
-		    || !environment->pEntitySystem
-		    || !wh::rpgmodule::C_SoulList::GetInstance())
+		    || !environment->pEntitySystem || !environment->pScriptSystem)
 		{
 			m_diagnostic =
-			    "native ActorSystem, EntitySystem, or SoulList is unavailable";
+			    "native ActorSystem, EntitySystem, or ScriptSystem is unavailable";
 			KCD2Online_JOIN_TRACE(
 			    "join.remote-backend.unavailable",
 			    m_diagnostic);
@@ -733,192 +618,84 @@ namespace kcd2o::kcse
 			        m_diagnostic));
 			return std::nullopt;
 		}
-		auto *context = wh::game::S_GameContext::GetInstance();
 		const auto position = native_position(player.transform.position());
-		const auto rotation = native_rotation(player.transform.rotation());
-		const Vec3 scale(1.0F, 1.0F, 1.0F);
 		const auto handle = m_next_handle++;
 		const auto name = std::format(
-		    "KCD2Online_Remote_{}_{}_{}",
+		    "KCD2Online_Avatar_{}_{}_{}",
 		    m_epoch,
 		    player.id,
 		    handle);
+		const auto *archetype = npc::runtime_catalog().find(
+		    player.avatar.archetype_id());
+		const std::string_view class_name = archetype
+		    && !archetype->archetype_name.empty()
+		    ? std::string_view{archetype->archetype_name}
+		    : std::string_view{"NPC"};
 		KCD2Online_JOIN_TRACE(
 		    "join.remote-spawn.engine-call.begin",
 		    std::format(
-		        "api=IActorSystem::CreateActor channel=0 name=\"{}\" "
-		        "class=\"NPC\" template=<not-used-by-CreateActor> "
+		        "api=lua-avatar-spawn name=\"{}\" "
+		        "class=\"{}\" "
 		        "soul=\"{}\" position=({:.6f},{:.6f},{:.6f}) "
-		        "rotation=({:.6f},{:.6f},{:.6f},{:.6f}) "
-		        "scale=(1,1,1) requested_entity_id=0 flags=0x{:08X} "
-		        "actor_system={} entity_system={}",
+		        "scheduler_proxy=<omitted> behavior_tree=<omitted> "
+		        "entity_system={}",
 		        name,
+		        class_name,
 		        player.avatar.archetype_id(),
 		        position.x,
 		        position.y,
 		        position.z,
-		        rotation.v.x,
-		        rotation.v.y,
-		        rotation.v.z,
-		        rotation.w,
-		        remote_actor_creation_flags,
-		        static_cast<void *>(context->m_pActorSystem),
 		        SSystemGlobalEnvironment::GetInstance()
 		                ? static_cast<void *>(
 		                      SSystemGlobalEnvironment::GetInstance()
 		                          ->pEntitySystem)
 		                : nullptr));
-		Offsets::IActor *actor_interface{};
-		{
-			auto spawn_scope =
-			    m_entities.authorize_human_npc_spawn(name);
-			actor_interface = guarded_create_actor(
-			    context->m_pActorSystem,
-			    name.c_str(),
-			    &position,
-			    &rotation,
-			    &scale);
-		}
+		auto spawn_authorization =
+		    m_entities.authorize_human_npc_spawn(name);
+		const bool queued = queue_avatar_spawn(
+		    name,
+		    class_name,
+		    player.avatar.archetype_id(),
+		    position);
 		KCD2Online_JOIN_TRACE(
-		    actor_interface
+		    queued
 		        ? "join.remote-spawn.engine-call.returned"
 		        : "join.remote-spawn.engine-call.nil",
 		    std::format(
-		        "api=IActorSystem::CreateActor actor={}",
-		        static_cast<void *>(actor_interface)));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.GetEntity.begin",
-		    std::format(
-		        "actor={}",
-		        static_cast<void *>(actor_interface)));
-		auto *entity =
-		    actor_interface ? actor_interface->GetEntity() : nullptr;
-		KCD2Online_JOIN_TRACE(
-		    entity ? "join.remote-spawn.entity.resolved"
-		           : "join.remote-spawn.entity.nil",
-		    std::format(
-		        "actor={} entity={}",
-		        static_cast<void *>(actor_interface),
-		        static_cast<void *>(entity)));
-		if (!actor_interface || !entity)
+		        "api=Script.SetTimer->AvatarSpawn queued={}",
+		        queued));
+		if (!queued)
 		{
-			m_diagnostic = "IActorSystem::CreateActor(NPC) failed";
+			m_diagnostic =
+			    "could not queue Avatar spawn on the Lua scheduler";
 			KCD2Online_JOIN_TRACE(
 			    "join.remote-spawn.failed",
 			    m_diagnostic);
 			return std::nullopt;
 		}
 
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.GetId.begin",
-		    std::format("entity={}", static_cast<void *>(entity)));
-		const auto id = entity->GetId();
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.GetId.returned",
-		    std::format("entity_id={}", id));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.entity.configure.begin",
-		    std::format(
-		        "player_id={} handle={} entity_id={} entity={}",
-		        player.id,
-		        handle,
-		        id,
-		        static_cast<void *>(entity)));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.register-player-entity.begin",
-		    std::format("entity_id={}", id));
-		m_entities.register_player_entity(id, player.id);
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.register-player-entity.returned",
-		    std::format("entity_id={}", id));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.GetFlags.begin",
-		    std::format("entity_id={}", id));
-		auto flags = entity->GetFlags();
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.GetFlags.returned",
-		    std::format("entity_id={} flags=0x{:08X}", id, flags));
-		flags &= ~(entity_flag_has_ai | entity_flag_trigger_areas
-		    | entity_flag_no_proximity);
-		flags |= remote_actor_creation_flags | entity_flag_calc_physics;
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.SetFlags.begin",
-		    std::format("entity_id={} flags=0x{:08X}", id, flags));
-		entity->SetFlags(flags);
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.SetFlags.returned",
-		    std::format("entity_id={}", id));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.SetAIObjectID.begin",
-		    std::format("entity_id={} ai_object_id=0", id));
-		entity->SetAIObjectID(0);
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.SetAIObjectID.returned",
-		    std::format("entity_id={}", id));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.EnablePhysics.begin",
-		    std::format(
-		        "entity_id={} entity={} enabled=false "
-		        "api=fork:CEntity::EnablePhysics",
-		        id,
-		        static_cast<void *>(entity)));
-		const auto physics_result =
-		    reinterpret_cast<CEntity *>(entity)->EnablePhysics(false);
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.EnablePhysics.returned",
-		    std::format(
-		        "entity_id={} result={}",
-		        id,
-		        physics_result));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.Hide.begin",
-		    std::format("entity_id={} hidden=true", id));
-		entity->Hide(true);
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.Hide.returned",
-		    std::format("entity_id={}", id));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.Activate.begin",
-		    std::format("entity_id={} active=false", id));
-		entity->Activate(false);
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.Activate.returned",
-		    std::format("entity_id={}", id));
-		KCD2Online_JOIN_TRACE(
-		    "join.remote-spawn.entity.configure.complete",
-		    std::format(
-		        "entity_id={} flags=0x{:08X} client_only=true "
-		        "never_network_static=true ai_object_id=0 "
-		        "physics=false proximity=true hidden=true active=false "
-		        "presentation=deferred",
-		        id,
-		        flags));
-
+		const auto requested_at = std::chrono::steady_clock::now();
 		const auto [iterator, inserted] = m_avatars.emplace(
 		    handle,
 		    entry{
 		        .player = player.id,
-		        .entity_id = id,
-		        .epoch = m_epoch,
-		        .shared_soul_guid = player.avatar.archetype_id()});
+		        .entity_name = name,
+		        .spawn_requested_at = requested_at,
+		        .spawn_authorization = std::move(spawn_authorization),
+		        .epoch = m_epoch});
 		(void)iterator;
 		KCD2Online_JOIN_TRACE(
 		    inserted ? "join.remote-spawn.success"
 		             : "join.remote-spawn.handle-collision",
 		    std::format(
-		        "player_id={} handle={} entity_id={} actor={} entity={}",
+		        "player_id={} handle={} entity_name=\"{}\" state=queued",
 		        player.id,
 		        handle,
-		        id,
-		        static_cast<void *>(actor_interface),
-		        static_cast<void *>(entity)));
+		        name));
 		if (!inserted)
 		{
 			m_diagnostic = "remote avatar handle collision";
-			m_entities.unregister_player_entity(id);
-			auto *environment = SSystemGlobalEnvironment::GetInstance();
-			if (environment && environment->pEntitySystem)
-				environment->pEntitySystem->RemoveEntity(id, true);
+			cancel_avatar_spawn(name);
 			return std::nullopt;
 		}
 		return handle;
@@ -975,6 +752,45 @@ namespace kcd2o::kcse
 			    "remote avatar belongs to a stale runtime epoch"};
 		if (value->lifecycle_ready)
 			return {remote_avatar_state::ready, {}};
+		if (value->entity_id == 0)
+		{
+			auto *environment = SSystemGlobalEnvironment::GetInstance();
+			auto *system = environment ? environment->pEntitySystem : nullptr;
+			auto *spawned = system && !value->entity_name.empty()
+			    ? system->FindEntityByName(value->entity_name.c_str())
+			    : nullptr;
+			if (!spawned)
+			{
+				if (std::chrono::steady_clock::now()
+				        - value->spawn_requested_at < remote_avatar_spawn_timeout)
+				{
+					return {
+					    remote_avatar_state::waiting_for_human,
+					    "waiting for Lua-scheduled Avatar spawn"};
+				}
+				value->failed = true;
+				value->failure =
+				    "Lua-scheduled Avatar spawn timed out";
+				value->spawn_authorization.reset();
+				return {remote_avatar_state::failed, value->failure};
+			}
+
+			value->entity_id = spawned->GetId();
+			value->shared_soul_applied_frame = m_frame_sequence;
+			value->shared_soul_applied_at =
+			    std::chrono::steady_clock::now();
+			m_entities.register_player_entity(
+			    value->entity_id, value->player);
+			value->spawn_authorization.reset();
+			KCD2Online_JOIN_TRACE(
+			    "join.remote-spawn.entity.resolved",
+			    std::format(
+			        "player_id={} entity_id={} entity_name=\"{}\" "
+			        "source=lua-scheduler",
+			        value->player,
+			        value->entity_id,
+			        value->entity_name));
+		}
 
 		auto *entity = resolve_entity(value->entity_id);
 		auto *actor = resolve_actor(value->entity_id);
@@ -986,17 +802,21 @@ namespace kcd2o::kcse
 		        value->entity_id,
 		        static_cast<void *>(entity),
 		        static_cast<void *>(actor)));
-		if (!entity || !actor)
+		if (!entity)
 			return {
 			    remote_avatar_state::failed,
 			    "remote avatar entity was destroyed externally"};
+		if (!actor)
+			return {
+			    remote_avatar_state::waiting_for_human,
+			    "waiting for XGen Human actor registration"};
 		if (!actor->IsHumanActor())
 			return {
 			    remote_avatar_state::failed,
 			    "remote avatar is not backed by a native Human"};
 		// Retain only what replicated players need: mannequin/locomotion,
 		// hit/condition handling and (below) Soul/Inventory.
-		if (!actor->m_pMovementController || !actor->m_pMannequinStateParams
+		if (!actor->m_pMannequinStateParams
 		    || !actor->m_pHitDeathReactions || !actor->m_pConditionController)
 			return {
 			    remote_avatar_state::waiting_for_human,
@@ -1014,47 +834,6 @@ namespace kcd2o::kcse
 			return {
 			    remote_avatar_state::waiting_for_soul,
 			    "waiting for native Soul"};
-		if (!value->shared_soul_applied)
-		{
-			CryGUID guid{};
-			auto *souls = wh::rpgmodule::C_SoulList::GetInstance();
-			KCD2Online_JOIN_TRACE(
-			    "join.remote-status.ApplySharedSoul.begin",
-			    std::format(
-			        "player_id={} entity_id={} soul={} soul_list={} "
-			        "shared_soul_guid=\"{}\" api=fork:C_SoulList::ApplySharedSoul",
-			        value->player,
-			        value->entity_id,
-			        static_cast<void *>(soul),
-			        static_cast<void *>(souls),
-			        value->shared_soul_guid));
-			if (!souls
-			    || !wh::ParseGuid(
-			        value->shared_soul_guid.c_str(),
-			        guid)
-			    || !souls->ApplySharedSoul(*soul, guid))
-			{
-				value->failed = true;
-				value->failure =
-				    "native shared-Soul materialization failed";
-				return {
-				    remote_avatar_state::failed,
-				    value->failure};
-			}
-			value->shared_soul_applied = true;
-			value->shared_soul_applied_frame = m_frame_sequence;
-			value->shared_soul_applied_at =
-			    std::chrono::steady_clock::now();
-			KCD2Online_JOIN_TRACE(
-			    "join.remote-status.ApplySharedSoul.returned",
-			    std::format(
-			        "player_id={} entity_id={} result=true",
-			        value->player,
-			        value->entity_id));
-			return {
-			    remote_avatar_state::stabilizing_soul,
-			    "waiting for native shared-Soul stabilization"};
-		}
 		const auto settled = evaluate_remote_soul_settle(
 		    m_frame_sequence,
 		    value->shared_soul_applied_frame,
@@ -1130,6 +909,13 @@ namespace kcd2o::kcse
 		lifecycle_time = std::chrono::steady_clock::now() - lifecycle_started;
 		if (lifecycle.state == remote_avatar_state::failed)
 			return false;
+		// Keep this defensive even though remote_avatar_manager suppresses pending
+		// updates. With the Lua-scheduled XGen path there is no entity id yet;
+		// treating that as a destroyed entity would cancel/requeue the request and
+		// flood the Lua timer queue. Until XGen, Human, Soul and Inventory are
+		// ready, status() is the sole lifecycle owner.
+		if (is_pending_remote_avatar_state(lifecycle.state))
+			return true;
 		const auto now = std::chrono::steady_clock::now();
 		if (lifecycle.state == remote_avatar_state::ready
 		    && (value->last_native_validation_at
@@ -1180,7 +966,6 @@ namespace kcd2o::kcse
 			error.clear();
 		}
 		if (lifecycle.state == remote_avatar_state::ready
-		    && value->presented
 		    && !apply_activity(*value, player, error))
 		{
 			value->failed = true;
@@ -1221,42 +1006,24 @@ namespace kcd2o::kcse
 			auto *entity = resolve_entity(value->entity_id);
 			if (!entity)
 				error = "native remote entity disappeared";
-			auto corrected = player.transform;
-			bool needs_write = true;
-			if (entity && value->transform_applied)
-			{
-				const auto seconds = value->last_native_transform_at
-			        == std::chrono::steady_clock::time_point{}
-				    ? 1.0F / 60.0F
-				    : std::chrono::duration<float>(
-				          transform_started - value->last_native_transform_at)
-				          .count();
-				corrected = smooth_transform_target(
-				    *entity,
-				    player.transform,
-				    seconds,
-				    needs_write);
-			}
 			transform_succeeded = entity
-			    && (!needs_write
-			        || m_entities.write_transform(
-			            entity,
-			            corrected,
-			            error));
+			    && m_entities.write_transform(
+			        entity,
+			        player.transform,
+			        error);
 			if (transform_succeeded)
 				value->last_native_transform_at = transform_started;
 			transform_time =
 			    std::chrono::steady_clock::now() - transform_started;
 		}
 		bool motion_succeeded = true;
-		if (transform_succeeded && value->presented && !activity_locked)
+		if (transform_succeeded && !activity_locked)
 		{
 			const auto motion_started = std::chrono::steady_clock::now();
-			motion_succeeded = drive_motion(*value, player, error);
+			motion_succeeded = update_motion_state(*value, player, error);
 			motion_time = std::chrono::steady_clock::now() - motion_started;
 		}
-		if (transform_succeeded && value->presented)
-			apply_animation(*value, player);
+		update_animation_state(*value, player);
 		if (!transform_succeeded || !motion_succeeded)
 		{
 			value->failed = true;
@@ -1306,11 +1073,8 @@ namespace kcd2o::kcse
 			appearance_time =
 			    std::chrono::steady_clock::now() - appearance_started;
 		}
-		// A freshly created Human is deliberately kept outside rendering,
-		// physics and Actor updates while its shared Soul and inventory are
-		// being replaced. The active ABI probe has always used this safe
-		// lifecycle. Real remote players must not become tickable earlier than
-		// the probe just because ServerAccepted already contains their snapshot.
+		// XGen owns Human/Soul/physics initialization. Presentation is a logical
+		// readiness boundary only; it does not mutate the XGen lifecycle.
 		if (lifecycle.state == remote_avatar_state::ready
 		    && value->player != std::numeric_limits<player_id>::max()
 		    && !value->presented
@@ -1328,6 +1092,16 @@ namespace kcd2o::kcse
 			        value->failure));
 			return false;
 		}
+		// This is the only FullBody-layer write in an Avatar update. Equipment
+		// and weapon tags have settled already; activity owns the body while it is
+		// active, otherwise an emote wins over locomotion.
+		if (transform_succeeded && value->presented
+		    && !present_animation(*value, player, error))
+		{
+			value->failed = true;
+			value->failure = std::move(error);
+			return false;
+		}
 		const auto update_finished = std::chrono::steady_clock::now();
 		if (join_trace::diagnostics_enabled()
 		    && (last_update_diagnostic_at
@@ -1340,16 +1114,29 @@ namespace kcd2o::kcse
 			{
 				return std::chrono::duration<double, std::milli>(duration).count();
 			};
+			Vec3 actual_position{};
+			bool actual_position_available{};
+			if (auto *entity = resolve_entity(value->entity_id))
+			{
+				if (const auto *matrix = entity->GetWorldTMPtr())
+				{
+					actual_position = matrix->GetTranslation();
+					actual_position_available = true;
+				}
+			}
 			join_trace::write_diagnostic(
 			    "performance.remote-avatar-update",
 			    std::format(
-			        "player_id={} handle={} total_ms={:.3f} "
+			        "player_id={} handle={} sequence={} total_ms={:.3f} "
 			        "lifecycle_ms={:.3f} validation_ms={:.3f} "
 			        "transform_changed={} transform_ms={:.3f} "
 			        "motion_ms={:.3f} appearance_attempted={} "
-			        "appearance_ms={:.3f}",
+			        "appearance_ms={:.3f} target=({:.3f},{:.3f},{:.3f}) "
+			        "actual_available={} actual=({:.3f},{:.3f},{:.3f}) "
+			        "locomotion_clip=\"{}\" visual_speed={:.3f} one_shot={}",
 			        value->player,
 			        avatar,
+			        player.transform.sequence(),
 			        milliseconds(update_finished - update_started),
 			        milliseconds(lifecycle_time),
 			        milliseconds(validation_time),
@@ -1357,7 +1144,18 @@ namespace kcd2o::kcse
 			        milliseconds(transform_time),
 			        milliseconds(motion_time),
 			        appearance_attempted,
-			        milliseconds(appearance_time)));
+			        milliseconds(appearance_time),
+			        player.transform.position().x(),
+			        player.transform.position().y(),
+			        player.transform.position().z(),
+			        actual_position_available,
+			        actual_position.x,
+			        actual_position.y,
+			        actual_position.z,
+			        remote_locomotion_animation_name(
+			            value->locomotion_animation),
+			        value->smoothed_visual_speed,
+			        value->one_shot_animation_active));
 		}
 		return true;
 	}
@@ -1378,16 +1176,9 @@ namespace kcd2o::kcse
 		KCD2Online_JOIN_TRACE(
 		    "join.remote-presentation.begin",
 		    std::format(
-		        "player_id={} entity_id={} physics=true hidden=false active=true",
+		        "player_id={} entity_id={} xgen_state=preserved",
 		        avatar.player,
 		        avatar.entity_id));
-		if (!reinterpret_cast<CEntity *>(entity)->EnablePhysics(true))
-		{
-			error = "native remote physics could not be enabled";
-			return false;
-		}
-		entity->Activate(true);
-		entity->Hide(false);
 		avatar.presented = true;
 		avatar.motion_applied = false;
 		KCD2Online_JOIN_TRACE(
@@ -1514,6 +1305,18 @@ namespace kcd2o::kcse
 		const bool active = player.has_activity && player.activity.active();
 		if (!active && !avatar.activity_active)
 			return true;
+		if (!active)
+		{
+			// The next single-owner presentation decision transitions directly
+			// back to locomotion. Do not enqueue a second, untracked exit clip.
+			avatar.activity_active = false;
+			avatar.activity_kind = protocol::PLAYER_ACTIVITY_KIND_NONE;
+			avatar.activity_session_id = 0;
+			avatar.activity_station_guid = 0;
+			avatar.motion_applied = false;
+			avatar.transform_applied = false;
+			return true;
+		}
 		if (active && avatar.activity_active
 		    && avatar.activity_session_id == player.activity.session_id())
 		{
@@ -1526,9 +1329,7 @@ namespace kcd2o::kcse
 			error = "entity system is unavailable for remote activity";
 			return false;
 		}
-		const auto station_guid = active
-		    ? player.activity.station_guid()
-		    : avatar.activity_station_guid;
+		const auto station_guid = player.activity.station_guid();
 		const auto station_id = environment->pEntitySystem->FindEntityByGuid(
 		    station_guid);
 		if (station_id == 0)
@@ -1557,12 +1358,6 @@ namespace kcd2o::kcse
 				return false;
 			}
 		}
-		else if (avatar.activity_kind
-		    == protocol::PLAYER_ACTIVITY_KIND_BLACKSMITHING)
-		{
-			action = "SmithHarden";
-		}
-
 		if (!action.empty())
 		{
 			const auto script = std::format(
@@ -1578,22 +1373,10 @@ namespace kcd2o::kcse
 			}
 		}
 
-		if (active)
-		{
-			avatar.activity_active = true;
-			avatar.activity_kind = player.activity.kind();
-			avatar.activity_session_id = player.activity.session_id();
-			avatar.activity_station_guid = player.activity.station_guid();
-		}
-		else
-		{
-			avatar.activity_active = false;
-			avatar.activity_kind = protocol::PLAYER_ACTIVITY_KIND_NONE;
-			avatar.activity_session_id = 0;
-			avatar.activity_station_guid = 0;
-			avatar.motion_applied = false;
-			avatar.transform_applied = false;
-		}
+		avatar.activity_active = true;
+		avatar.activity_kind = player.activity.kind();
+		avatar.activity_session_id = player.activity.session_id();
+		avatar.activity_station_guid = player.activity.station_guid();
 		return true;
 	}
 
@@ -1604,13 +1387,12 @@ namespace kcd2o::kcse
 		if (found == m_avatars.end())
 			return;
 		const auto id = found->second.entity_id;
+		cancel_avatar_spawn(found->second.entity_name);
 		std::string ignored;
 		(void)remove_created_items(found->second, ignored);
-		m_entities.unregister_player_entity(id);
-		auto *environment = SSystemGlobalEnvironment::GetInstance();
-		if (environment && environment->pEntitySystem
-		    && environment->pEntitySystem->GetEntity(id))
-			environment->pEntitySystem->RemoveEntity(id, true);
+		if (id != 0)
+			m_entities.unregister_player_entity(id);
+		queue_avatar_remove(found->second.entity_name);
 		m_avatars.erase(found);
 	}
 
@@ -1702,7 +1484,7 @@ namespace kcd2o::kcse
 		}
 
 		const bool should_draw = avatar_weapon_should_draw(appearance);
-		if (m_native_weapon_actions_enabled
+		if (avatar.native_weapon_actions_enabled
 		    && !native_avatar_weapon_state_matches(*human, appearance))
 		{
 			if (!avatar.first_weapon_action_logged)
@@ -1734,7 +1516,7 @@ namespace kcd2o::kcse
 				// Weapon presentation is optional for a replicated visual. A
 				// rejected or faulting native controller must not destroy the
 				// remote avatar and unload the local multiplayer world.
-				m_native_weapon_actions_enabled = false;
+				avatar.native_weapon_actions_enabled = false;
 				KCD2Online_JOIN_TRACE(
 				    "join.remote-animation.weapon-action.disabled",
 				    std::format(
@@ -1757,185 +1539,238 @@ namespace kcd2o::kcse
 		return true;
 	}
 
-	bool native_remote_avatar_backend::drive_motion(
+	bool native_remote_avatar_backend::update_motion_state(
 	    entry &avatar,
 	    const remote_avatar_snapshot &player,
 	    std::string &error)
 	{
 		const auto now = std::chrono::steady_clock::now();
-		const auto &velocity = player.transform.velocity();
-		const bool motion_changed = !avatar.motion_applied
-		    || avatar.last_movement_mode != player.movement_mode
-		    || velocity_changed(avatar.last_motion_velocity, velocity)
-		    || (player.transform.has_locomotion()
-		        && locomotion_changed(
-		            avatar.last_locomotion,
-		            player.transform.locomotion()));
-		const bool keepalive_due = avatar.motion_applied
-		    && player.movement_mode != protocol::MOVEMENT_MODE_IDLE
-		    && now - avatar.last_motion_request_at
-		        >= remote_motion_keepalive;
-		if (!motion_changed && !keepalive_due)
-			return true;
-
-		auto *actor = resolve_actor(avatar.entity_id);
-		auto *controller =
-		    actor ? actor->m_pMovementController : nullptr;
+		auto *entity = resolve_entity(avatar.entity_id);
 		if (!avatar.first_motion_logged)
 		{
 			avatar.first_motion_logged = true;
 			KCD2Online_JOIN_TRACE(
 			    "join.remote-animation.first-locomotion",
 			    std::format(
-			        "player_id={} entity_id={} actor={} controller={} "
-			        "movement_mode={} api=C_Actor::RequestLocomotion",
+			        "player_id={} entity_id={} entity={} movement_mode={} "
+			        "api=rendered-position-state",
 			        avatar.player,
 			        avatar.entity_id,
-			        static_cast<void *>(actor),
-			        static_cast<void *>(controller),
+			        static_cast<void *>(entity),
 			        static_cast<int>(player.movement_mode)));
 		}
-		if (!actor || !controller)
+		if (!entity)
 		{
-			// Controller construction is part of the asynchronous readiness
-			// chain; transform interpolation still applies in the meantime.
-			if (avatar.lifecycle_ready)
-			{
-				error = actor
-				    ? "native remote MovementController disappeared"
-				    : "native remote actor disappeared";
-				return false;
-			}
-			return true;
+			error = "native remote entity disappeared before locomotion animation";
+			return false;
 		}
-		float speed{};
+
+		float network_speed = std::hypot(
+		    player.transform.velocity().x(),
+		    player.transform.velocity().y());
 		if (player.transform.has_locomotion())
-			speed = player.transform.locomotion().speed();
-		else switch (player.movement_mode)
+			network_speed = player.transform.locomotion().speed();
+		if (network_speed < 0.05F)
 		{
-		case protocol::MOVEMENT_MODE_WALK:
-			speed = 1.5F;
-			break;
-		case protocol::MOVEMENT_MODE_RUN:
-			speed = 3.8F;
-			break;
-		case protocol::MOVEMENT_MODE_SPRINT:
-			speed = 5.0F;
-			break;
-		case protocol::MOVEMENT_MODE_IDLE:
-		default:
-			break;
+			switch (player.movement_mode)
+			{
+			case protocol::MOVEMENT_MODE_WALK:
+				network_speed = 1.5F;
+				break;
+			case protocol::MOVEMENT_MODE_RUN:
+				network_speed = 3.8F;
+				break;
+			case protocol::MOVEMENT_MODE_SPRINT:
+				network_speed = 5.2F;
+				break;
+			case protocol::MOVEMENT_MODE_IDLE:
+			default:
+				break;
+			}
 		}
-		std::optional<Vec3> move_target;
-		std::optional<Vec3> facing_direction;
-		if (speed > 0.0F)
+
+		float target_speed = network_speed;
+		if (const auto *matrix = entity->GetWorldTMPtr())
 		{
-			Vec3 direction(velocity.x(), velocity.y(), velocity.z());
-			const auto length = direction.GetLength();
-			if (length > 0.001F)
-				direction /= length;
+			const auto position = matrix->GetTranslation();
+			if (avatar.visual_position_sampled)
+			{
+				const auto elapsed = std::chrono::duration<float>(
+				    now - avatar.last_visual_sample_at).count();
+				const auto dx = position.x - avatar.last_visual_x;
+				const auto dy = position.y - avatar.last_visual_y;
+				const auto distance = std::hypot(dx, dy);
+				// Ignore teleports, world transitions and long frame stalls. In those
+				// cases the replicated movement mode is a safer visual hint than the
+				// apparent one-frame speed.
+				if (elapsed >= 0.005F && elapsed <= 0.25F && distance <= 2.0F)
+					target_speed = distance / elapsed;
+			}
 			else
 			{
-				auto *entity = resolve_entity(avatar.entity_id);
-				if (entity)
-					entity->GetForwardDir(direction);
+				avatar.smoothed_visual_speed = network_speed;
+				avatar.locomotion_animation =
+				    remote_locomotion_animation_for_mode(
+				        player.movement_mode);
 			}
-			move_target =
-			    native_position(player.transform.position())
-			    + direction * std::clamp(speed * 0.4F, 1.2F, 2.5F);
+			avatar.last_visual_x = position.x;
+			avatar.last_visual_y = position.y;
+			avatar.last_visual_sample_at = now;
+			avatar.visual_position_sampled = true;
 		}
-		if (player.transform.has_locomotion()
-		    && player.transform.locomotion().has_facing_direction())
-		{
-			facing_direction = native_position(
-			    player.transform.locomotion().facing_direction());
-		}
-		if (m_native_locomotion_enabled)
-		{
-			const SMultiplayerLocomotionRequest request{
-			    move_target ? &*move_target : nullptr,
-			    facing_direction ? &*facing_direction : nullptr,
-			    speed,
-			    player.transform.has_locomotion()
-			        && player.transform.locomotion().strafing()};
-			const auto result = guarded_request_locomotion(
-			    *actor,
-			    request);
-			if (result != locomotion_request_result::applied)
-			{
-				// RequestMovement is an optional presentation enhancement. Some
-				// native NPC controllers reject player-style requests (and older
-				// layouts may fault). Transform replication remains authoritative,
-				// so disable this ABI path for the process instead of failing the
-				// remote avatar and unloading the multiplayer world.
-				m_native_locomotion_enabled = false;
-				KCD2Online_JOIN_TRACE(
-				    "join.remote-animation.locomotion-disabled",
-				    std::format(
-				        "player_id={} entity_id={} speed={} reason={}",
-				        avatar.player,
-				        avatar.entity_id,
-				        speed,
-				        result == locomotion_request_result::faulted
-				            ? "seh"
-				            : "rejected"));
-			}
-		}
-		avatar.motion_applied = true;
+
+		target_speed = std::clamp(target_speed, 0.0F, 12.0F);
+		// Match the working Ghost implementation: animation state is derived
+		// from what this client actually rendered, with a simple 25% low-pass.
+		avatar.smoothed_visual_speed = avatar.visual_position_sampled
+		    ? avatar.smoothed_visual_speed * 0.75F + target_speed * 0.25F
+		    : target_speed;
+		const auto desired = select_remote_locomotion_animation(
+		    avatar.smoothed_visual_speed,
+		    avatar.locomotion_animation);
+		avatar.locomotion_animation = desired;
 		avatar.last_movement_mode = player.movement_mode;
-		avatar.last_motion_velocity = velocity;
-		if (player.transform.has_locomotion())
-			avatar.last_locomotion = player.transform.locomotion();
-		avatar.last_motion_request_at = now;
 		return true;
 	}
 
-	void native_remote_avatar_backend::apply_animation(
+	void native_remote_avatar_backend::update_animation_state(
 	    entry &avatar,
 	    const remote_avatar_snapshot &player)
 	{
-		if (!m_native_animation_actions_enabled
-		    || !player.transform.has_animation())
+		if (!player.transform.has_animation())
 			return;
 		const auto &animation = player.transform.animation();
 		if (animation.sequence() <= avatar.last_animation_sequence)
 			return;
 		avatar.last_animation_sequence = animation.sequence();
-		if (avatar.activity_active)
-			return;
-
-		const auto script = animation.active()
-		    ? std::format(
-		          "local e=System.GetEntity({}) if e and e.human "
-		          "and e.human.PlayAnim then e.human:PlayAnim({},'') end",
-		          avatar.entity_id,
-		          lua_string(animation.fragment()))
-		    : std::format(
-		          "local e=System.GetEntity({}) if e and e.human "
-		          "and e.human.StopAnim then e.human:StopAnim() end",
-		          avatar.entity_id);
-		if (!execute_remote_script(script))
+		const auto *emote = find_emote_fragment(animation.fragment());
+		if (animation.active() && !emote)
 		{
-			m_native_animation_actions_enabled = false;
 			KCD2Online_JOIN_TRACE(
-			    "join.remote-animation.mannequin-disabled",
+			    "join.remote-animation.skeleton-rejected",
 			    std::format(
-			        "player_id={} entity_id={} sequence={} fragment=\"{}\"",
+			        "player_id={} entity_id={} sequence={} fragment=\"{}\" reason=unknown-emote",
 			        avatar.player,
 			        avatar.entity_id,
 			        animation.sequence(),
 			        animation.fragment()));
+			avatar.one_shot_animation_active = false;
+			avatar.one_shot_animation_clip.clear();
+			avatar.motion_applied = false;
 			return;
 		}
+		avatar.one_shot_animation_active = animation.active();
+		avatar.one_shot_animation_clip = animation.active()
+		    ? std::string{emote->skeleton_clip}
+		    : std::string{};
+		avatar.motion_applied = false;
+		avatar.next_motion_retry_at = {};
 		KCD2Online_JOIN_TRACE(
-		    "join.remote-animation.mannequin-applied",
+		    "join.remote-animation.state-accepted",
 		    std::format(
-		        "player_id={} entity_id={} sequence={} active={} fragment=\"{}\" api=C_ScriptBindHuman::{}",
+		        "player_id={} entity_id={} sequence={} active={} "
+		        "fragment=\"{}\" clip=\"{}\" owner={}",
 		        avatar.player,
 		        avatar.entity_id,
 		        animation.sequence(),
 		        animation.active(),
 		        animation.fragment(),
-		        animation.active() ? "PlayAnim" : "StopAnim"));
+		        emote ? emote->skeleton_clip : std::string_view{},
+		        animation.active() ? "emote" : "locomotion"));
+	}
+
+	bool native_remote_avatar_backend::present_animation(
+	    entry &avatar,
+	    const remote_avatar_snapshot &player,
+	    std::string &error)
+	{
+		if (avatar.activity_active)
+			return true;
+		const auto now = std::chrono::steady_clock::now();
+		if (now < avatar.next_motion_retry_at)
+			return true;
+
+		const bool loop = !avatar.one_shot_animation_active;
+		const auto locomotion = avatar.locomotion_animation
+		        == remote_locomotion_animation::sprint
+		    && !avatar.sprint_animation_supported
+		    ? remote_locomotion_animation::run
+		    : avatar.locomotion_animation;
+		const std::string_view clip = avatar.one_shot_animation_active
+		    ? std::string_view{avatar.one_shot_animation_clip}
+		    : remote_locomotion_animation_name(locomotion);
+		if (clip.empty())
+		{
+			error = "Avatar presentation selected an empty animation clip";
+			return false;
+		}
+
+		const bool changed = avatar.presented_animation_clip != clip
+		    || avatar.presented_animation_loop != loop;
+		const auto result = start_avatar_animation(
+		    avatar.entity_id, clip, loop);
+		// CryAnimation normally rejects re-adding the same FIFO entry unless the
+		// restart flag is set. That is the behavior we want: the call reasserts
+		// ownership without resetting foot phase. An already validated, unchanged
+		// clip is therefore still healthy when the binding reports "not started".
+		const bool accepted = result && (*result == 1
+		    || (*result == -2 && !changed));
+		if (!accepted)
+		{
+			avatar.motion_applied = false;
+			if (result && *result == -4 && loop
+			    && avatar.locomotion_animation
+			        == remote_locomotion_animation::sprint)
+			{
+				avatar.sprint_animation_supported = false;
+				avatar.next_motion_retry_at = {};
+			}
+			else if (result && *result == -4 && !loop)
+			{
+				// A catalog emote absent from this concrete skeleton cannot own
+				// FullBody. Resume locomotion on the next Avatar update.
+				avatar.one_shot_animation_active = false;
+				avatar.one_shot_animation_clip.clear();
+				avatar.next_motion_retry_at = {};
+			}
+			else
+			{
+				avatar.next_motion_retry_at = now + remote_motion_retry;
+			}
+			KCD2Online_JOIN_TRACE(
+			    "join.remote-animation.skeleton-retry",
+			    std::format(
+			        "player_id={} entity_id={} owner={} clip=\"{}\" "
+			        "validated_result={} retry_ms={}",
+			        avatar.player,
+			        avatar.entity_id,
+			        loop ? "locomotion" : "emote",
+			        clip,
+			        result.value_or(-4),
+			        remote_motion_retry.count()));
+			return true;
+		}
+
+		avatar.next_motion_retry_at = {};
+		avatar.presented_animation_clip = clip;
+		avatar.presented_animation_loop = loop;
+		avatar.last_motion_request_at = now;
+		avatar.motion_applied = loop;
+		if (changed)
+		{
+			KCD2Online_JOIN_TRACE(
+			    "join.remote-animation.skeleton-applied",
+			    std::format(
+			        "player_id={} entity_id={} movement_mode={} speed={:.3f} "
+			        "owner={} clip=\"{}\" loop={} validated=true",
+			        avatar.player,
+			        avatar.entity_id,
+			        static_cast<int>(player.movement_mode),
+			        avatar.smoothed_visual_speed,
+			        loop ? "locomotion" : "emote",
+			        clip,
+			        loop));
+		}
+		return true;
 	}
 }

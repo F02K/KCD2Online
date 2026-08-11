@@ -104,6 +104,12 @@ namespace kcd2o::kcse
 		return api && api->send_chat(text.c_str()) != 0;
 	}
 
+	bool ui_client_proxy::play_emote(emote_kind kind) const
+	{
+		const auto *api = load();
+		return api && api->play_emote(static_cast<std::uint32_t>(kind)) != 0;
+	}
+
 	bool ui_client_proxy::select_avatar(std::string archetype_id) const
 	{
 		const auto *api = load();
@@ -161,6 +167,22 @@ namespace kcd2o::kcse
 		result.sleeping_players_required = value.sleeping_players_required;
 		result.dead = value.dead != 0;
 		result.respawn_pending = value.respawn_pending != 0;
+		result.voice_recording = value.voice_recording != 0;
+		result.voice_speaking = value.voice_speaking != 0;
+		result.voice_level = std::clamp(value.voice_level, 0.0F, 1.0F);
+		const auto voice_range = static_cast<protocol::VoiceRange>(value.voice_range);
+		if (voice_range >= protocol::VOICE_RANGE_NORMAL
+		    && voice_range <= protocol::VOICE_RANGE_SHOUT)
+			result.voice_range = voice_range;
+		result.native_keybinds = value.native_keybinds != 0;
+		result.chat_action_generation = value.chat_action_generation;
+		result.emote_action_held = value.emote_action_held != 0;
+		if (value.network_role
+		    <= static_cast<std::uint32_t>(protocol::NETWORK_ROLE_OWNER))
+		{
+			result.network_role = static_cast<protocol::NetworkRole>(
+			    value.network_role);
+		}
 		result.avatar_policy.set_default_archetype_id(
 		    value.default_avatar_archetype_id);
 		const auto count = api->copy_avatar_archetypes(nullptr, 0);
@@ -196,6 +218,12 @@ namespace kcd2o::kcse
 			player.movement_mode =
 			    static_cast<protocol::MovementMode>(value.movement_mode);
 			player.display_name = value.display_name;
+			if (value.network_role
+			    <= static_cast<std::uint32_t>(protocol::NETWORK_ROLE_OWNER))
+			{
+				player.network_role = static_cast<protocol::NetworkRole>(
+				    value.network_role);
+			}
 			result.push_back(std::move(player));
 		}
 		return result;
@@ -218,7 +246,13 @@ namespace kcd2o::kcse
 			    {value.player_id,
 			     value.display_name,
 			     value.text,
-			     value.server_time_ms});
+			     value.server_time_ms,
+			     static_cast<protocol::ChatChannel>(value.channel),
+			     value.network_role
+			             <= static_cast<std::uint32_t>(
+			                 protocol::NETWORK_ROLE_OWNER)
+			         ? static_cast<protocol::NetworkRole>(value.network_role)
+			         : protocol::NETWORK_ROLE_USER});
 		}
 		return result;
 	}

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <exception>
+#include <iterator>
 #include <string>
 
 #undef assert
@@ -70,7 +71,9 @@ namespace
 		return config;
 	}
 
-	protocol::Envelope hello(std::string name = "Henry")
+	protocol::Envelope hello(
+	    std::string name = "Henry",
+	    std::string password = "secret")
 	{
 		protocol::Envelope envelope;
 		auto *message = envelope.mutable_client_hello();
@@ -78,7 +81,7 @@ namespace
 		message->set_whgame_timestamp(supported_whgame_timestamp);
 		message->set_whgame_image_size(supported_whgame_image_size);
 		message->set_display_name(std::move(name));
-		message->set_password("secret");
+		message->set_password(std::move(password));
 		auto *runtime = message->mutable_runtime();
 		runtime->set_features(required_client_runtime_capabilities);
 		runtime->set_kcse_version(1);
@@ -152,6 +155,27 @@ namespace
 		transform->mutable_velocity();
 		transform->set_sequence(sequence);
 		transform->set_client_time_ms(sequence * 10);
+		return envelope;
+	}
+
+	protocol::Envelope chat_message(std::string text)
+	{
+		protocol::Envelope envelope;
+		envelope.mutable_chat_send()->set_text(std::move(text));
+		return envelope;
+	}
+
+	protocol::Envelope voice_frame(
+	    std::uint32_t sequence,
+	    protocol::VoiceRange range = protocol::VOICE_RANGE_NORMAL)
+	{
+		protocol::Envelope envelope;
+		auto *voice = envelope.mutable_client_voice_frame();
+		voice->set_sequence(sequence);
+		voice->set_capture_time_ms(sequence * 20);
+		voice->set_range(range);
+		voice->set_opus("opus");
+		voice->set_visemes(std::string(voice_viseme_count, '\0'));
 		return envelope;
 	}
 
@@ -353,6 +377,7 @@ int main()
 		       "disable_non_player_entities = true\n"
 		       "[auth]\n"
 		       "enabled = true\n"
+		       "whitelist_enabled = true\n"
 		       "service_url = \"https://api.kingdom-online.cc\"\n"
 		       "identity_file = \"server-identity.json\"\n"
 		       "public_address = \"203.0.113.20:27020\"\n"
@@ -364,7 +389,20 @@ int main()
 		       "weather_id = 8\n"
 		       "weather_transition_seconds = 12\n"
 		       "sleeping_players_required = 3\n"
-		       "sleep_wake_hour = 7.25\n";
+		       "sleep_wake_hour = 7.25\n"
+		       "[chat]\n"
+		       "whisper_range_m = 2.0\n"
+		       "say_range_m = 12.0\n"
+		       "shout_range_m = 60.0\n"
+		       "ooc_enabled = false\n"
+		       "[voice]\n"
+		       "enabled = true\n"
+		       "whisper_range_m = 2.5\n"
+		       "normal_range_m = 14.0\n"
+		       "shout_range_m = 55.0\n"
+		       "max_frames_per_second = 70\n"
+		       "[permissions]\n"
+		       "owners = [\"11111111-2222-4333-8444-555555555555\"]\n";
 		output.close();
 		const auto parsed = load_server_config(path);
 		assert(parsed.disable_human_npcs);
@@ -380,11 +418,140 @@ int main()
 		assert(parsed.weather_transition_seconds == 12);
 		assert(parsed.sleeping_players_required == 3);
 		assert(parsed.sleep_wake_hour == 7.25);
+		assert(parsed.chat_whisper_range_m == 2.0F);
+		assert(parsed.chat_say_range_m == 12.0F);
+		assert(parsed.chat_shout_range_m == 60.0F);
+		assert(!parsed.chat_ooc_enabled);
+		assert(parsed.voice_enabled);
+		assert(parsed.voice_whisper_range_m == 2.5F);
+		assert(parsed.voice_normal_range_m == 14.0F);
+		assert(parsed.voice_shout_range_m == 55.0F);
+		assert(parsed.voice_max_frames_per_second == 70);
+		assert(parsed.permission_owners.size() == 1);
 		assert(parsed.account_auth_enabled);
+		assert(parsed.account_whitelist_enabled);
 		assert(parsed.account_server_id.empty());
 		assert(parsed.account_server_key.empty());
 		assert(parsed.account_identity_file
 		    == parsed_config_world.path / "server-identity.json");
+	}
+
+	temporary_world roleplay_world;
+	std::string roleplay_owner_id;
+	{
+		auto config = config_for(roleplay_world.path);
+		config.chat_whisper_range_m = 3.0F;
+		config.chat_say_range_m = 15.0F;
+		config.chat_shout_range_m = 40.0F;
+		config.max_player_speed_mps = 1000.0F;
+		server_core core(config);
+		(void)connect_new_player(core, 101, start, 1, nullptr, "Henry");
+		(void)connect_new_player(core, 102, start + 10ms, 2, nullptr, "Hans");
+		(void)core.take_outbound();
+		core.on_message(101, client_transform(1, 10.0F), start + 100ms);
+		core.on_message(102, client_transform(1, 30.0F), start + 100ms);
+		(void)core.take_outbound();
+
+		core.on_message(101, chat_message("Good day"), start + 200ms);
+		auto outbound = core.take_outbound();
+		assert(std::ranges::count_if(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.envelope.has_chat_broadcast()
+			        && entry.envelope.chat_broadcast().channel()
+			            == protocol::CHAT_CHANNEL_SAY;
+		    }) == 1);
+		assert(outbound.front().connection == 101);
+
+		core.on_message(101, voice_frame(1), start + 250ms);
+		outbound = core.take_outbound();
+		assert(outbound.empty());
+		core.on_message(102, client_transform(2, 20.0F), start + 255ms);
+		assert(core.take_outbound().empty());
+		core.on_message(101, voice_frame(2), start + 260ms);
+		outbound = core.take_outbound();
+		assert(outbound.size() == 1);
+		assert(outbound.front().connection == 102);
+		assert(outbound.front().delivery == reliability::unreliable);
+		assert(outbound.front().envelope.server_voice_frame().sequence() == 2);
+
+		core.on_message(102, client_transform(3, 30.0F), start + 265ms);
+		assert(core.take_outbound().empty());
+		core.on_message(
+		    101,
+		    voice_frame(3, protocol::VOICE_RANGE_SHOUT),
+		    start + 270ms);
+		outbound = core.take_outbound();
+		assert(outbound.size() == 1);
+		assert(outbound.front().connection == 102);
+		assert(outbound.front().delivery == reliability::unreliable);
+		assert(outbound.front().envelope.server_voice_frame().player_id() == 1);
+		assert(outbound.front().envelope.server_voice_frame().sequence() == 3);
+
+		core.on_message(101, chat_message("/y Hear ye"), start + 300ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::count_if(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.envelope.has_chat_broadcast()
+			        && entry.envelope.chat_broadcast().channel()
+			            == protocol::CHAT_CHANNEL_SHOUT;
+		    }) == 2);
+
+		std::string error;
+		roleplay_owner_id = core.players().front().persistent_id;
+		assert(core.grant_permission(1, "admin.announce", error));
+		assert(core.grant_permission(1, "admin.freeze", error));
+		assert(std::filesystem::exists(roleplay_world.path / "permissions.json"));
+		core.on_message(101, chat_message("/announce Court begins"), start + 400ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::count_if(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.envelope.has_chat_broadcast()
+			        && entry.envelope.chat_broadcast().channel()
+			            == protocol::CHAT_CHANNEL_ANNOUNCEMENT;
+		    }) == 2);
+		core.on_message(102, chat_message("/kick 1"), start + 450ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.connection == 102
+			        && entry.envelope.has_chat_broadcast()
+			        && entry.envelope.chat_broadcast().channel()
+			            == protocol::CHAT_CHANNEL_ADMIN
+			        && entry.envelope.chat_broadcast().text().contains("admin.kick");
+		    }));
+
+		core.on_message(101, chat_message("/freeze 2"), start + 500ms);
+		(void)core.take_outbound();
+		core.on_message(102, client_transform(4, 31.0F), start + 600ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.connection == 102
+			        && entry.envelope.has_state_correction()
+			        && entry.envelope.state_correction().reason().contains("frozen");
+		    }));
+		assert(std::filesystem::exists(roleplay_world.path / "admin-audit.jsonl"));
+		std::ifstream audit(roleplay_world.path / "admin-audit.jsonl");
+		const std::string audit_text{
+		    std::istreambuf_iterator<char>(audit),
+		    std::istreambuf_iterator<char>()};
+		assert(audit_text.contains("\"outcome\":\"denied\""));
+	}
+	{
+		permission_store reloaded(roleplay_world.path);
+		assert(reloaded.has(roleplay_owner_id, "admin.announce"));
+		assert(reloaded.has(roleplay_owner_id, "admin.freeze"));
+		assert(!reloaded.has(roleplay_owner_id, "admin.kick"));
 	}
 
 	temporary_world generated_property_world;
@@ -392,10 +559,12 @@ int main()
 	{
 		auto config = config_for(central_auth_world.path);
 		config.account_auth_enabled = true;
+		config.account_whitelist_enabled = true;
 		config.account_service_url = "https://api.kingdom-online.cc";
 		config.account_server_id = "central-test";
 		config.account_server_key = "test-key";
 		config.public_address = "127.0.0.1:27020";
+		config.max_players = 1;
 		constexpr std::string_view account_id =
 		    "0c997ac1-8ae3-45b0-9b7f-bf3bd45ea21e";
 		server_core core(
@@ -404,9 +573,27 @@ int main()
 		    [&](std::string_view token, std::string &error)
 		    {
 			    if (token == "valid-access-token")
-				    return std::optional{std::string(account_id)};
+				    return std::optional{network_identity{
+				        .account_id = std::string(account_id),
+				        .network_role = "user",
+				        .display_name = "Henry",
+				        .whitelisted = true}};
+			    if (token == "owner-access-token")
+				    return std::optional{network_identity{
+				        .account_id = "fa692275-6954-4fbb-b64d-545a709b204e",
+				        .network_role = "owner",
+				        .display_name = "Network Owner",
+				        .join_bypass = true,
+				        .full_permissions = true,
+				        .chat_muted = true,
+				        .voice_muted = true}};
+			    if (token == "unlisted-access-token")
+				    return std::optional{network_identity{
+				        .account_id = "1652dbd5-ad09-4f45-92f5-b2e7da826fb5",
+				        .network_role = "user",
+				        .display_name = "Unlisted User"}};
 			    error = "invalid central token";
-			    return std::optional<std::string>{};
+			    return std::optional<network_identity>{};
 		    });
 		core.on_transport_connected(90, start);
 		core.on_message(90, hello(), start);
@@ -431,6 +618,61 @@ int main()
 		outbound = core.take_outbound();
 		assert(has_accepted(outbound, 91, 1));
 		assert(core.players().front().persistent_id == account_id);
+
+		// Network staff are admitted even when both the server password and
+		// capacity gate would reject a regular account. Owner/Admin also gain
+		// effective wildcard permissions without a local role assignment.
+		core.on_transport_connected(92, start + 5ms);
+		core.on_message(
+		    92,
+		    hello("Network Owner", "wrong-password"),
+		    start + 5ms);
+		(void)core.take_outbound();
+		core.on_message(
+		    92,
+		    central_auth("owner-access-token"),
+		    start + 6ms);
+		const auto owner_bootstrap = find_bootstrap(core.take_outbound(), 92);
+		core.on_message(92, ready(owner_bootstrap), start + 7ms);
+		outbound = core.take_outbound();
+		assert(has_accepted(outbound, 92, 2));
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.connection == 92
+			        && entry.envelope.has_server_accepted()
+			        && entry.envelope.server_accepted().network_role()
+			            == protocol::NETWORK_ROLE_OWNER;
+		    }));
+		assert(core.permissions(2) == std::vector<std::string>{"*"});
+		core.on_message(92, chat_message("muted text"), start + 8ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::none_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.envelope.has_chat_broadcast()
+			        && entry.envelope.chat_broadcast().player_id() == 2;
+		    }));
+		core.on_message(92, voice_frame(1), start + 9ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::none_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    { return entry.envelope.has_server_voice_frame(); }));
+
+		core.on_transport_connected(93, start + 10ms);
+		core.on_message(93, hello("Unlisted User"), start + 10ms);
+		(void)core.take_outbound();
+		core.on_message(
+		    93,
+		    central_auth("unlisted-access-token"),
+		    start + 11ms);
+		assert(has_rejection(
+		    core.take_outbound(),
+		    93,
+		    protocol::REJECT_REASON_AUTHENTICATION_FAILED));
 	}
 
 	{
@@ -480,6 +722,7 @@ int main()
 		(void)connect_new_player(core, 93, start, 1);
 		auto state = core.current_environment(start + 126s);
 		assert(std::abs(state.time_of_day_hours() - 20.5) < 0.000001);
+		assert(std::abs(state.world_time_seconds() - 160'200.0) < 0.000001);
 		assert(state.time_scale() == 600.0F);
 		assert(state.weather_id() == 2);
 		const auto revision = state.revision();
@@ -503,6 +746,7 @@ int main()
 		    == 13);
 		state = core.current_environment(start + 126s);
 		assert(std::abs(state.time_of_day_hours() - 6.25) < 0.000001);
+		assert(std::abs(state.world_time_seconds() - 195'300.0) < 0.000001);
 		assert(state.weather_id() == 13);
 		assert(state.weather_transition_ms() == 30'000);
 		assert(!core.set_weather(34, 30, start + 126s));
@@ -526,6 +770,8 @@ int main()
 		config.sleeping_players_required = 2;
 		config.sleep_wake_hour = 6.5;
 		server_core core(config);
+		const auto world_time_before_sleep =
+		    core.current_environment(start).world_time_seconds();
 		(void)connect_new_player(core, 94, start, 1, nullptr, "Henry");
 		(void)connect_new_player(core, 95, start + 10ms, 2, nullptr, "Hans");
 
@@ -555,11 +801,13 @@ int main()
 		    {
 			    return message.envelope.has_server_environment_updated()
 			        && std::abs(message.envelope.server_environment_updated()
-			                        .state()
-			                        .time_of_day_hours()
-			                    - 6.5)
+				                        .state()
+				                        .time_of_day_hours()
+				                    - 6.5)
 			            < 0.000001;
 		    }) == 2);
+		assert(core.current_environment(start + 21ms).world_time_seconds()
+		    > world_time_before_sleep);
 		assert(std::ranges::count_if(
 		    outbound,
 		    [](const outbound_message &message)
@@ -616,6 +864,11 @@ int main()
 		(void)connect_new_player(core, 96, start, 1, nullptr, "Henry");
 		const auto hans_token =
 		    connect_new_player(core, 97, start + 10ms, 2, nullptr, "Hans");
+		core.on_message(97, client_transform(100), start + 15ms);
+		assert(std::ranges::any_of(
+		    core.players(),
+		    [](const player_view &player)
+		    { return player.id == 2 && player.last_sequence == 100; }));
 
 		core.on_transport_disconnected(
 		    97,
@@ -645,12 +898,29 @@ int main()
 		assert(has_accepted(outbound, 98, 2));
 		assert(has_system_chat(outbound, 96, "Hans reconnected."));
 		assert(!has_system_chat(outbound, 98, "Hans reconnected."));
+		const auto joined = std::ranges::find_if(
+		    outbound,
+		    [](const outbound_message &message)
+		    {
+			    return message.connection == 96
+			        && message.envelope.has_player_joined()
+			        && message.envelope.player_joined().player().player_id()
+			            == 2;
+		    });
+		assert(joined != outbound.end());
+		assert(joined->envelope.player_joined().player().transform().sequence()
+		    == 0);
+		core.on_message(98, client_transform(1), start + 24ms);
+		assert(std::ranges::any_of(
+		    core.players(),
+		    [](const player_view &player)
+		    { return player.id == 2 && player.last_sequence == 1; }));
 
 		core.on_transport_disconnected(
 		    98,
 		    false,
 		    "client disconnected",
-		    start + 24ms);
+		    start + 25ms);
 		outbound = core.take_outbound();
 		assert(has_system_chat(outbound, 96, "Hans left the server."));
 		assert(std::ranges::any_of(
@@ -665,7 +935,7 @@ int main()
 		(void)connect_new_player(
 		    core,
 		    99,
-		    start + 25ms,
+		    start + 26ms,
 		    3,
 		    nullptr,
 		    "Bob");
@@ -1902,8 +2172,8 @@ int main()
 		    {
 			    return message.envelope.has_player_activity_updated()
 			        && !message.envelope.player_activity_updated()
-			                .activity()
-			                .active();
+				                .activity()
+				                .active();
 		    }) == 2);
 
 		core.on_message(61, first_start, start + 23ms);

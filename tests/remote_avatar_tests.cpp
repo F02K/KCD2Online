@@ -1,5 +1,8 @@
 #include "kcse/remote_avatar_readiness.hpp"
+#include "multiplayer/emote_catalog.hpp"
 #include "multiplayer/remote_avatar.hpp"
+#include "multiplayer/remote_locomotion_animation.hpp"
+#include "multiplayer/remote_transform_sequence.hpp"
 
 #include <algorithm>
 #include <array>
@@ -63,6 +66,7 @@ namespace
 		    const kcd2o::remote_avatar_snapshot &player,
 		    bool appearance_changed) override
 		{
+			++updates;
 			players[avatar] = player;
 			if (appearance_changed)
 				++appearance_updates;
@@ -85,6 +89,7 @@ namespace
 		kcd2o::remote_avatar_handle next_handle{1};
 		std::size_t removed{};
 		std::size_t spawn_attempts{};
+		std::size_t updates{};
 		std::size_t appearance_updates{};
 		std::unordered_map<
 		    kcd2o::remote_avatar_handle,
@@ -122,6 +127,57 @@ int main()
 {
 	using namespace kcd2o;
 	using namespace std::chrono_literals;
+	const auto *bow = find_emote(emote_kind::bow);
+	assert(bow && bow->tags == "bowBig");
+	assert(bow->skeleton_clip == "greetings_bow");
+	assert(find_emote_fragment("Greetings") == bow);
+	assert(find_emote(emote_kind::cheer)->skeleton_clip
+	    == "soldier_speech_cheer08");
+	assert(find_emote(emote_kind::point)->skeleton_clip
+	    == "crowd_peasant_male_audience_point_03");
+	assert(find_emote(emote_kind::surrender)->skeleton_clip
+	    == "dlg_male_neutral_stand_disown_01");
+	assert(remote_locomotion_animation_name(
+	           remote_locomotion_animation::idle)
+	    == "relaxed_idle_both");
+	assert(remote_locomotion_animation_name(
+	           remote_locomotion_animation::sprint)
+	    == "3d_relaxed_sprint_turn_strafe");
+	assert(remote_locomotion_animation_for_mode(
+	           protocol::MOVEMENT_MODE_RUN)
+	    == remote_locomotion_animation::run);
+	assert(select_remote_locomotion_animation(
+	           0.99F,
+	           remote_locomotion_animation::idle)
+	    == remote_locomotion_animation::idle);
+	assert(select_remote_locomotion_animation(
+	           1.00F,
+	           remote_locomotion_animation::idle)
+	    == remote_locomotion_animation::walk);
+	assert(select_remote_locomotion_animation(
+	           0.50F,
+	           remote_locomotion_animation::walk)
+	    == remote_locomotion_animation::walk);
+	assert(select_remote_locomotion_animation(
+	           2.50F,
+	           remote_locomotion_animation::walk)
+	    == remote_locomotion_animation::run);
+	assert(select_remote_locomotion_animation(
+	           2.00F,
+	           remote_locomotion_animation::run)
+	    == remote_locomotion_animation::run);
+	assert(select_remote_locomotion_animation(
+	           4.00F,
+	           remote_locomotion_animation::run)
+	    == remote_locomotion_animation::sprint);
+	assert(select_remote_locomotion_animation(
+	           3.30F,
+	           remote_locomotion_animation::sprint)
+	    == remote_locomotion_animation::sprint);
+	assert(select_remote_locomotion_animation(
+	           0.10F,
+	           remote_locomotion_animation::walk)
+	    == remote_locomotion_animation::idle);
 	assert(is_valid_remote_avatar_transition(
 	    remote_avatar_state::pending,
 	    remote_avatar_state::waiting_for_human));
@@ -136,6 +192,11 @@ int main()
 	assert(!is_pending_remote_avatar_state(remote_avatar_state::ready));
 	assert(!is_valid_remote_avatar_state(
 	    static_cast<remote_avatar_state>(999)));
+	remote_transform_sequence transform_sequence;
+	assert(transform_sequence.accept(100));
+	assert(!transform_sequence.accept(1));
+	transform_sequence.reset();
+	assert(transform_sequence.accept(1));
 	const auto soul_applied_at = std::chrono::steady_clock::now();
 	assert(!kcse::evaluate_remote_soul_settle(
 	             10,
@@ -345,10 +406,26 @@ int main()
 	const auto timeout_start = remote_avatar_manager::clock::now();
 	result = timeout_manager.sync(timeout_players, timeout_start);
 	assert(result.success);
+	assert(timeout_backend.updates == 0);
 	result = timeout_manager.sync(timeout_players, timeout_start + 2s);
 	assert(!result.success);
 	assert(result.error.contains("timed out"));
+	assert(timeout_backend.updates == 0);
 	assert(timeout_backend.players.empty());
+
+	fake_backend pending_backend;
+	pending_backend.spawned_state = remote_avatar_state::waiting_for_human;
+	remote_avatar_manager pending_manager(pending_backend);
+	auto pending_players = std::vector{
+	    player(9, 90.0F, protocol::MOVEMENT_MODE_WALK)};
+	const auto pending_start = remote_avatar_manager::clock::now();
+	result = pending_manager.sync(pending_players, pending_start);
+	assert(result.success);
+	assert(pending_backend.updates == 0);
+	pending_backend.states.begin()->second = remote_avatar_state::ready;
+	result = pending_manager.sync(pending_players, pending_start + 1ms);
+	assert(result.success);
+	assert(pending_backend.updates == 1);
 
 	fake_backend regression_backend;
 	regression_backend.spawned_state =

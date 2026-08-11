@@ -17,17 +17,19 @@ namespace kcd2o::net
 		    10, // player_realtime
 		    10, // ordered_state
 		    10, // npc_realtime
-		    0   // interactive
+		    0,  // interactive
+		    1   // voice_realtime
 		};
 		constexpr std::array<uint16, traffic_lane_count> lane_weights{
 		    8, // player_realtime
 		    6, // ordered_state
 		    2, // npc_realtime
-		    1  // ignored while interactive has a unique priority
+		    1, // ignored while interactive has a unique priority
+		    1  // ignored while voice has a unique priority
 		};
 
 		static_assert(
-		    static_cast<std::size_t>(traffic_lane::interactive) + 1
+		    static_cast<std::size_t>(traffic_lane::voice_realtime) + 1
 		    == traffic_lane_count);
 
 		void set_error(std::string *error, std::string message)

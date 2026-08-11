@@ -25,6 +25,9 @@ starter_profile = "starter_profile.toml"
 
 [auth]
 enabled = true
+# When enabled, regular accounts must have a centrally managed membership
+# with whitelisted=true. Network staff still retain their join bypass.
+whitelist_enabled = false
 service_url = "https://api.kingdom-online.cc"
 # Created automatically on first start. Keep this file to retain the stable ID.
 identity_file = "server-identity.json"
@@ -49,6 +52,31 @@ weather_transition_seconds = 30
 # advances. The effective requirement is capped at the online player count.
 sleeping_players_required = 1
 sleep_wake_hour = 6.0
+
+[chat]
+# In-character speech is routed by authoritative server position. /ooc remains
+# global unless explicitly disabled.
+whisper_range_m = 3.0
+say_range_m = 15.0
+shout_range_m = 40.0
+ooc_enabled = true
+
+[voice]
+# Proximity VOIP is relayed only to players inside the authoritative range.
+# Clients transmit one Opus packet every 20 ms while push-to-talk is held.
+enabled = true
+whisper_range_m = 3.0
+normal_range_m = 15.0
+shout_range_m = 40.0
+max_frames_per_second = 60
+
+[permissions]
+# KCD2Online account IDs shown by the server's `players` command. While central
+# authentication is enabled, these owner claims and their history are reported
+# to the authenticated backend. Configured owners and centrally authenticated
+# network admins/owners implicitly receive `*`; all other grants are persisted
+# in world/permissions.json.
+owners = []
 
 # Optional. If omitted, the first authenticated client initializes the spawn.
 # [server.initial_spawn]

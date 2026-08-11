@@ -4,6 +4,7 @@
 #include "kcse/native_remote_avatar_equipment.hpp"
 #include "kcse/remote_avatar_readiness.hpp"
 #include "multiplayer/remote_avatar.hpp"
+#include "multiplayer/remote_locomotion_animation.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -30,6 +31,7 @@ namespace kcd2o::kcse
 		void set_epoch(std::uint64_t epoch);
 		void clear();
 		void reset_active_probe();
+		[[nodiscard]] std::uint32_t entity_id_for(player_id player) const noexcept;
 		[[nodiscard]] active_probe_result poll_active_probe(
 		    const protocol::TransformState &origin,
 		    std::string &error);
@@ -58,9 +60,11 @@ namespace kcd2o::kcse
 		{
 			player_id player{};
 			std::uint32_t entity_id{};
+			std::string entity_name;
+			std::chrono::steady_clock::time_point spawn_requested_at{};
+			std::optional<native_entity_backend::human_npc_spawn_scope>
+			    spawn_authorization;
 			std::uint64_t epoch{};
-			std::string shared_soul_guid;
-			bool shared_soul_applied{};
 			std::uint64_t shared_soul_applied_frame{};
 			std::chrono::steady_clock::time_point
 			    shared_soul_applied_at{};
@@ -77,18 +81,32 @@ namespace kcd2o::kcse
 			bool motion_applied{};
 			protocol::MovementMode last_movement_mode{
 			    protocol::MOVEMENT_MODE_IDLE};
-			protocol::Vec3 last_motion_velocity;
-			protocol::LocomotionState last_locomotion;
+			remote_locomotion_animation locomotion_animation{
+			    remote_locomotion_animation::idle};
+			bool sprint_animation_supported{true};
+			float smoothed_visual_speed{};
+			float last_visual_x{};
+			float last_visual_y{};
+			bool visual_position_sampled{};
+			std::chrono::steady_clock::time_point
+			    last_visual_sample_at{};
 			std::chrono::steady_clock::time_point
 			    last_motion_request_at{};
 			std::chrono::steady_clock::time_point
+			    next_motion_retry_at{};
+			std::chrono::steady_clock::time_point
 			    last_native_transform_at{};
 			std::uint64_t last_animation_sequence{};
+			bool one_shot_animation_active{};
+			std::string one_shot_animation_clip;
+			std::string presented_animation_clip;
+			bool presented_animation_loop{};
 			std::chrono::steady_clock::time_point
 			    last_native_validation_at{};
 			bool first_transform_logged{};
 			bool first_motion_logged{};
 			bool first_weapon_action_logged{};
+			bool native_weapon_actions_enabled{true};
 			bool failed{};
 			std::string failure;
 			protocol::AvatarDescriptor appearance;
@@ -111,13 +129,17 @@ namespace kcd2o::kcse
 		[[nodiscard]] bool remove_created_items(
 		    entry &avatar,
 		    std::string &error);
-		[[nodiscard]] bool drive_motion(
+		[[nodiscard]] bool update_motion_state(
 		    entry &avatar,
 		    const remote_avatar_snapshot &player,
 		    std::string &error);
-		void apply_animation(
+		void update_animation_state(
 		    entry &avatar,
 		    const remote_avatar_snapshot &player);
+		[[nodiscard]] bool present_animation(
+		    entry &avatar,
+		    const remote_avatar_snapshot &player,
+		    std::string &error);
 		[[nodiscard]] bool apply_display_name(
 		    entry &avatar,
 		    const remote_avatar_snapshot &player,
@@ -141,9 +163,6 @@ namespace kcd2o::kcse
 		std::uint64_t m_frame_sequence{};
 		std::uint64_t m_epoch{1};
 		remote_avatar_handle m_next_handle{1};
-		bool m_native_locomotion_enabled{true};
-		bool m_native_weapon_actions_enabled{true};
-		bool m_native_animation_actions_enabled{true};
 		mutable bool m_catalogs_ready{};
 		mutable std::string m_diagnostic;
 	};

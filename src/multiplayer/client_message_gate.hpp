@@ -74,6 +74,7 @@ namespace kcd2o
 			case payload_case::kServerNpcSnapshot:
 			case payload_case::kServerNpcMotion:
 			case payload_case::kServerNpcGameplayUpdate:
+			case payload_case::kServerVoiceFrame:
 				return true;
 			default:
 				return false;
@@ -99,6 +100,7 @@ namespace kcd2o
 		case protocol::Envelope::kChatBroadcast:
 		case protocol::Envelope::kServerNpcSnapshot:
 		case protocol::Envelope::kServerNpcMotion:
+		case protocol::Envelope::kServerVoiceFrame:
 			return true;
 		default:
 			return false;
@@ -115,6 +117,7 @@ namespace kcd2o
 		case payload_case::kServerShutdown:
 		case payload_case::kPong:
 		case payload_case::kChatBroadcast:   return false;
+		case payload_case::kServerVoiceFrame: return false;
 		default:                             return true;
 		}
 	}

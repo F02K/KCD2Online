@@ -20,6 +20,7 @@ namespace
 	void __cdecl disconnect() noexcept {}
 	std::uint32_t __cdecl text(const char *) noexcept { return 1; }
 	std::uint32_t __cdecl action() noexcept { return 1; }
+	std::uint32_t __cdecl action_with_value(std::uint32_t) noexcept { return 1; }
 	std::uint32_t __cdecl status(
 	    kcd2o::kcse::client_status_view *) noexcept
 	{
@@ -67,10 +68,10 @@ int main()
 	static_assert(sizeof(fixed_string) == 64);
 	static_assert(sizeof(connect_request) == 836);
 	static_assert(sizeof(runtime_status) == 424);
-	static_assert(sizeof(client_status_view) == 688);
-	static_assert(sizeof(remote_player_view) == 80);
-	static_assert(sizeof(chat_entry_view) == 336);
-	static_assert(sizeof(client_api) == 112);
+	static_assert(sizeof(client_status_view) == 720);
+	static_assert(sizeof(remote_player_view) == 88);
+	static_assert(sizeof(chat_entry_view) == 344);
+	static_assert(sizeof(client_api) == 120);
 #endif
 
 	client_api valid{
@@ -82,6 +83,7 @@ int main()
 	    connect,
 	    disconnect,
 	    text,
+	    action_with_value,
 	    text,
 	    action,
 	    action,
@@ -91,10 +93,10 @@ int main()
 	    archetypes,
 	    diagnostic_logging};
 	assert(compatible(&valid));
-	static_assert(kcd2o::kcd2o_version == "0.1.3");
+	static_assert(kcd2o::kcd2o_version == "0.1.4");
 	static_assert(kcd2o::kcd2o_version_major == 0);
 	static_assert(kcd2o::kcd2o_version_minor == 1);
-	static_assert(kcd2o::kcd2o_version_patch == 3);
+	static_assert(kcd2o::kcd2o_version_patch == 4);
 
 	auto wrong_version = valid;
 	++wrong_version.version_patch;
