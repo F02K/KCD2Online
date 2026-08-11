@@ -1294,18 +1294,12 @@ def package_artifacts(
             source = project_root / "data" / "server" / source_name
             if source.is_dir():
                 shutil.copytree(source, server_root / destination_name)
-        documentation = project_root / "docs"
-        if documentation.is_dir():
-            docs_root = server_root / "docs"
-            docs_root.mkdir(parents=True, exist_ok=True)
-            for name in (
-                "server-scripting.md",
-                "resource-ui.md",
-                "resource-delivery.md",
-            ):
-                source = documentation / name
-                if source.is_file():
-                    shutil.copy2(source, docs_root / name)
+        scripting_docs = project_root / "docs" / "scripting"
+        if not scripting_docs.is_dir():
+            raise BuildToolError(
+                f"Cannot package missing server scripting documentation: {scripting_docs}"
+            )
+        shutil.copytree(scripting_docs, server_root / "docs" / "scripting")
 
         if game_data_dir is not None:
             required_game_data = (

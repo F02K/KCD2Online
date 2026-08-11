@@ -453,15 +453,19 @@ class PackagingTests(unittest.TestCase):
         ).write_text(
             "[resource]\nid='example'\nversion='1.0.0'\n", encoding="utf-8"
         )
-        (project / "docs").mkdir()
-        for name in (
-            "server-scripting.md",
-            "resource-ui.md",
-            "resource-delivery.md",
-        ):
-            (project / "docs" / name).write_text(
-                "# Resource docs\n", encoding="utf-8"
-            )
+        (project / "docs" / "scripting" / "getting-started").mkdir(
+            parents=True
+        )
+        (project / "docs" / "scripting" / "README.md").write_text(
+            "# Server scripting\n", encoding="utf-8"
+        )
+        (
+            project
+            / "docs"
+            / "scripting"
+            / "getting-started"
+            / "quick-start.md"
+        ).write_text("# Quick start\n", encoding="utf-8")
         (project / "data" / "npc_archetypes.json").write_text(
             "{}\n", encoding="utf-8"
         )
@@ -600,7 +604,11 @@ class PackagingTests(unittest.TestCase):
                     names,
                 )
                 self.assertIn(
-                    "KCD2Online-Server-v0.1.0/docs/server-scripting.md",
+                    "KCD2Online-Server-v0.1.0/docs/scripting/README.md",
+                    names,
+                )
+                self.assertIn(
+                    "KCD2Online-Server-v0.1.0/docs/scripting/getting-started/quick-start.md",
                     names,
                 )
                 self.assertFalse(any("/game_data/" in name for name in names))

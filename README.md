@@ -255,6 +255,7 @@ and full NPC/quest simulation remain manual or future work.
 ## Additional documentation
 
 - [Multiplayer architecture and status](docs/multiplayer.md)
+- [Server Lua scripting and resource authoring](docs/scripting/README.md)
 - [Version history](CHANGELOG.md)
 - [libKCD2/KCSE migration audit](docs/libkcd2-kcse-migration.md)
 - [Vendor integration](docs/libkcd2-vendor.md)
