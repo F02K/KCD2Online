@@ -265,6 +265,17 @@ namespace kcd2o
 			return count;
 		}
 
+		// A full game-context teardown already owns destruction of every native
+		// actor. Drop only the manager's handles in that case: calling the backend
+		// removal path while CryEngine is about to destroy the world can race
+		// Human/Soul and inventory lifecycle work still queued by the engine.
+		std::size_t abandon_world()
+		{
+			const auto count = m_avatars.size();
+			m_avatars.clear();
+			return count;
+		}
+
 		[[nodiscard]] std::size_t size() const
 		{
 			return m_avatars.size();

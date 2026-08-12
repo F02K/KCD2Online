@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "kcd2o",
-  "version-string": "0.1.4",
+  "version-string": "0.1.5",
   "builtin-baseline": "908da3a305a0a8028d9602ab241b433652b3df69",
   "dependencies": [
     {

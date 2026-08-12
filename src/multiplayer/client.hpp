@@ -296,7 +296,6 @@ namespace kcd2o
 		std::optional<protocol::ClientActivityStart> m_pending_activity_start;
 		std::optional<std::string> m_activity_denial;
 		bool m_manual_disconnect_pending{};
-		bool m_disconnect_capture_profile{};
 		bool m_avatar_update_pending{};
 		std::optional<protocol::ServerBootstrap> m_pending_bootstrap;
 		std::optional<client_options> m_pending_connect;

@@ -8,6 +8,46 @@ changes. Client and server versions must match exactly.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-12
+
+### Added
+
+- Added self-service account recovery with a one-time recovery code. A
+  successful recovery rotates both the device-bound credential and recovery
+  code before storing the replacement credential with Windows DPAPI.
+- Added account overview, profile, security, and privacy sections to the native
+  menu, including locale editing, credential details, secure recovery-code
+  copying, machine-readable JSON data export, and confirmed account deletion.
+- Added scrollable Terms of Service and Privacy Policy pages behind a compact
+  Legal & Privacy submenu, with English and German navigation and account
+  feedback text.
+- Added server-browser search across server name, ID, level, and version, plus
+  keyboard and mouse-wheel selection for matching servers.
+
+### Changed
+
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.5`.
+- The main menu now exposes account management as a separate entry, and the
+  account view displays the central network role returned by the profile.
+- Raised the account-service response limit to support data exports and ignored
+  generated .NET bootstrap `bin` and `obj` directories.
+
+### Fixed
+
+- Updated ABI, protocol, packaging, and rebranding checks for `0.1.5`, and
+  avoided a deleted `parameter_info_range` copy that broke MSVC test builds.
+- Replaced the manual multiplayer world unload and native menu VTable call on
+  disconnect with CryEngine's deferred canonical `disconnect` transition.
+  Full world teardown now leaves remote Actors and their inventories intact for
+  CryEngine to destroy, waits one clean engine frame before disconnecting, and
+  avoids a final native profile capture that could race shutdown.
+- Added durable critical lifecycle markers around the deferred disconnect path
+  so crashes that occur after control returns to CryEngine remain diagnosable.
+- Disconnect an active multiplayer session before disabling the central account
+  service, preventing an authenticated session from outliving its local account
+  state.
+
 ## [0.1.4] - 2026-08-09
 
 ### Added

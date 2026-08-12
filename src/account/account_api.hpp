@@ -55,6 +55,11 @@ namespace kcd2o::account
 		    std::string_view public_key_spki,
 		    std::string_view device_evidence,
 		    std::span<const std::byte> private_key_blob) const;
+		[[nodiscard]] registration_result recover_account(
+		    std::string_view recovery_code,
+		    std::string_view public_key_spki,
+		    std::string_view device_evidence,
+		    std::span<const std::byte> private_key_blob) const;
 		[[nodiscard]] login_result login(
 		    const account_record &account,
 		    std::string_view audience) const;
@@ -65,6 +70,10 @@ namespace kcd2o::account
 		    std::string_view username,
 		    std::string_view display_name,
 		    std::string_view locale) const;
+		[[nodiscard]] std::string export_data(const account_record &account) const;
+		void delete_account(
+		    const account_record &account,
+		    std::string_view confirmation_account_id) const;
 		[[nodiscard]] std::vector<public_server> list_servers() const;
 
 	private:

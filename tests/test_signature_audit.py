@@ -211,17 +211,23 @@ class StartupSafetyTests(unittest.TestCase):
 
         begin = runtime.index("void native_runtime::begin_native_unload")
         unload = runtime[begin:]
-        self.assertIn('execute_console_command("unload", true)', unload)
+        self.assertIn('execute_console_command("disconnect", true)', unload)
+        self.assertNotIn('execute_console_command("unload", true)', unload)
         self.assertNotIn("framework->EndGameContext()", unload)
         safe_queue = unload.index("void native_runtime::queue_native_unload_if_safe")
         load_gate = unload.index("if (!level_load_complete)", safe_queue)
         unload_command = unload.index(
-            'execute_console_command("unload", true)', load_gate
+            'execute_console_command("disconnect", true)', load_gate
         )
         self.assertLess(load_gate, unload_command)
+        self.assertIn("m_remote_avatars.abandon_world();", unload)
+        self.assertIn("m_remote_backend.abandon_world();", unload)
+        self.assertIn("if (m_frame_sequence <= teardown_frame)", unload)
+        self.assertNotIn("m_remote_avatars.clear();", unload)
         self.assertNotIn("m_world_start_deadline", runtime)
-        self.assertIn("system_global_state_running", runtime)
-        self.assertIn("open_main_menu_if_pending();", runtime)
+        self.assertIn("system_global_state_level_load_complete", runtime)
+        self.assertNotIn("open_main_menu_if_pending", runtime)
+        self.assertNotIn("interface->Open(1)", runtime)
         self.assertIn("return changed && !unload_transition;", runtime)
 
         self.assertIn("previous == client_state::closing", client)
@@ -362,10 +368,13 @@ class StartupSafetyTests(unittest.TestCase):
             "void multiplayer_client::advance_runtime_preflight", tick_begin
         )
         tick = client[tick_begin:preflight_begin]
-        capture = tick.index("m_runtime.local_profile()")
-        close = tick.index("queue_network(disconnect_command{})", capture)
-        self.assertLess(capture, close)
-        self.assertIn("queue_profile_snapshot(*profile, true)", tick)
+        manual_begin = tick.index("if (manual_disconnect)")
+        manual_end = tick.index("for (const auto &envelope", manual_begin)
+        manual = tick[manual_begin:manual_end]
+        self.assertIn("queue_network(disconnect_command{})", manual)
+        self.assertNotIn("m_runtime.local_profile()", manual)
+        self.assertNotIn("queue_profile_snapshot", manual)
+        self.assertNotIn("m_disconnect_capture_profile", client)
 
         self.assertIn("bool m_manual_disconnect_pending{};", header)
         self.assertIn(

@@ -28,6 +28,9 @@ int main()
 	           {{"server", "Kuttenberg"}})
 	    == "VERBUNDEN: Kuttenberg");
 	assert(catalog.text("chat.title") == "MEHRSPIELER-CHAT");
+	assert(catalog.text("account.action.recover") == "BESTEHENDEN ACCOUNT WIEDERHERSTELLEN");
+	assert(catalog.text("legal.action.open") == "RECHTLICHES & DATENSCHUTZ");
+	assert(catalog.text("legal.action.privacy") == "DATENSCHUTZERKLÄRUNG");
 	assert(catalog.text("chat.help").find("schlie\xC3\x9F" "en")
 	    != std::string::npos);
 	assert(catalog.format(
@@ -35,10 +38,10 @@ int main()
 	           {{"players", "2"},
 	            {"max", "8"},
 	            {"level", "3"},
-	            {"version", "0.1.4"},
+	            {"version", "0.1.5"},
 	            {"password", "JA"},
 	            {"id", "srv_test"}})
-	    == "SPIELER: 2/8\nLEVEL: 3\nVERSION: 0.1.4\nPASSWORT: JA\nSERVER-ID: srv_test");
+	    == "SPIELER: 2/8\nLEVEL: 3\nVERSION: 0.1.5\nPASSWORT: JA\nSERVER-ID: srv_test");
 
 	assert(catalog.load(directory, "french", error));
 	assert(catalog.language() == "fr");

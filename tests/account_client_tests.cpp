@@ -201,12 +201,27 @@ int main()
 		CHECK(!registered.account_id.empty());
 		CHECK(!registered.credential_id.empty());
 		CHECK(!registered.recovery_code.empty());
+		auto recovery_credential = generate_credential();
+		std::array<std::byte, 32> recovery_device_evidence{};
+		CHECK(BCryptGenRandom(
+		    nullptr,
+		    reinterpret_cast<PUCHAR>(recovery_device_evidence.data()),
+		    static_cast<ULONG>(recovery_device_evidence.size()),
+		    BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0);
+		const auto recovered = account_api(service_url).recover_account(
+		    registered.recovery_code,
+		    recovery_credential.public_key_spki,
+		    base64url_encode(recovery_device_evidence),
+		    recovery_credential.private_key_blob);
+		CHECK(recovered.account_id == registered.account_id);
+		CHECK(recovered.credential_id != registered.credential_id);
+		CHECK(recovered.recovery_code != registered.recovery_code);
 		account_record live_account;
 		live_account.consent = consent_choice::accepted;
-		live_account.account_id = registered.account_id;
-		live_account.credential_id = registered.credential_id;
-		live_account.private_key_blob = std::move(live_credential.private_key_blob);
-		live_account.recovery_code = registered.recovery_code;
+		live_account.account_id = recovered.account_id;
+		live_account.credential_id = recovered.credential_id;
+		live_account.private_key_blob = std::move(recovery_credential.private_key_blob);
+		live_account.recovery_code = recovered.recovery_code;
 		const auto login = account_api(service_url).login(live_account, "development");
 		CHECK(!login.access_token.empty());
 		CHECK(login.expires_at_unix_seconds > 0);

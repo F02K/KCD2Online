@@ -144,7 +144,6 @@ namespace kcd2o::kcse
 		void begin_native_unload(std::string_view reason);
 		void queue_native_unload_if_safe();
 		void finish_native_unload_if_complete();
-		void open_main_menu_if_pending();
 		[[nodiscard]] bool native_world_unloaded() const;
 		void poll_local_activity();
 		void refresh_home_marker();
@@ -187,10 +186,11 @@ namespace kcd2o::kcse
 		bool m_save_load_locked{};
 		bool m_unload_pending{};
 		bool m_unload_teardown_started{};
+		std::uint64_t m_unload_teardown_frame{};
 		bool m_unload_command_queued{};
 		bool m_unload_deferred_logged{};
-		bool m_main_menu_pending{};
 		bool m_level_load_complete{};
+		std::uint64_t m_frame_sequence{};
 		bool m_probe_transform_verified{};
 		bool m_probe_complete{};
 		std::uint64_t m_native_weather_revision{};

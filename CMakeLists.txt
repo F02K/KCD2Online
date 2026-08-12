@@ -8,7 +8,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
 
-project(KCD2Online VERSION 0.1.4 LANGUAGES CXX C ASM ASM_MASM)
+project(KCD2Online VERSION 0.1.5 LANGUAGES CXX C ASM ASM_MASM)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/multiplayer/version.hpp.in"
@@ -439,6 +439,8 @@ if(KCD2Online_BUILD_KCSE)
         advapi32
         bcrypt
         crypt32
+        ole32
+        shell32
         winhttp
     )
     set_property(TARGET KCD2OnlineAccount PROPERTY COMPILE_WARNING_AS_ERROR ON)
@@ -449,7 +451,9 @@ if(KCD2Online_BUILD_KCSE)
 		"${SRC_DIR}/gui/native_ingame_menu_api.hpp"
 		"${SRC_DIR}/gui/native_ui_localization.cpp"
 		"${SRC_DIR}/gui/native_ui_localization.hpp"
-        "${SRC_DIR}/gui/native_multiplayer_menu.cpp"
+		"${SRC_DIR}/gui/terms_of_service.hpp"
+		"${SRC_DIR}/gui/privacy_policy.hpp"
+		"${SRC_DIR}/gui/native_multiplayer_menu.cpp"
         "${SRC_DIR}/gui/native_multiplayer_menu.hpp"
     )
     set_property(TARGET KCD2OnlineNativeMultiplayerMenu PROPERTY CXX_STANDARD 23)

@@ -337,7 +337,6 @@ namespace kcd2o
 			m_status = {};
 			m_update_rates = {};
 			m_manual_disconnect_pending = false;
-			m_disconnect_capture_profile = false;
 			m_remote_players.clear();
 			{
 				std::scoped_lock chat_lock(m_chat_mutex);
@@ -397,9 +396,9 @@ namespace kcd2o
 
 	void multiplayer_client::disconnect()
 	{
-		KCD2Online_JOIN_TRACE(
+		KCD2Online_CRITICAL_TRACE(
 		    "join.disconnect.requested",
-		    "client disconnect requested; deferring native capture to game thread");
+		    "client disconnect requested; transport close deferred to game thread");
 		{
 			std::scoped_lock lock(m_state_mutex);
 			if (m_status.state == client_state::disconnected
@@ -407,8 +406,6 @@ namespace kcd2o
 			{
 				return;
 			}
-			m_disconnect_capture_profile =
-			    m_status.state == client_state::connected;
 			m_manual_disconnect_pending = true;
 			if (!transition_state_locked(client_state::closing))
 				return;
@@ -662,33 +659,22 @@ namespace kcd2o
 	{
 		advance_runtime_preflight();
 		bool manual_disconnect{};
-		bool capture_disconnect_profile{};
 		{
 			std::scoped_lock lock(m_state_mutex);
 			manual_disconnect = m_manual_disconnect_pending;
-			capture_disconnect_profile =
-			    m_disconnect_capture_profile;
 			m_manual_disconnect_pending = false;
-			m_disconnect_capture_profile = false;
 		}
 		if (manual_disconnect)
 		{
 			m_runtime.set_voice_active(false);
 			m_runtime.reset_voice();
-			KCD2Online_JOIN_TRACE(
+			KCD2Online_CRITICAL_TRACE(
 			    "join.disconnect.game-thread.begin",
-			    std::format(
-			        "capture_profile={}",
-			        capture_disconnect_profile));
-			if (capture_disconnect_profile)
-			{
-				if (const auto profile = m_runtime.local_profile())
-					queue_profile_snapshot(*profile, true);
-			}
+			    "voice stopped; queuing transport close without optional native profile capture");
 			queue_network(disconnect_command{});
-			KCD2Online_JOIN_TRACE(
+			KCD2Online_CRITICAL_TRACE(
 			    "join.disconnect.game-thread.complete",
-			    "final profile and transport close were queued in order");
+			    "transport close queued");
 			return;
 		}
 		for (const auto &envelope : m_game_commands.drain())
@@ -1766,7 +1752,6 @@ namespace kcd2o
 		if (state == client_state::disconnected)
 		{
 			m_manual_disconnect_pending = false;
-			m_disconnect_capture_profile = false;
 			m_pending_bootstrap.reset();
 			m_pending_connect.reset();
 			m_remote_players.clear();

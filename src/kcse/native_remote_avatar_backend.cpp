@@ -405,6 +405,17 @@ namespace kcd2o::kcse
 		m_probe_polls = 0;
 	}
 
+	void native_remote_avatar_backend::abandon_world() noexcept
+	{
+		// CryEngine's game-context teardown destroys these actors and their
+		// inventories. Do not queue Lua removals or unequip native items here:
+		// those operations may outlive this PostUpdate and race the world unload.
+		m_avatars.clear();
+		m_probe_avatar.reset();
+		m_probe_snapshot = {};
+		m_probe_polls = 0;
+	}
+
 	void native_remote_avatar_backend::reset_active_probe()
 	{
 		if (m_probe_avatar)

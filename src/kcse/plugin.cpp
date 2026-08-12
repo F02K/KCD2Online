@@ -583,14 +583,22 @@ namespace
 
 	void __cdecl abi_disconnect() noexcept
 	{
+		kcd2o::kcse::join_trace::set_thread_role(
+		    kcd2o::kcse::join_trace::thread_role::abi);
+		KCD2Online_CRITICAL_TRACE(
+		    "join.abi-disconnect.begin",
+		    "native UI requested disconnect");
 		try
 		{
 			if (g_client)
 				g_client->disconnect();
+			KCD2Online_CRITICAL_TRACE(
+			    "join.abi-disconnect.complete",
+			    "disconnect request accepted");
 		}
 		catch (...)
 		{
-			KCD2Online_JOIN_TRACE(
+			KCD2Online_CRITICAL_TRACE(
 			    "join.abi-disconnect.exception",
 			    "type=unknown");
 		}

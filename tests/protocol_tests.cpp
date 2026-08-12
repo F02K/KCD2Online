@@ -117,7 +117,7 @@ int main()
 	const auto decoded = decode(encoded->bytes, &error);
 	assert(decoded);
 	assert(decoded->client_hello().display_name() == "Henry");
-	assert(decoded->client_hello().version() == "0.1.4");
+	assert(decoded->client_hello().version() == "0.1.5");
 	auto incompatible = envelope;
 	incompatible.mutable_client_hello()->set_version("0.0.8");
 	assert(encode(incompatible, reliability::reliable, &error));
@@ -608,7 +608,7 @@ int main()
 	valid_environment.set_world_time_seconds(-1.0);
 	assert(!is_valid_environment_state(valid_environment));
 
-	assert(kcd2o_version == "0.1.4");
+	assert(kcd2o_version == "0.1.5");
 	auto unknown_address_library = *runtime;
 	unknown_address_library.set_address_library_sha256(std::string(64, '0'));
 	assert(is_valid_address_library_identity(unknown_address_library));

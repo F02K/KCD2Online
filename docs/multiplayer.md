@@ -1,6 +1,6 @@
 # Multiplayer architecture and prototype status
 
-This document describes KCD2Online **v0.1.4**. The implementation is an active
+This document describes KCD2Online **v0.1.5**. The implementation is an active
 prototype and is not intended for production servers or valuable saves.
 
 ## Versioning and compatibility
@@ -13,7 +13,7 @@ KCD2Online has one semantic project version shared by:
 - packaged artifacts; and
 - the multiplayer handshake.
 
-The current version is `0.1.4`. There is no separate public protocol or KCSE C
+The current version is `0.1.5`. There is no separate public protocol or KCSE C
 ABI version. The KCSE query boundary reads the same generated major, minor, and
 patch components as the rest of the project. During the prototype phase, all
 components must match exactly; a mismatch is rejected before authentication or

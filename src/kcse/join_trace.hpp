@@ -42,6 +42,10 @@ namespace kcd2o::kcse::join_trace
 	    std::string_view event,
 	    std::string_view detail = {},
 	    std::source_location location = std::source_location::current()) noexcept;
+	void write_critical(
+	    std::string_view event,
+	    std::string_view detail = {},
+	    std::source_location location = std::source_location::current()) noexcept;
 
 #ifdef _WIN32
 	long seh_filter(
@@ -63,6 +67,10 @@ namespace kcd2o::kcse::join_trace
 			    std::source_location::current());                               \
 		}                                                                      \
 	} while (false)
+
+#define KCD2Online_CRITICAL_TRACE(event, detail)                                 \
+	::kcd2o::kcse::join_trace::write_critical(                                \
+	    (event), (detail), std::source_location::current())
 
 #ifdef _WIN32
 #define KCD2Online_JOIN_SEH_FILTER(event)                                        \

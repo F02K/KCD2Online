@@ -235,50 +235,6 @@ namespace kcd2o::kcse
 #endif
 		}
 
-#ifdef _WIN32
-		bool open_main_menu() noexcept
-		{
-			auto *menu = find_main_menu();
-			if (!menu)
-				return false;
-			if (menu->m_state == 1)
-				return true;
-
-			auto *interface = static_cast<wh::I_UIMenu *>(menu);
-			auto **vtable = *reinterpret_cast<void ***>(interface);
-			if (!vtable
-			    || reinterpret_cast<std::uintptr_t>(vtable)
-			        != REL::ID(1018).address()
-			    || !in_whgame_text(vtable[1]))
-				return false;
-			interface->Open(1);
-			return true;
-		}
-
-		bool guarded_open_main_menu() noexcept
-		{
-			__try
-			{
-				return open_main_menu();
-			}
-			__except (KCD2Online_JOIN_SEH_FILTER(
-			    "join.sandbox.OpenMainMenu.seh"))
-			{
-				return false;
-			}
-		}
-#else
-		bool open_main_menu() noexcept
-		{
-			auto *menu = find_main_menu();
-			if (!menu)
-				return false;
-			if (menu->m_state != 1)
-				static_cast<wh::I_UIMenu *>(menu)->Open(1);
-			return true;
-		}
-#endif
-
 		bool normalize(protocol::Quaternion *rotation)
 		{
 			const auto length_squared =
@@ -720,6 +676,7 @@ namespace kcd2o::kcse
 
 	bool native_runtime::on_frame()
 	{
+		++m_frame_sequence;
 		KCD2Online_JOIN_TRACE(
 		    "join.kcse.frame.begin",
 		    std::format(
@@ -738,14 +695,13 @@ namespace kcd2o::kcse
 		bool unload_transition{};
 		{
 			std::scoped_lock lock(m_cache_mutex);
-			unload_transition = m_unload_pending || m_main_menu_pending;
+			unload_transition = m_unload_pending;
 		}
 		refresh_cached_state();
 		refresh_home_marker();
 		poll_local_activity();
 		advance_native_world_start();
 		finish_native_unload_if_complete();
-		open_main_menu_if_pending();
 		KCD2Online_JOIN_TRACE(
 		    "join.kcse.frame.complete",
 		    std::format(
@@ -1537,7 +1493,6 @@ namespace kcd2o::kcse
 					return;
 				if (!world_loaded)
 				{
-					m_main_menu_pending = true;
 					open_menu_only = true;
 				}
 			}
@@ -2664,6 +2619,7 @@ namespace kcd2o::kcse
 			std::scoped_lock lock(m_cache_mutex);
 			m_unload_pending = true;
 			m_unload_teardown_started = false;
+			m_unload_teardown_frame = 0;
 			m_unload_command_queued = false;
 			m_unload_deferred_logged = false;
 			m_sandbox_active = true;
@@ -2672,8 +2628,9 @@ namespace kcd2o::kcse
 		}
 		m_multiplayer_requested.store(false, std::memory_order_release);
 		m_expected_epoch_transition.store(false, std::memory_order_release);
-		queue_native_unload_if_safe();
-		finish_native_unload_if_complete();
+		KCD2Online_CRITICAL_TRACE(
+		    "join.sandbox.unload.requested",
+		    "native world teardown requested");
 	}
 
 	void native_runtime::queue_native_unload_if_safe()
@@ -2681,6 +2638,7 @@ namespace kcd2o::kcse
 		bool teardown_started{};
 		bool command_queued{};
 		bool level_load_complete{};
+		std::uint64_t teardown_frame{};
 		{
 			std::scoped_lock lock(m_cache_mutex);
 			if (!m_unload_pending)
@@ -2688,6 +2646,7 @@ namespace kcd2o::kcse
 			teardown_started = m_unload_teardown_started;
 			command_queued = m_unload_command_queued;
 			level_load_complete = m_level_load_complete;
+			teardown_frame = m_unload_teardown_frame;
 		}
 		if (native_world_unloaded())
 			return;
@@ -2720,45 +2679,63 @@ namespace kcd2o::kcse
 				if (m_unload_teardown_started)
 					teardown_started = true;
 				else
+				{
 					m_unload_teardown_started = true;
+					m_unload_teardown_frame = m_frame_sequence;
+				}
 			}
 			if (!teardown_started)
 			{
+				KCD2Online_CRITICAL_TRACE(
+				    "join.sandbox.unload.teardown.begin",
+				    "dropping multiplayer ownership before engine world teardown");
 				(void)execute_script(
 				    "if player and player.EnableFastTravel then "
 				    "player:EnableFastTravel(true) end");
-				m_remote_avatars.clear();
-				m_remote_backend.clear();
+				m_remote_avatars.abandon_world();
+				m_remote_backend.abandon_world();
+				KCD2Online_CRITICAL_TRACE(
+				    "join.sandbox.unload.avatars.abandoned",
+				    "remote actors left intact for CryEngine context destruction");
 				m_entities.restore_world();
 				m_profiles.reset();
+				KCD2Online_CRITICAL_TRACE(
+				    "join.sandbox.unload.teardown.complete",
+				    "world ownership restored; waiting for next engine frame");
+				return;
 			}
 		}
+		if (m_frame_sequence <= teardown_frame)
+			return;
 
 		auto *framework = CCryAction::GetInstance();
 		if (framework && framework->m_pGameContext)
 		{
 			// EndGameContext is unsafe from KCSE's PostUpdate callback. Queue the
-			// engine's map-unload command so CryEngine performs the transition in
-			// its deferred console-command phase on the following frame.
-			KCD2Online_JOIN_TRACE(
+			// engine's canonical disconnect command so CryEngine tears the game
+			// context down in its deferred console-command phase and performs its
+			// normal return-to-frontend transition. A bare `unload` leaves that UI
+			// transition to us and opening C_UIMenu manually during teardown has
+			// crashed inside the native menu code.
+			KCD2Online_CRITICAL_TRACE(
 			    "join.sandbox.unload.command.begin",
 			    std::format(
 			        "framework={} game_context={}",
 			        static_cast<void *>(framework),
 			        static_cast<void *>(framework->m_pGameContext)));
-			const auto queued = execute_console_command("unload", true);
+			const auto queued = execute_console_command("disconnect", true);
 			if (queued)
 			{
 				std::scoped_lock lock(m_cache_mutex);
 				m_unload_command_queued = true;
 			}
-			KCD2Online_JOIN_TRACE(
+			KCD2Online_CRITICAL_TRACE(
 			    queued
 			        ? "join.sandbox.unload.command.queued"
 			        : "join.sandbox.unload.command.failed",
 			    queued
-			        ? "Deferred native map unload was queued."
-			        : "Deferred native map unload could not be queued.");
+			        ? "Deferred native disconnect and frontend return were queued."
+			        : "Deferred native disconnect could not be queued.");
 		}
 		else
 		{
@@ -2791,37 +2768,14 @@ namespace kcd2o::kcse
 			std::scoped_lock lock(m_cache_mutex);
 			m_unload_pending = false;
 			m_unload_teardown_started = false;
+			m_unload_teardown_frame = 0;
 			m_unload_command_queued = false;
 			m_unload_deferred_logged = false;
 			m_sandbox_active = false;
 			m_sandbox_progress = {};
-			m_main_menu_pending = true;
 		}
-		KCD2Online_JOIN_TRACE(
+		KCD2Online_CRITICAL_TRACE(
 		    "join.sandbox.unload.complete",
-		    "Native world is unloaded; returning to the main menu.");
-	}
-
-	void native_runtime::open_main_menu_if_pending()
-	{
-		{
-			std::scoped_lock lock(m_cache_mutex);
-			if (!m_main_menu_pending)
-				return;
-		}
-#ifdef _WIN32
-		const auto opened = guarded_open_main_menu();
-#else
-		const auto opened = open_main_menu();
-#endif
-		if (!opened)
-			return;
-		{
-			std::scoped_lock lock(m_cache_mutex);
-			m_main_menu_pending = false;
-		}
-		KCD2Online_JOIN_TRACE(
-		    "join.sandbox.main-menu.opened",
-		    "Native root main menu is open.");
+		    "Native disconnect completed; CryEngine owns the frontend transition.");
 	}
 }

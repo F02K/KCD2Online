@@ -93,10 +93,10 @@ int main()
 	    archetypes,
 	    diagnostic_logging};
 	assert(compatible(&valid));
-	static_assert(kcd2o::kcd2o_version == "0.1.4");
+	static_assert(kcd2o::kcd2o_version == "0.1.5");
 	static_assert(kcd2o::kcd2o_version_major == 0);
 	static_assert(kcd2o::kcd2o_version_minor == 1);
-	static_assert(kcd2o::kcd2o_version_patch == 4);
+	static_assert(kcd2o::kcd2o_version_patch == 5);
 
 	auto wrong_version = valid;
 	++wrong_version.version_patch;

@@ -279,6 +279,18 @@ namespace kcd2o::kcse::join_trace
 		write_line(event, detail, location);
 	}
 
+	void write_critical(
+	    std::string_view event,
+	    std::string_view detail,
+	    std::source_location location) noexcept
+	{
+		// Disconnect crashes can occur after KCSE returns control to CryEngine,
+		// outside the guarded frame and after join diagnostics were deactivated.
+		// These sparse lifecycle markers therefore always reach durable storage.
+		write_line(event, detail, location);
+		flush(true);
+	}
+
 #ifdef _WIN32
 	long seh_filter(
 	    EXCEPTION_POINTERS *exception,
