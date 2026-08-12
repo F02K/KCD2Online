@@ -102,6 +102,7 @@ class BuildResult:
     kcse_client_pdb_path: Optional[Path] = None
     address_library_paths: Tuple[Path, ...] = ()
     game_data_generator_path: Optional[Path] = None
+    bootstrap_path: Optional[Path] = None
     server_game_data_dir: Optional[Path] = None
     package: Optional[PackageResult] = None
 
@@ -651,6 +652,42 @@ class BuildService:
             result,
             game_data_generator_path=artifact_dir / GAME_DATA_GENERATOR_EXECUTABLE,
         )
+        dotnet = shutil.which("dotnet")
+        if not dotnet:
+            raise BuildToolError(
+                "The .NET SDK was not found on PATH; it is required to build the version manager."
+            )
+        bootstrap_output = artifact_dir / "KCD2OnlineBootstrap"
+        log("=== Building external KCD2Online version manager ===")
+        self._run(
+            [
+                dotnet,
+                "publish",
+                str(
+                    self.project_root
+                    / "tools"
+                    / "KCD2Online.Bootstrap"
+                    / "KCD2Online.Bootstrap.csproj"
+                ),
+                "-c",
+                "Release",
+                "-r",
+                "win-x64",
+                "--self-contained",
+                "true",
+                "-o",
+                str(bootstrap_output),
+            ],
+            log,
+        )
+        bootstrap_path = bootstrap_output / "KCD2OnlineBootstrap.exe"
+        if not bootstrap_path.is_file():
+            raise BuildToolError(
+                "The KCD2Online version manager build did not produce {}.".format(
+                    bootstrap_path
+                )
+            )
+        result = replace(result, bootstrap_path=bootstrap_path)
         if game_root is not None:
             normalized_game_root = normalize_game_root(game_root)
             whgame = self.audit(
@@ -1098,6 +1135,10 @@ def client_deployment_layout(
             result.kcse_client_pdb_path,
             Path("Mods") / "KCD2Online" / "KCSE" / "Plugins" / "KCD2OnlineKCSEClient.pdb",
         ),
+        (
+            result.bootstrap_path,
+            Path("Mods") / "KCD2Online" / "KCD2OnlineBootstrap.exe",
+        ),
     )
     targets.extend(
         (source, destination)
@@ -1271,6 +1312,7 @@ def package_artifacts(
             result.server_path,
             result.server_path.with_suffix(".pdb"),
             result.game_data_generator_path,
+            result.bootstrap_path,
             project_root / "server.toml.example",
             project_root / "starter_profile.toml",
             archetype_source,

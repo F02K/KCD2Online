@@ -7,6 +7,10 @@
 
 #include "kcse/client_proxy.hpp"
 #include "multiplayer/ui_settings.hpp"
+#include "generated/kcd2o_version.hpp"
+
+#include <Windows.h>
+#include <shellapi.h>
 
 #include <Offsets/vtables/IUIElement.h>
 #include <Offsets/vtables/IUIElementEventListener.h>
@@ -15,8 +19,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <initializer_list>
+#include <filesystem>
 #include <mutex>
 #include <utility>
 
@@ -95,6 +101,54 @@ namespace big::native_multiplayer_menu
 			    nullptr,
 			    nullptr);
 			return result;
+		}
+
+		std::wstring wide_utf8(std::string_view value)
+		{
+			if (value.empty())
+				return {};
+			const auto size = MultiByteToWideChar(
+			    CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+			    static_cast<int>(value.size()), nullptr, 0);
+			if (size <= 0)
+				return {};
+			std::wstring result(static_cast<std::size_t>(size), L'\0');
+			MultiByteToWideChar(
+			    CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+			    static_cast<int>(value.size()), result.data(), size);
+			return result;
+		}
+
+		bool launch_version_switch(
+		    std::string_view version,
+		    std::string_view service_url)
+		{
+			if (version.empty() || version.size() > 32
+			    || !std::ranges::all_of(version, [](unsigned char character)
+			    {
+				    return std::isalnum(character) || character == '.' || character == '-';
+			    })
+			    || service_url.find('"') != std::string_view::npos)
+				return false;
+			std::wstring executable_path(32768, L'\0');
+			const auto length = GetModuleFileNameW(
+			    nullptr, executable_path.data(), static_cast<DWORD>(executable_path.size()));
+			if (!length || length >= executable_path.size())
+				return false;
+			executable_path.resize(length);
+			const auto game_root = std::filesystem::path(executable_path)
+			                           .parent_path().parent_path().parent_path();
+			const auto bootstrap = game_root / "Mods" / "KCD2Online"
+			    / "KCD2OnlineBootstrap.exe";
+			if (!std::filesystem::is_regular_file(bootstrap))
+				return false;
+			const auto parameters = std::wstring(L"client \"") + wide_utf8(version)
+			    + L"\" \"" + game_root.wstring() + L"\" --wait-pid "
+			    + std::to_wstring(GetCurrentProcessId()) + L" --relaunch --api \""
+			    + wide_utf8(service_url) + L"\"";
+			return reinterpret_cast<std::intptr_t>(ShellExecuteW(
+			           nullptr, L"open", bootstrap.c_str(), parameters.c_str(),
+			           game_root.c_str(), SW_SHOWNORMAL)) > 32;
 		}
 
 		std::string clipboard_text()
@@ -626,7 +680,10 @@ namespace big::native_multiplayer_menu
 					    settings_locked);
 				}
 				page.add_button(std::string(connect_button),
-				    ingame_ui::localized("menu.action.connect"),
+				    server.version == kcd2o::kcd2o_version
+				        ? ingame_ui::localized("menu.action.connect")
+				        : ingame_ui::localized(
+				            "menu.action.switch_version", {{"version", server.version}}),
 				    settings_locked || settings.display_name.empty()
 				        || (server.password_protected && password.empty()));
 				page.add_button(std::string(favorite_button),
@@ -830,6 +887,17 @@ namespace big::native_multiplayer_menu
 			}
 			options.address = selected->address;
 			options.server_id = selected->id;
+			if (selected->version != kcd2o::kcd2o_version)
+			{
+				const auto launched = launch_version_switch(
+				    selected->version, options.account_service_url);
+				std::scoped_lock lock(value.mutex);
+				value.local_feedback_key = launched
+				    ? "menu.feedback.close_for_update"
+				    : "menu.feedback.update_failed";
+				value.rebuild_requested = true;
+				return;
+			}
 			if (selected->password_protected)
 			{
 				if (options.password.empty())

@@ -4,8 +4,12 @@
 #include "server/server_core.hpp"
 #include "server/backend_client.hpp"
 
+#include <Windows.h>
+#include <shellapi.h>
+
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
@@ -22,6 +26,59 @@
 
 namespace
 {
+	std::wstring wide_utf8(std::string_view value)
+	{
+		if (value.empty())
+			return {};
+		const auto size = MultiByteToWideChar(
+		    CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+		    static_cast<int>(value.size()), nullptr, 0);
+		if (size <= 0)
+			return {};
+		std::wstring result(static_cast<std::size_t>(size), L'\0');
+		MultiByteToWideChar(
+		    CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+		    static_cast<int>(value.size()), result.data(), size);
+		return result;
+	}
+
+	std::filesystem::path executable_directory()
+	{
+		std::wstring buffer(32768, L'\0');
+		const auto length = GetModuleFileNameW(
+		    nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+		if (length == 0 || length >= buffer.size())
+			return {};
+		buffer.resize(length);
+		return std::filesystem::path(buffer).parent_path();
+	}
+
+	bool launch_server_update(
+	    std::string_view version,
+	    std::string_view service_url)
+	{
+		if (version.empty() || version.size() > 32
+		    || !std::ranges::all_of(version, [](unsigned char character)
+		    {
+			    return std::isalnum(character) || character == '.' || character == '-';
+		    })
+		    || service_url.find('"') != std::string_view::npos)
+			return false;
+		const auto root = executable_directory();
+		if (root.empty())
+			return false;
+		const auto bootstrap = root / "KCD2OnlineBootstrap.exe";
+		if (!std::filesystem::is_regular_file(bootstrap))
+			return false;
+		const auto parameters = std::wstring(L"server \"") + wide_utf8(version)
+		    + L"\" \"" + root.wstring() + L"\" --wait-pid "
+		    + std::to_wstring(GetCurrentProcessId()) + L" --relaunch --api \""
+		    + wide_utf8(service_url) + L"\"";
+		return reinterpret_cast<std::intptr_t>(ShellExecuteW(
+		           nullptr, L"open", bootstrap.c_str(), parameters.c_str(),
+		           root.c_str(), SW_SHOWNORMAL)) > 32;
+	}
+
 	struct command_queue
 	{
 		std::mutex mutex;
@@ -37,7 +94,7 @@ namespace
 		       "dummy spawn [name], dummy remove <player_id>, "
 		       "entities <all|humans|animals> <disable|enable>, "
 		       "entities status, time <hours>, timescale <ratio>, "
-		       "weather <id> [transition_seconds], stop, help\n";
+		       "weather <id> [transition_seconds], update <version>, stop, help\n";
 		std::cout
 		    << "Property: property list [filter], property show <property_id>, "
 		       "property owner <property_id> <player_id>, property grant "
@@ -643,6 +700,25 @@ int main(int argc, char **argv)
 				{
 					core.shutdown("server stopped");
 					running = false;
+				}
+				else if (command == "update")
+				{
+					std::string version;
+					input >> version;
+					if (version.empty())
+					{
+						std::cout << "usage: update <version>\n";
+					}
+					else if (!launch_server_update(version, config.account_service_url))
+					{
+						std::cerr << "could not start KCD2OnlineBootstrap.exe\n";
+					}
+					else
+					{
+						std::cout << "updating to KCD2Online " << version << "...\n";
+						core.shutdown("server update");
+						running = false;
+					}
 				}
 				else if (command == "help")
 				{

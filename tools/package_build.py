@@ -108,6 +108,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
         address_library_paths=_address_libraries(build_dir, options.config),
         game_data_generator_path=generator_path,
+        bootstrap_path=_artifact(
+            build_dir, options.config, "KCD2OnlineBootstrap.exe"
+        ),
         server_game_data_dir=server_game_data_dir,
     )
     if not server_game_data_dir.is_dir():

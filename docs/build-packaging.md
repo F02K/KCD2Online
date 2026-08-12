@@ -31,6 +31,7 @@ out/package/release/
 |   |   |-- Mods/KCD2Online/KCSE/Plugins/
 |   |   |   |-- KCD2OnlineKCSEClient.dll
 |   |   |   `-- KCD2OnlineKCSEClient.pdb
+|   |   |-- Mods/KCD2Online/KCD2OnlineBootstrap.exe
 |   |   |-- Mods/KCD2Online/mod.manifest
 |   |   |-- Mods/KCD2Online/Localization/
 |   |   |   `-- *_xml.pak
@@ -44,6 +45,7 @@ out/package/release/
 |-- server/
 |   |-- KCD2OnlineServer.exe
 |   |-- KCD2OnlineServer.pdb
+|   |-- KCD2OnlineBootstrap.exe
 |   |-- KCD2OnlineGameDataGenerator.exe
 |   |-- start_server.bat
 |   |-- README.txt
@@ -87,6 +89,28 @@ The loose client tree and ZIP are built from the same deployment mapping used
 by the build tool. Changing a deploy destination therefore changes package
 generation through the same code path instead of requiring a second manually
 maintained file list.
+
+## Version switching
+
+Both release ZIPs contain the external `KCD2OnlineBootstrap.exe`. Release builds
+produce it as a self-contained Windows x64 Native-AOT executable, so players and
+server operators do not need to install .NET.
+
+The server browser keeps exact product-version compatibility. Selecting a server
+with another version starts the bootstrapper for that exact version; after the
+game closes it downloads the signed client manifest and package, verifies the
+archive plus every contained file, activates it, and restarts the game. The
+dedicated-server console provides the equivalent command:
+
+```text
+update <version>
+```
+
+Downloads resume from partial files. Replaced and removed managed files are
+backed up under `%LOCALAPPDATA%\KCD2Online\installations`; a failed activation
+rolls back files already changed. The currently running bootstrapper itself is
+kept in place during a switch, making the version manager independent from the
+older client/server version it installs.
 
 ## Client ZIP
 
