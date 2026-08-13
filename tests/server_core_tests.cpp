@@ -365,6 +365,21 @@ int main()
 	temporary_world parsed_config_world;
 	{
 		const auto path = parsed_config_world.path / "server.toml";
+		const auto game_data = parsed_config_world.path / "game_data";
+		std::filesystem::create_directories(game_data);
+		constexpr std::string_view custom_soul =
+		    "11111111-2222-4333-8444-555555555555";
+		{
+			std::ofstream catalog(game_data / "npc_archetypes.json");
+			catalog
+			    << "{\"schema_version\":2,"
+			       "\"retail_build\":\"1308617_856\","
+			       "\"catalog_fingerprint\":\"22f4d6dc5438ecab\","
+			       "\"default_soul_id\":\""
+			    << npc::default_soul_id << "\","
+			       "\"soul_ids\":[\""
+			    << npc::default_soul_id << "\",\"" << custom_soul << "\"]}";
+		}
 		std::filesystem::copy_file(
 		    std::filesystem::path(KCD2Online_SOURCE_DIR) / "starter_profile.toml",
 		    parsed_config_world.path / "starter_profile.toml");
@@ -372,6 +387,8 @@ int main()
 		output
 		    << "[server]\n"
 		       "level_id = \"sandbox\"\n"
+		       "default_avatar_archetype = \"11111111-2222-4333-8444-555555555555\"\n"
+		       "allowed_avatar_archetypes = [\"11111111-2222-4333-8444-555555555555\"]\n"
 		       "max_players = 50000\n"
 		       "world_directory = \"world\"\n"
 		       "disable_non_player_entities = true\n"
@@ -406,6 +423,8 @@ int main()
 		output.close();
 		const auto parsed = load_server_config(path);
 		assert(parsed.disable_human_npcs);
+		assert(parsed.default_avatar_archetype == custom_soul);
+		assert(parsed.known_avatar_archetypes.contains(std::string(custom_soul)));
 		assert(parsed.max_players == 50'000);
 		assert(parsed.disable_animal_npcs);
 		assert(parsed.world_directory

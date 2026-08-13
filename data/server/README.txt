@@ -2,8 +2,10 @@ KCD2Online dedicated server
 =======================
 
 IMPORTANT: game_data is deliberately not included in the GitHub release ZIP.
-It contains files copied and derived from a local Kingdom Come: Deliverance II
-installation, including WHGame.dll, and must not be redistributed.
+It contains minimal compatibility metadata derived locally from a legitimate
+Kingdom Come: Deliverance II installation. It contains no game executable,
+DLL, PAK, XML, audio, image, or other source asset. Keep it private to the
+server operator and do not publish it.
 
 First-time setup
 ----------------
@@ -12,8 +14,8 @@ First-time setup
    KCD2OnlineGameDataGenerator.exe once.
 2. The tool auto-detects Steam installations. If detection fails, enter the
    KingdomComeDeliverance2 installation directory when prompted.
-3. Copy the generated game_data folder together with these server files to the
-   machine that will host the dedicated server.
+3. If you host on another machine, privately copy the generated game_data
+   folder together with these server files to that machine.
 4. Run start_server.bat. On first launch it creates server.toml from
    server.toml.example automatically. Edit server.toml as needed. The default
    [property].game_data path already points at the generated folder beside it.

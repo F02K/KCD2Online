@@ -2,13 +2,12 @@
 
 #include "multiplayer/protocol.hpp"
 
+#include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 
 #include <cmath>
 #include <fstream>
-#include <iterator>
 #include <limits>
-#include <regex>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -44,24 +43,28 @@ namespace kcd2o::server
 			std::ifstream input(path, std::ios::binary);
 			if (!input)
 				return;
-			const std::string text{
-			    std::istreambuf_iterator<char>(input),
-			    std::istreambuf_iterator<char>()};
-			if (!text.contains(
-			        "\"retail_build\": \"1308617_856\"")
-			    || !text.contains(
-			        "\"catalog_fingerprint\": \"22f4d6dc5438ecab\""))
+			const auto document = nlohmann::json::parse(
+			    input, nullptr, false);
+			if (document.is_discarded() || !document.is_object()
+			    || document.value("schema_version", 0) != 2
+			    || document.value("retail_build", std::string{})
+			        != "1308617_856"
+			    || document.value("catalog_fingerprint", std::string{})
+			        != "22f4d6dc5438ecab"
+			    || document.value("default_soul_id", std::string{})
+			        != npc::default_soul_id
+			    || !document.contains("soul_ids")
+			    || !document["soul_ids"].is_array())
 			{
 				return;
 			}
-			const std::regex soul_id(
-			    R"catalog("soul_id"\s*:\s*"([0-9a-fA-F-]{36})")catalog");
-			for (auto iterator =
-			         std::sregex_iterator(text.begin(), text.end(), soul_id);
-			     iterator != std::sregex_iterator();
-			     ++iterator)
+			for (const auto &entry : document["soul_ids"])
 			{
-				output.insert((*iterator)[1].str());
+				if (!entry.is_string())
+					continue;
+				auto soul_id = entry.get<std::string>();
+				if (is_uuid(soul_id))
+					output.insert(std::move(soul_id));
 			}
 		}
 	}
@@ -187,7 +190,7 @@ namespace kcd2o::server
 		}
 		load_catalog_ids(
 		    std::filesystem::absolute(path).parent_path()
-		        / "npc_archetypes.json",
+		        / "game_data" / "npc_archetypes.json",
 		    config.known_avatar_archetypes);
 		config.max_player_speed_mps =
 		    (*server)["max_player_speed_mps"].value_or(config.max_player_speed_mps);

@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import os
 import pathlib
 import shutil
@@ -150,16 +149,6 @@ def _pe_identity(path: pathlib.Path) -> PeIdentity:
         raise GameDataError(f"could not read {path}: {exc}") from exc
 
 
-def _numbers(value: str, expected: int) -> Optional[list[float]]:
-    try:
-        result = [float(component) for component in value.split(",")]
-    except ValueError:
-        return None
-    if len(result) != expected or not all(math.isfinite(component) for component in result):
-        return None
-    return result
-
-
 def _valid_entity_guid(value: str) -> bool:
     parts = value.split("-")
     if tuple(map(len, parts)) != (8, 4, 4):
@@ -199,8 +188,6 @@ def _read_level_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
 
 def _catalog_level(level_id: str, level_name: str, pak: pathlib.Path) -> dict:
     by_guid: dict[str, dict] = {}
-    spawners: dict[str, dict] = {}
-    relevant_xml = hashlib.sha256()
     try:
         with zipfile.ZipFile(pak) as archive:
             for info in _level_xml_entries(archive):
@@ -210,9 +197,6 @@ def _catalog_level(level_id: str, level_name: str, pak: pathlib.Path) -> dict:
                     root = ET.fromstring(payload)
                 except (KeyError, ET.ParseError) as exc:
                     raise GameDataError(f"could not parse {name} in {pak}: {exc}") from exc
-                relevant_xml.update(name.lower().encode("utf-8"))
-                relevant_xml.update(b"\0")
-                relevant_xml.update(payload)
                 for node in root.findall(".//Entity"):
                     entity_class = node.attrib.get("EntityClass", "")
                     lowered_class = entity_class.lower()
@@ -220,59 +204,28 @@ def _catalog_level(level_id: str, level_name: str, pak: pathlib.Path) -> dict:
                         kind = "human"
                     elif lowered_class in ANIMAL_ENTITY_CLASSES:
                         kind = "animal"
-                    elif lowered_class == "animalspawner":
-                        kind = "animal_spawner"
                     else:
                         continue
                     guid = node.attrib.get("EntityGuid", "").lower()
                     if not _valid_entity_guid(guid):
                         continue
                     entry = {
-                        "canonical_id": f"{level_id}:{guid}",
                         "entity_guid": guid,
-                        "entity_class": entity_class,
-                        "name": node.attrib.get("Name", ""),
-                        "editor_layer": node.attrib.get("EditorLayer", ""),
+                        "kind": kind,
                     }
-                    position = _numbers(node.attrib.get("Pos", ""), 3)
-                    rotation = _numbers(node.attrib.get("Rotate", ""), 4)
-                    if position is not None:
-                        entry["position"] = position
-                    if rotation is not None:
-                        entry["rotation"] = rotation
-                    if kind == "animal_spawner":
-                        properties = node.find("Properties")
-                        if properties is not None and properties.attrib:
-                            entry["properties"] = dict(sorted(properties.attrib.items()))
-                        spawners.setdefault(guid, entry)
-                    else:
-                        entry["kind"] = kind
-                        previous = by_guid.get(guid)
-                        if previous is not None and (
-                            previous["kind"] != kind
-                            or previous["entity_class"].lower() != lowered_class
-                        ):
-                            raise GameDataError(
-                                f"level {level_name} reuses NPC GUID {guid} with incompatible classes"
-                            )
-                        by_guid.setdefault(guid, entry)
+                    previous = by_guid.get(guid)
+                    if previous is not None and previous["kind"] != kind:
+                        raise GameDataError(
+                            f"level {level_name} reuses NPC GUID {guid} with incompatible kinds"
+                        )
+                    by_guid.setdefault(guid, entry)
     except (OSError, zipfile.BadZipFile) as exc:
         raise GameDataError(f"could not scan level archive {pak}: {exc}") from exc
 
-    npcs = sorted(by_guid.values(), key=lambda item: item["canonical_id"])
-    authored_spawners = sorted(
-        spawners.values(), key=lambda item: item["canonical_id"]
-    )
+    npcs = sorted(by_guid.values(), key=lambda item: item["entity_guid"])
     return {
         "level_id": level_id,
-        "level_name": level_name,
-        "source": f"Data/Levels/{level_name}/level.pak",
-        "relevant_xml_sha256": relevant_xml.hexdigest(),
-        "human_count": sum(item["kind"] == "human" for item in npcs),
-        "animal_count": sum(item["kind"] == "animal" for item in npcs),
-        "animal_spawner_count": len(authored_spawners),
         "npcs": npcs,
-        "animal_spawners": authored_spawners,
     }
 
 
@@ -355,17 +308,17 @@ def generate_server_game_data(
         tempfile.mkdtemp(prefix=output.name + ".", dir=str(output.parent))
     )
     try:
-        shutil.copy2(whgame, staging / "WHGame.dll")
-
         archetypes = generate(tables)
         _write_json(
             staging / "npc_archetypes.json",
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "retail_build": "1308617_856",
                 "catalog_fingerprint": fingerprint(archetypes),
                 "default_soul_id": DEFAULT_SOUL_ID,
-                "archetypes": archetypes,
+                # The dedicated server only validates configured avatar IDs.
+                # Descriptive retail fields stay in the local game installation.
+                "soul_ids": sorted(record["soul_id"] for record in archetypes),
             },
         )
 

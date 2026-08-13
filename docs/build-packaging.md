@@ -49,9 +49,7 @@ out/package/release/
 |   |-- README.txt
 |   |-- server.toml.example
 |   |-- starter_profile.toml
-|   |-- npc_archetypes.json
 |   |-- game_data/
-|   |   |-- WHGame.dll
 |   |   |-- content_manifest.json
 |   |   |-- npc_archetypes.json
 |   |   |-- npc_world_catalog.json
@@ -71,17 +69,14 @@ out/package/release/
 When the build tool has a selected KCD2 installation, it audits that exact
 `WHGame.dll` before creating `server/game_data`. The generated content manifest
 hashes the DLL, `Tables.pak`, every production `level.pak`, and installed mod
-PAKs. The NPC world catalog gives authored humans and animals a stable
-`level_id:entity_guid` identity and records animal-spawner metadata. Property
-catalogs are generated for all three production levels.
+PAKs. The NPC world catalog contains only the authored Entity GUID and human or
+animal kind needed by the server allowlist. The human-Soul catalog contains
+only the IDs needed to validate configured avatars. Property catalogs are
+generated for all three production levels.
 
-The DLL copy is deliberately server-only and is never added to either release
-ZIP.
-It comes from the builder's local installation, so locally produced packages
-containing it must not be redistributed unless the game publisher's terms
-permit that. The loose local server tree still receives `game_data` exactly as
-before. The server ZIP always omits the entire directory, even when it exists in
-the local package tree.
+The generator audits and hashes the installed DLL in place. It never copies the
+DLL, PAKs, source XML, or other game assets. The server ZIP also omits the entire
+locally generated `game_data` directory.
 
 The loose client tree and ZIP are built from the same deployment mapping used
 by the build tool. Changing a deploy destination therefore changes package
@@ -113,8 +108,9 @@ configuration examples, `start_server.bat`, diagnostic tools, and the standalone
 
 Before the first server start, run the generator once on a Windows PC with KCD2
 installed. It auto-detects Steam or prompts for the game directory, audits the
-installed `WHGame.dll`, and writes `game_data` next to itself. Transfer that
-directory with the server files if the host is a different machine.
+installed `WHGame.dll`, and writes minimal compatibility metadata to `game_data`
+next to itself. If the host is a different machine, keep that directory private
+to the server operator while transferring it with the server files.
 
 The default `[property].game_data = "game_data"` setting makes the server load
 the generated `property_catalog_<level_id>.pb` on first use of a world. Runtime

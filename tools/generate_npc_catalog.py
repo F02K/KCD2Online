@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the KCD2Online human Soul catalog from the supported Tables.pak."""
+"""Generate a minimal local server avatar allowlist from Tables.pak."""
 
 from __future__ import annotations
 
@@ -88,12 +88,7 @@ def main() -> int:
     parser.add_argument(
         "--json",
         type=pathlib.Path,
-        default=pathlib.Path("data/npc_archetypes.json"),
-    )
-    parser.add_argument(
-        "--markdown",
-        type=pathlib.Path,
-        default=pathlib.Path("docs/npc-archetypes.md"),
+        default=pathlib.Path("game_data/npc_archetypes.json"),
     )
     args = parser.parse_args()
     records = generate(args.tables_pak)
@@ -102,11 +97,11 @@ def main() -> int:
     args.json.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "retail_build": "1308617_856",
                 "catalog_fingerprint": fingerprint(records),
                 "default_soul_id": DEFAULT_SOUL_ID,
-                "archetypes": records,
+                "soul_ids": sorted(record["soul_id"] for record in records),
             },
             indent=2,
             ensure_ascii=False,
@@ -115,23 +110,6 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    args.markdown.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "# NPC archetypes",
-        "",
-        "Generated from the supported retail `Data/Tables.pak`. "
-        f"Human Souls: {len(records)}. Catalog fingerprint: "
-        f"`{fingerprint(records)}`.",
-        "",
-        "| Soul name | Character | Type | Soul ID |",
-        "|---|---|---|---|",
-    ]
-    lines.extend(
-        f"| {item['soul_name']} | {item['character_id']} | "
-        f"{item['archetype_name']} | `{item['soul_id']}` |"
-        for item in records
-    )
-    args.markdown.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return 0
 
 

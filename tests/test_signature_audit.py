@@ -17,15 +17,17 @@ class SignatureArchitectureTests(unittest.TestCase):
         self.assertIn('set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")', cmake)
         self.assertIn("set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)", cmake)
 
-    def test_registry_is_the_single_source_for_68_signatures(self) -> None:
+    def test_registry_is_the_single_source_for_67_signatures(self) -> None:
         core = (
             PROJECT_ROOT / "src" / "signatures" / "signature_core.cpp"
         ).read_text(encoding="utf-8")
         init = (PROJECT_ROOT / "src" / "kcd2_init.cpp").read_text(encoding="utf-8")
         entries = re.findall(r'signature_spec\{"([^"]+)",\s*"([^"]+)"', core)
 
-        self.assertEqual(len(entries), 68)
-        self.assertEqual(len({name for name, _ in entries}), 68)
+        self.assertEqual(len(entries), 67)
+        self.assertEqual(len({name for name, _ in entries}), 67)
+        self.assertNotIn("CXConsole_RegisterVar", core)
+        self.assertNotIn("hook_CXConsole_AddCommand", init)
         self.assertIn("static_assert(signature_registry.size()", core)
         self.assertNotIn("kcd2_address::scan(", init)
         self.assertNotIn(".get_call()", init)

@@ -1846,55 +1846,6 @@ namespace big
 					ImGui::EndMenu();
 				}
 
-				if (ImGui::BeginMenu("Dumps"))
-				{
-					if (ImGui::Button("Dump CVars and Console Commands to Files"))
-					{
-						{
-							const auto path = g_file_manager.get_project_file("cvars.md").get_path();
-							std::ofstream cvars_file(path);
-							if (cvars_file)
-							{
-								cvars_file << "# CVars (" << g_cvar_name_to_cvar_data.size() << ")\n\n";
-								for (const auto& [name, cvar_data] : g_cvar_name_to_cvar_data)
-								{
-									cvars_file << "- **" << name << "**:\n\n"
-									           << "  - **Default Value:** `" << cvar_data.m_default_value << "`\n\n"
-									           << "  - **Description:**\n\n"
-									           << "    ```text\n"
-									           << cvar_data.m_help_text << "\n"
-									           << "    ```\n\n";
-								}
-
-
-								LOG(INFO) << "Dumped CVars to " << (char*)path.u8string().c_str();
-							}
-						}
-
-						{
-							const auto path = g_file_manager.get_project_file("console_commands.md").get_path();
-							std::ofstream commands_file(path);
-							if (commands_file)
-							{
-								commands_file << "# Console Commands (" << g_console_command_name_to_help_text.size() << ")\n\n";
-								for (const auto& [name, help_text] : g_console_command_name_to_help_text)
-								{
-									commands_file << "- **" << name << "**:\n\n"
-									              << "  - **Description:**\n\n"
-									              << "    ```text\n"
-									              << help_text << "\n"
-									              << "    ```\n\n";
-								}
-
-								LOG(INFO) << "Dumped Console Commands to " << (char*)path.u8string().c_str();
-							}
-						}
-					}
-
-
-					ImGui::EndMenu();
-				}
-
 				if (ImGui::BeginMenu("Mods"))
 				{
 					ImGui::Text("Vanilla System Mods");

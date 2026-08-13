@@ -653,9 +653,7 @@ class BuildService:
         )
         if game_root is not None:
             normalized_game_root = normalize_game_root(game_root)
-            whgame = self.audit(
-                profile, normalized_game_root, log, build_result=result
-            )
+            self.audit(profile, normalized_game_root, log, build_result=result)
             log("=== Generating dedicated-server game metadata ===")
             game_data_dir = artifact_dir / SERVER_GAME_DATA_DIRECTORY
             property_catalog_tool = (
@@ -680,14 +678,6 @@ class BuildService:
                 ],
                 log,
             )
-            generated_whgame = game_data_dir / "WHGame.dll"
-            if (
-                not generated_whgame.is_file()
-                or generated_whgame.stat().st_size != whgame.stat().st_size
-            ):
-                raise BuildToolError(
-                    "Dedicated-server game data did not contain the audited WHGame.dll."
-                )
             result = replace(result, server_game_data_dir=game_data_dir)
         package = package_artifacts(result, self.project_root)
         log("Packaged client, server, and tests under {}.".format(package.root))
@@ -1257,23 +1247,12 @@ def package_artifacts(
             candidate = artifact_dir / SERVER_GAME_DATA_DIRECTORY
             if candidate.is_dir():
                 game_data_dir = candidate
-        generated_archetypes = (
-            game_data_dir / "npc_archetypes.json"
-            if game_data_dir is not None
-            else None
-        )
-        archetype_source = (
-            generated_archetypes
-            if generated_archetypes is not None and generated_archetypes.is_file()
-            else project_root / "data" / "npc_archetypes.json"
-        )
         server_sources = (
             result.server_path,
             result.server_path.with_suffix(".pdb"),
             result.game_data_generator_path,
             project_root / "server.toml.example",
             project_root / "starter_profile.toml",
-            archetype_source,
             project_root / "data" / "server" / "start_server.bat",
             project_root / "data" / "server" / "README.txt",
         )
@@ -1289,7 +1268,6 @@ def package_artifacts(
 
         if game_data_dir is not None:
             required_game_data = (
-                "WHGame.dll",
                 "content_manifest.json",
                 "npc_archetypes.json",
                 "npc_world_catalog.json",
@@ -1308,7 +1286,10 @@ def package_artifacts(
                         "\n".join(missing_game_data)
                     )
                 )
-            shutil.copytree(game_data_dir, server_root / "game_data")
+            packaged_game_data = server_root / "game_data"
+            packaged_game_data.mkdir()
+            for name in required_game_data:
+                shutil.copy2(game_data_dir / name, packaged_game_data / name)
 
         if result.audit_path is not None:
             audit_sources = (result.audit_path, result.audit_path.with_suffix(".pdb"))

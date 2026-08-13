@@ -434,9 +434,6 @@ class PackagingTests(unittest.TestCase):
         (project / "data" / "server" / "README.txt").write_text(
             "Generate game_data first.\n", encoding="utf-8"
         )
-        (project / "data" / "npc_archetypes.json").write_text(
-            "{}\n", encoding="utf-8"
-        )
         (project / "data" / "lang").mkdir()
         (project / "data" / "lang" / "en.lang").write_text(
             "menu.title=Multiplayer\n", encoding="utf-8"
@@ -645,7 +642,9 @@ class PackagingTests(unittest.TestCase):
             game_data = result.dll_path.parent / "server_game_data"
             game_data.mkdir()
             required = {
-                "WHGame.dll": b"audited-game-code",
+                # Old generator output or manually added game files must never
+                # cross the explicit metadata allowlist during packaging.
+                "WHGame.dll": b"stale-game-code",
                 "content_manifest.json": b'{"content_fingerprint":"test"}\n',
                 "npc_archetypes.json": b'{"generated":true}\n',
                 "npc_world_catalog.json": b'{"levels":[]}\n',
@@ -662,16 +661,20 @@ class PackagingTests(unittest.TestCase):
                 root / "package",
             )
 
-            self.assertEqual(
-                (package.server_root / "game_data" / "WHGame.dll").read_bytes(),
-                b"audited-game-code",
+            self.assertFalse(
+                (package.server_root / "game_data" / "WHGame.dll").exists()
             )
             with zipfile.ZipFile(package.server_zip) as archive:
                 self.assertFalse(
                     any("/game_data/" in name for name in archive.namelist())
                 )
+            self.assertFalse((package.server_root / "npc_archetypes.json").exists())
             self.assertEqual(
-                (package.server_root / "npc_archetypes.json").read_bytes(),
+                (
+                    package.server_root
+                    / "game_data"
+                    / "npc_archetypes.json"
+                ).read_bytes(),
                 b'{"generated":true}\n',
             )
 

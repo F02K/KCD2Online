@@ -2,6 +2,12 @@
 
 Experimental multiplayer for Kingdom Come: Deliverance II.
 
+KCD2Online is an independent, unofficial, non-commercial fan modification. It
+requires a legitimate copy of Kingdom Come: Deliverance II, works only with
+that game, and does not bypass DRM, platform authentication, or paid-content
+licensing. Warhorse Studios, PLAION, Deep Silver, and the platform operators do
+not endorse or operate this project.
+
 > [!WARNING]
 > KCD2Online **v0.1.5 is a prototype**, not a production-ready multiplayer mod.
 > Expect breaking changes, incomplete world simulation, compatibility limits,
@@ -121,10 +127,14 @@ SHA256SUMS.txt
 ```
 
 When a local KCD2 installation is selected, the server package additionally
-contains `game_data/WHGame.dll`, a hashed content manifest, generated human
-Soul and authored human/animal NPC catalogs, and property catalogs for all
-production levels. The DLL is audited before it is copied and is not included
-in the client ZIP.
+contains a hashed content manifest, a minimal human-Soul ID allowlist, a minimal
+authored human/animal NPC allowlist, and property catalogs for all production
+levels. The installed `WHGame.dll` is audited and hashed in place but is never
+copied into `game_data` or any package.
+
+KCD2Online does not ship game executables, DLLs, PAKs, XML, audio, images, or
+other source assets. Locally generated `game_data` is private compatibility
+metadata for the server operator and must not be published.
 
 The client ZIP starts with `KingdomComeDeliverance2/` and mirrors the same
 relative paths used by `Build & Deploy`. It can therefore be extracted directly

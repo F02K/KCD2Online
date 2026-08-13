@@ -1034,14 +1034,9 @@ namespace big
 
 	bool engine_console_has_command(std::string_view name)
 	{
-		if (g_console_command_name_to_help_text.contains(std::string(name)))
-		{
-			return true;
-		}
-
-		// A late attach cannot replay commands registered before our hooks were
-		// enabled. These two built-ins are verified for the signature-gated retail
-		// image and are the only vanilla commands used by the sandbox wrapper.
+		// These are the only retail commands used by the multiplayer sandbox
+		// wrapper. Avoid intercepting every command registration just to discover
+		// or document unrelated internal commands.
 		return g_CXConsole && (name == "map" || name == "unload");
 	}
 
@@ -1159,63 +1154,6 @@ namespace big
 				    command);
 			}
 		}
-	}
-
-	std::string to_string_us(float value)
-	{
-		std::ostringstream oss;
-		oss.imbue(std::locale("C")); // Ensures decimal point is '.'
-		oss << value;
-		return oss.str();
-	}
-
-	static __int64 hook_CXConsole_RegisterVar(__int64 a1, cry_cvar *pCvar, __int64 pChangeFunc)
-	{
-		// https://github.com/ValtoGameEngines/CryEngine/blob/d9d2c9f000836f0676e65a90bed40dcc3b1451eb/Code/CryEngine/CryCommon/CrySystem/IConsole.h#L612
-		const char *cvar_name      = pCvar->GetName();
-		const char *cvar_help_text = pCvar->GetHelpText();
-		const auto cvar_type       = pCvar->GetType();
-		std::string default_value  = "";
-		constexpr int CVAR_FLOAT   = 2;
-		constexpr int CVAR_INT     = 1;
-		constexpr int CVAR_STRING  = 3;
-		if (cvar_type == CVAR_FLOAT || cvar_type == CVAR_INT)
-		{
-			default_value = to_string_us(pCvar->GetFVal());
-		}
-		else if (cvar_type == CVAR_STRING)
-		{
-			default_value = pCvar->GetString();
-		}
-
-		g_cvar_name_to_cvar_data[cvar_name] = {cvar_help_text, default_value};
-		g_cvars[cvar_name] = pCvar;
-
-		const auto res = big::g_hooking->get_original<hook_CXConsole_RegisterVar>()(a1, pCvar, pChangeFunc);
-
-		return res;
-	}
-
-	static __int64 hook_CXConsole_AddCommandScript(__int64 a1, const char *sName, __int64 pFunc, int nFlags, const char *sHelp)
-	{
-		if (sName)
-		{
-			g_console_command_name_to_help_text[sName] = sHelp ? sHelp : "";
-		}
-
-		const auto res = big::g_hooking->get_original<hook_CXConsole_AddCommandScript>()(a1, sName, pFunc, nFlags, sHelp);
-		return res;
-	}
-
-	static __int64 hook_CXConsole_AddCommandCommand(__int64 a1, const char *sName, __int64 pFunc, int nFlags, const char *sHelp)
-	{
-		if (sName)
-		{
-			g_console_command_name_to_help_text[sName] = sHelp ? sHelp : "";
-		}
-
-		const auto res = big::g_hooking->get_original<hook_CXConsole_AddCommandCommand>()(a1, sName, pFunc, nFlags, sHelp);
-		return res;
 	}
 
 	static __int64 hook_CXConsole_Ctor(__int64 a1)
@@ -2713,16 +2651,6 @@ namespace big
 		}
 
 		{
-			const auto ptr = kcd2_address::resolved("CXConsole_RegisterVar");
-			if (!ptr)
-			{
-				LOG(ERROR) << "Failed to find CXConsole_RegisterVar";
-				return;
-			}
-			big::hooking::detour_hook_helper::add<hook_CXConsole_RegisterVar>("hook_CXConsole_RegisterVar", ptr);
-		}
-
-		{
 			const auto ptr = CXConsole_Ctor;
 			if (!ptr)
 			{
@@ -2730,8 +2658,6 @@ namespace big
 				return;
 			}
 			big::hooking::detour_hook_helper::add<hook_CXConsole_Ctor>("hook_CXConsole_Ctor", ptr);
-			big::hooking::detour_hook_helper::add<hook_CXConsole_AddCommandScript>("hook_CXConsole_AddCommandScript", CXConsoleVFTable[32]);
-			big::hooking::detour_hook_helper::add<hook_CXConsole_AddCommandCommand>("hook_CXConsole_AddCommandCommand", CXConsoleVFTable[33]);
 		}
 
 		{

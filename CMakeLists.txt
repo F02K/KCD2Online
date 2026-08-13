@@ -405,8 +405,7 @@ add_custom_command(TARGET KCD2OnlineServer POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PROJECT_SOURCE_DIR}/starter_profile.toml"
         "$<TARGET_FILE_DIR:KCD2OnlineServer>/starter_profile.toml"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${PROJECT_SOURCE_DIR}/data/npc_archetypes.json"
+    COMMAND "${CMAKE_COMMAND}" -E rm -f
         "$<TARGET_FILE_DIR:KCD2OnlineServer>/npc_archetypes.json"
 )
 
@@ -973,9 +972,6 @@ if (BUILD_TESTING)
     )
     set_property(TARGET KCD2OnlineNpcCatalogTests PROPERTY CXX_STANDARD 23)
     target_link_libraries(KCD2OnlineNpcCatalogTests PRIVATE KCD2OnlineNpcCatalog)
-    target_compile_definitions(KCD2OnlineNpcCatalogTests PRIVATE
-        "KCD2Online_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\""
-    )
     set_property(TARGET KCD2OnlineNpcCatalogTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     add_test(NAME KCD2OnlineNpcCatalogTests COMMAND KCD2OnlineNpcCatalogTests)
 

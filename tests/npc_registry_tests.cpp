@@ -160,7 +160,7 @@ int main()
 	    / "kcd2o-npc-registry-catalog.json";
 	{
 		std::ofstream catalog(catalog_path, std::ios::binary | std::ios::trunc);
-		catalog << R"({"levels":[{"level_id":"2","npcs":[{"entity_guid":"12345678-9abc-def0","kind":"human","entity_class":"NPC","name":"catalogued","position":[0.0,0.0,0.0],"rotation":[0.0,0.0,0.0,1.0]}]}]})";
+		catalog << R"({"levels":[{"level_id":"2","npcs":[{"entity_guid":"12345678-9abc-def0","kind":"human"}]}]})";
 	}
 	npc_registry catalogued("2", catalog_path);
 	assert(catalogued.size() == 0); // catalog is an identity allowlist, not live state

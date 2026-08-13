@@ -76,8 +76,8 @@ namespace kcd2o::server
 		std::vector<std::string> permission_owners;
 		std::filesystem::path world_directory{"world"};
 		std::filesystem::path starter_profile_path{"starter_profile.toml"};
-		// Generated from the audited retail level PAKs and shipped beside the
-		// dedicated server. Production levels use it as an NPC GUID/kind allowlist.
+		// Generated locally from the operator's retail level PAKs. Production
+		// levels use it as an NPC GUID/kind allowlist.
 		std::filesystem::path npc_world_catalog_path;
 		// Generated dedicated-server data. When configured, the matching property
 		// catalog is imported once and persisted in world_directory.

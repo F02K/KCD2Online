@@ -67,7 +67,6 @@ namespace kcd2::signatures
 		    signature_spec{"wh_db_table_patched", "E8 ? ? ? ? E9 ? ? ? ? 8B 52 ? 44 8B 79", resolution_kind::relative_call, target_region::executable},
 		    signature_spec{"wh_db_table_patch_find_line", "E8 ? ? ? ? 83 F8 ? 75 ? 48 8B CB E8 ? ? ? ? 45 33 C9", resolution_kind::relative_call, target_region::executable},
 		    signature_spec{"XmlParserReadOnly_Read_caller", "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 41 8A E8 48 8B DA 48 8B F1 E8 ? ? ? ? B9 18 00 00 00 4C 8B 88", resolution_kind::direct, target_region::executable},
-		    signature_spec{"CXConsole_RegisterVar", "E8 ? ? ? ? 48 8B C3 48 8B 5C 24 ? 48 8B 6C 24 ? 0F 28 74 24", resolution_kind::relative_call, target_region::executable},
 		    signature_spec{"CEntitySystem_ctor", "E8 ? ? ? ? 48 8B D8 48 8B D7 48 89 1D", resolution_kind::relative_call, target_region::executable},
 		    signature_spec{"CEntity_ctor", "E8 ? ? ? ? 48 8B D8 EB ? 48 8B DF 41 8B C7", resolution_kind::relative_call, target_region::executable},
 		    signature_spec{"CBrush_ctor", "E8 ? ? ? ? 48 8B D8 4C 8B 8C 24", resolution_kind::relative_call, target_region::executable},
@@ -1035,8 +1034,6 @@ namespace kcd2::signatures
 			}
 			validate_vtable_entry(image, report, entry, *table, index);
 		};
-		validate_named_vtable("CXConsole vtable", "CXConsole vtable[32]", 32, true);
-		validate_named_vtable("CXConsole vtable", "CXConsole vtable[33]", 33, true);
 		validate_named_vtable("CXConsole vtable", "CXConsole vtable[35]", 35, true);
 		validate_named_vtable("CEntity vtable", "CEntity vtable[0]", 0, false);
 		validate_named_vtable("CEntity vtable", "CEntity::SetFlags", 5, false);
