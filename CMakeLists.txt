@@ -8,7 +8,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
 
-project(KCD2Online VERSION 0.1.5 LANGUAGES CXX C ASM ASM_MASM)
+project(KCD2Online VERSION 0.1.6 LANGUAGES CXX C ASM ASM_MASM)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/multiplayer/version.hpp.in"

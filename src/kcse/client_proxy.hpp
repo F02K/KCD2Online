@@ -24,10 +24,10 @@ namespace kcd2o::kcse
 		[[nodiscard]] bool select_avatar(std::string archetype_id) const;
 		[[nodiscard]] bool attempt_sleep() const;
 		[[nodiscard]] bool request_respawn() const;
+		[[nodiscard]] bool set_player_voice_volume(player_id player, float volume) const;
 		void set_diagnostic_logging(bool enabled) const;
 		[[nodiscard]] client_status status() const;
-		[[nodiscard]] std::vector<kcd2o::remote_player_view>
-		remote_players() const;
+		[[nodiscard]] std::vector<kcd2o::remote_player_view> players() const;
 		[[nodiscard]] std::vector<chat_entry> chat_history() const;
 
 	private:
@@ -35,4 +35,4 @@ namespace kcd2o::kcse
 	};
 
 	[[nodiscard]] ui_client_proxy &ui_client();
-}
+} // namespace kcd2o::kcse

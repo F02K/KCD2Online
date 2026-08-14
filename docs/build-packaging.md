@@ -40,7 +40,7 @@ out/package/release/
 |   |   |   `-- README.md
 |   |   `-- KCSE/addresslib/
 |   |       `-- kcd_addresslib_*.bin
-|   `-- KCD2Online-Client-v0.1.5.zip
+|   `-- KCD2Online-Client-v0.1.6.zip
 |-- server/
 |   |-- KCD2OnlineServer.exe
 |   |-- KCD2OnlineServer.pdb
@@ -59,7 +59,7 @@ out/package/release/
 |   |-- tools/
 |   |   |-- KCD2OnlineSignatureAudit.exe
 |   |   `-- KCD2OnlineSignatureAudit.pdb
-|   `-- KCD2Online-Server-v0.1.5.zip
+|   `-- KCD2Online-Server-v0.1.6.zip
 |-- tests/
 |   |-- KCD2Online*Tests.exe
 |   `-- KCD2Online*Tests.pdb

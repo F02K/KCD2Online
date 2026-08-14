@@ -8,6 +8,39 @@ changes. Client and server versions must match exactly.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-14
+
+### Added
+
+- Added a rebindable `F2` player hub with server and session overview, roster,
+  world state, connection and voice diagnostics, support actions, and a compact
+  multiplayer controls reference.
+- Added a rebindable `F3` social panel with roster search, verified role badges,
+  local chat hiding, per-player proximity-voice mute and volume controls, stable
+  RP identity copying, and support-ready report references.
+- Added a permission-aware `F7` staff panel for player moderation,
+  announcements, teleport and freeze actions, permission management, confirmed
+  destructive actions, and an in-panel GM log.
+- Added server-authoritative network roles, effective permission scopes,
+  persistent account restrictions, and append-only moderation auditing.
+
+### Changed
+
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.6`.
+- Reduced distributed game-derived data. Packages now generate the minimum NPC
+  and compatibility metadata locally and no longer include `WHGame.dll`,
+  console/CVar dumps, or the former full NPC archetype catalog.
+- Updated the pinned libKCD2 runtime dependency.
+
+### Fixed
+
+- Excluded locally owned transient weapon and combat state from transactional
+  profile verification, preventing false reconciliation mismatches after a
+  profile apply.
+- Kept input capture and native keybind handling coordinated when switching
+  between the player hub, social panel, and staff panel.
+
 ## [0.1.5] - 2026-08-12
 
 ### Added

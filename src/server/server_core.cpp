@@ -74,11 +74,13 @@ namespace kcd2o::server
 	server_core::server_core(
 	    server_config config,
 	    token_generator generate_token,
-	    account_authenticator authenticate_account) :
+	    account_authenticator authenticate_account,
+	    moderation_executor moderate_account) :
 	    m_config(validated_config(std::move(config))),
 	    m_generate_token(generate_token ? std::move(generate_token) : []
 	        { return random_hex(32); }),
 	    m_authenticate_account(std::move(authenticate_account)),
+	    m_moderate_account(std::move(moderate_account)),
 	    m_store(m_config),
 	    m_permissions(m_config.world_directory, m_config.permission_owners),
 	    m_npcs(m_store.manifest().level_id, m_config.npc_world_catalog_path),
@@ -1246,16 +1248,19 @@ namespace kcd2o::server
 		bool enrolled_profile = false;
 		if (m_config.account_auth_enabled)
 		{
-			std::string auth_error;
+			authentication_failure auth_failure;
 			const auto identity = m_authenticate_account
-			    ? m_authenticate_account(message.access_token(), auth_error)
+			    ? m_authenticate_account(message.access_token(), auth_failure)
 			    : std::nullopt;
 			if (!identity)
 			{
 				reject(
 				    connection,
-				    protocol::REJECT_REASON_IDENTITY_REQUIRED,
-				    auth_error.empty() ? "KCD2Online authentication failed" : auth_error);
+				    auth_failure.restriction_kind.empty()
+				        ? protocol::REJECT_REASON_IDENTITY_REQUIRED
+				        : protocol::REJECT_REASON_RESTRICTED,
+				    auth_failure.message.empty() ? "KCD2Online authentication failed" : auth_failure.message,
+				    &auth_failure);
 				return;
 			}
 			if (!pending.password_accepted && !identity->join_bypass)
@@ -2644,7 +2649,8 @@ namespace kcd2o::server
 	    const protocol::ChatSend &message,
 	    time_point now)
 	{
-		if (player.network_chat_muted)
+		if (player.network_chat_muted
+		    && (message.text().empty() || message.text().front() != '/'))
 		{
 			send_system_message(player, "Dein Netzwerk-Chat ist stummgeschaltet.", now);
 			return;
@@ -2933,12 +2939,62 @@ namespace kcd2o::server
 			const auto found = m_players.find(id);
 			return found == m_players.end() ? nullptr : &found->second;
 		};
+		auto resolve_account = [&](std::string_view token) -> std::pair<std::string, player_session *>
+		{
+			player_id id{};
+			const auto [end, error] = std::from_chars(token.data(), token.data() + token.size(), id);
+			if (error == std::errc{} && end == token.data() + token.size())
+			{
+				auto *target = parse_target(id);
+				return {target && !target->dummy ? target->profile.persistent_id() : std::string{}, target};
+			}
+			return is_uuid(token)
+			    ? std::pair{std::string(token), static_cast<player_session *>(nullptr)}
+			    : std::pair{std::string{}, static_cast<player_session *>(nullptr)};
+		};
+		auto expiry_from = [&](std::string_view value) -> std::optional<std::uint64_t>
+		{
+			if (lower_ascii(value) == "permanent")
+				return 0;
+			std::uint64_t minutes{};
+			const auto [end, error] = std::from_chars(
+			    value.data(), value.data() + value.size(), minutes);
+			if (error != std::errc{} || end != value.data() + value.size()
+			    || minutes == 0 || minutes > 5'256'000)
+				return std::nullopt;
+			return unix_milliseconds() + minutes * 60'000ULL;
+		};
+		auto execute_moderation = [&](moderation_action action)
+		{
+			if (!m_moderate_account)
+			{
+				send_system_message(player,
+				    "Servermoderation ist nicht mit dem KCD2Online-Backend verbunden.",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+				return false;
+			}
+			std::string error;
+			if (!m_moderate_account(action, error))
+			{
+				m_permissions.audit(actor, "moderation." + action.kind,
+				    action.account_id, "failed", error);
+				send_system_message(player, "Moderation fehlgeschlagen: " + error,
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+				return false;
+			}
+			m_permissions.audit(actor, "moderation." + action.kind,
+			    action.account_id, "allowed", action.reason);
+			apply_moderation_action(action, now);
+			const auto confirmation = action.kind + " gespeichert fuer " + action.account_id;
+			send_system_message(player, confirmation, now, protocol::CHAT_CHANNEL_ADMIN);
+			return true;
+		};
 
 		if (command == "/adminhelp")
 		{
 			send_system_message(
 			    player,
-			    "GM: /players, /announce, /kick, /goto, /bring, /freeze, /unfreeze, /perm",
+			    "GM: /players, /announce, /kick, /warn, /ban, /unban, /mute, /unmute, /goto, /bring, /freeze, /unfreeze, /perm",
 			    now, protocol::CHAT_CHANNEL_ADMIN);
 			return true;
 		}
@@ -2947,7 +3003,10 @@ namespace kcd2o::server
 			if (!require("admin.players", "players.list"))
 				return true;
 			for (const auto &entry : players())
-				send_system_message(player, std::to_string(entry.id) + " - " + entry.display_name + (entry.connected ? " [online]" : " [reconnecting]"), now, protocol::CHAT_CHANNEL_ADMIN);
+				send_system_message(player, std::to_string(entry.id) + " - " + entry.display_name
+				    + " [" + entry.persistent_id + "]"
+				    + (entry.connected ? " [online]" : " [reconnecting]"),
+				    now, protocol::CHAT_CHANNEL_ADMIN);
 			m_permissions.audit(actor, "players.list", "", "allowed");
 			return true;
 		}
@@ -2992,6 +3051,79 @@ namespace kcd2o::server
 			}
 			m_permissions.audit(actor, "player.kick", target->profile.persistent_id(), "allowed", reason);
 			kick(target_id, reason.empty() ? "Von der Spielleitung entfernt" : reason, now);
+			return true;
+		}
+		if (command == "/warn")
+		{
+			if (!require("admin.warn", "moderation.warning"))
+				return true;
+			std::string target_token;
+			std::string reason;
+			input >> target_token;
+			std::getline(input >> std::ws, reason);
+			auto [account_id, target] = resolve_account(target_token);
+			if (account_id.empty() || !target || reason.size() < 3)
+			{
+				send_system_message(player, "Verwendung: /warn <Spieler-ID> <Grund>", now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			(void)execute_moderation({account_id, "warning", reason, actor});
+			return true;
+		}
+		if (command == "/ban" || command == "/unban")
+		{
+			if (!require("admin.ban", command == "/ban" ? "moderation.server_ban" : "moderation.server_unban"))
+				return true;
+			std::string target_token;
+			std::string duration;
+			std::string reason;
+			input >> target_token;
+			if (command == "/ban")
+				input >> duration;
+			std::getline(input >> std::ws, reason);
+			auto [account_id, target] = resolve_account(target_token);
+			const auto expiry = command == "/ban" ? expiry_from(duration) : std::optional<std::uint64_t>{0};
+			if (account_id.empty() || !expiry || reason.size() < 3)
+			{
+				send_system_message(player,
+				    command == "/ban"
+				        ? "Verwendung: /ban <Spieler-ID|Account-ID> <Minuten|permanent> <Grund>"
+				        : "Verwendung: /unban <Spieler-ID|Account-ID> <Grund>",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			(void)execute_moderation({account_id,
+			    command == "/ban" ? "server_ban" : "server_unban",
+			    reason, actor, *expiry});
+			return true;
+		}
+		if (command == "/mute" || command == "/unmute")
+		{
+			if (!require("admin.mute", command == "/mute" ? "moderation.mute" : "moderation.unmute"))
+				return true;
+			std::string channel;
+			std::string target_token;
+			std::string duration;
+			std::string reason;
+			input >> channel >> target_token;
+			channel = lower_ascii(channel);
+			if (command == "/mute")
+				input >> duration;
+			std::getline(input >> std::ws, reason);
+			auto [account_id, target] = resolve_account(target_token);
+			const auto expiry = command == "/mute" ? expiry_from(duration) : std::optional<std::uint64_t>{0};
+			if ((channel != "chat" && channel != "voice") || account_id.empty()
+			    || !expiry || reason.size() < 3)
+			{
+				send_system_message(player,
+				    command == "/mute"
+				        ? "Verwendung: /mute <chat|voice> <Spieler-ID|Account-ID> <Minuten|permanent> <Grund>"
+				        : "Verwendung: /unmute <chat|voice> <Spieler-ID|Account-ID> <Grund>",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			const auto kind = channel + (command == "/mute" ? "_mute" : "_unmute");
+			(void)execute_moderation({account_id, kind, reason, actor, *expiry});
 			return true;
 		}
 		if (command == "/goto" || command == "/bring")
@@ -3307,7 +3439,8 @@ namespace kcd2o::server
 	void server_core::reject(
 	    connection_id connection,
 	    protocol::RejectReason reason,
-	    std::string message)
+	    std::string message,
+	    const authentication_failure *failure)
 	{
 		release_initializer(connection);
 		m_pending.erase(connection);
@@ -3315,6 +3448,16 @@ namespace kcd2o::server
 		auto *rejected = envelope.mutable_server_rejected();
 		rejected->set_reason(reason);
 		rejected->set_message(std::move(message));
+		if (failure)
+		{
+			rejected->set_error_code(failure->error_code);
+			rejected->set_restriction_scope(failure->restriction_scope);
+			rejected->set_restriction_kind(failure->restriction_kind);
+			rejected->set_restriction_reason(failure->restriction_reason);
+			rejected->set_expires_at_unix_ms(failure->expires_at_unix_ms);
+			rejected->set_reference_id(failure->reference_id);
+			rejected->set_support_url(failure->support_url);
+		}
 		queue(
 		    connection,
 		    std::move(envelope),
@@ -3381,6 +3524,12 @@ namespace kcd2o::server
 		accepted->set_server_name(m_config.name);
 		accepted->set_level_id(m_store.manifest().level_id);
 		accepted->set_network_role(network_role(player.network_role));
+		for (const auto &permission : m_permissions.list(player.profile.persistent_id()))
+			accepted->add_effective_permissions(permission);
+		if (player.network_full_permissions
+		    && std::ranges::find(accepted->effective_permissions(), "*")
+		        == accepted->effective_permissions().end())
+			accepted->add_effective_permissions("*");
 		accepted->set_profile_snapshot_interval_seconds(
 		    m_config.profile_snapshot_interval_seconds);
 		*accepted->mutable_avatar_policy() = avatar_policy();
@@ -3401,6 +3550,92 @@ namespace kcd2o::server
 		    m_sleeping_players.size()));
 		sleep_state->set_required_players(effective_sleep_requirement());
 		queue(*player.connection, std::move(sleep), reliability::reliable);
+	}
+
+	void server_core::apply_account_restrictions(
+	    const std::vector<account_restriction> &restrictions,
+	    time_point now)
+	{
+		for (const auto &restriction : restrictions)
+		{
+			const auto found = std::ranges::find_if(m_players, [&](const auto &entry)
+			{
+				return !entry.second.dummy
+				    && entry.second.profile.persistent_id() == restriction.account_id;
+			});
+			if (found == m_players.end())
+				continue;
+			auto &player = found->second;
+			if (restriction.network_blocked || restriction.server_banned)
+			{
+				const auto reason = restriction.network_blocked
+				    ? (restriction.network_reason.empty()
+				        ? "Network access restricted" : restriction.network_reason)
+				    : (restriction.ban_reason.empty()
+				        ? "Banned from this server" : restriction.ban_reason);
+				kick(player.id, reason + " - support.kingdom-online.cc", now);
+				continue;
+			}
+			const auto chat_changed = player.network_chat_muted != restriction.chat_muted;
+			const auto voice_changed = player.network_voice_muted != restriction.voice_muted;
+			player.network_chat_muted = restriction.chat_muted;
+			player.network_voice_muted = restriction.voice_muted;
+			if (chat_changed)
+				send_system_message(player,
+				    restriction.chat_muted
+				        ? "Dein Chat wurde stummgeschaltet: " + restriction.chat_mute_reason
+				        : "Deine Chat-Stummschaltung wurde aufgehoben.",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+			if (voice_changed)
+				send_system_message(player,
+				    restriction.voice_muted
+				        ? "Dein Sprachchat wurde stummgeschaltet: " + restriction.voice_mute_reason
+				        : "Deine Sprachchat-Stummschaltung wurde aufgehoben.",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+	}
+
+	void server_core::apply_moderation_action(
+	    const moderation_action &action,
+	    time_point now)
+	{
+		const auto found = std::ranges::find_if(m_players, [&](const auto &entry)
+		{
+			return !entry.second.dummy
+			    && entry.second.profile.persistent_id() == action.account_id;
+		});
+		if (found == m_players.end())
+			return;
+		auto &target = found->second;
+		if (action.kind == "warning")
+			send_system_message(target, "Verwarnung: " + action.reason,
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		else if (action.kind == "chat_mute")
+		{
+			target.network_chat_muted = true;
+			send_system_message(target, "Dein Chat wurde stummgeschaltet: " + action.reason,
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+		else if (action.kind == "chat_unmute")
+		{
+			target.network_chat_muted = false;
+			send_system_message(target, "Deine Chat-Stummschaltung wurde aufgehoben.",
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+		else if (action.kind == "voice_mute")
+		{
+			target.network_voice_muted = true;
+			send_system_message(target, "Dein Sprachchat wurde stummgeschaltet: " + action.reason,
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+		else if (action.kind == "voice_unmute")
+		{
+			target.network_voice_muted = false;
+			send_system_message(target, "Deine Sprachchat-Stummschaltung wurde aufgehoben.",
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+		else if (action.kind == "server_ban")
+			kick(target.id, action.reason + " - support.kingdom-online.cc", now);
 	}
 
 	void server_core::broadcast_home_markers()

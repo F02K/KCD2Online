@@ -48,6 +48,7 @@ enum RejectReason {
   REJECT_REASON_SESSION_MISMATCH = 11;
   REJECT_REASON_BOOTSTRAP_FAILED = 12;
   REJECT_REASON_PROFILE_CONFLICT = 13;
+  REJECT_REASON_RESTRICTED = 14;
 }
 
 enum BootstrapMode {
@@ -487,6 +488,7 @@ message ServerAccepted {
   AvatarPolicy avatar_policy = 10;
   PropertyHomeMarker home_marker = 11;
   NetworkRole network_role = 12;
+  repeated string effective_permissions = 13;
 }
 
 message ServerHomeMarkerUpdated {
@@ -498,6 +500,13 @@ message ServerHomeMarkerUpdated {
 message ServerRejected {
   RejectReason reason = 1;
   string message = 2;
+  string error_code = 3;
+  string restriction_scope = 4;
+  string restriction_kind = 5;
+  string restriction_reason = 6;
+  uint64 expires_at_unix_ms = 7;
+  string reference_id = 8;
+  string support_url = 9;
 }
 
 message PlayerJoined {

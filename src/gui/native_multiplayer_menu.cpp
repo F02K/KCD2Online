@@ -14,11 +14,13 @@
 #include <Offsets/vtables/IUIElementEventListener.h>
 #include <guimodule/SUIEventDesc.h>
 #include <guimodule/SUITypes.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
+#include <ctime>
 #include <initializer_list>
 #include <mutex>
 #include <utility>
@@ -79,6 +81,9 @@ namespace big::native_multiplayer_menu
 		constexpr std::string_view search_button = "KCD2Online.Servers.Search";
 		constexpr std::string_view clear_search_button = "KCD2Online.Servers.ClearSearch";
 		constexpr std::string_view favorite_button = "KCD2Online.Server.Favorite";
+		constexpr std::string_view support_button = "KCD2Online.Support";
+		constexpr std::string_view support_url =
+		    "https://support.kingdom-online.cc";
 
 		enum class edit_field
 		{
@@ -199,6 +204,36 @@ namespace big::native_multiplayer_menu
 				return false;
 			}
 			return true;
+		}
+
+		bool open_support_page()
+		{
+			const auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(
+			    nullptr,
+			    L"open",
+			    L"https://support.kingdom-online.cc",
+			    nullptr,
+			    nullptr,
+			    SW_SHOWNORMAL));
+			return result > 32;
+		}
+
+		bool is_network_ban_error(std::string_view error)
+		{
+			return error.find("(network_banned)") != std::string_view::npos;
+		}
+
+		std::string restriction_expiry(std::uint64_t unix_ms)
+		{
+			if (unix_ms == 0)
+				return ingame_ui::localized("moderation.restriction.permanent");
+			const auto seconds = static_cast<std::time_t>(unix_ms / 1000);
+			std::tm local{};
+			if (localtime_s(&local, &seconds) != 0)
+				return std::to_string(unix_ms);
+			char buffer[32]{};
+			return std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M", &local) != 0
+			    ? std::string(buffer) : std::to_string(unix_ms);
 		}
 
 		void erase_last_utf8_character(std::string &text)
@@ -797,7 +832,28 @@ namespace big::native_multiplayer_menu
 			else
 			{
 				std::string browser_body;
-				if (!status.error.empty())
+				const auto legacy_network_ban = is_network_ban_error(status.error);
+				const auto restricted = legacy_network_ban
+				    || !status.restriction_kind.empty();
+				const auto network_blocked = legacy_network_ban
+				    || status.restriction_scope == "network";
+				if (restricted)
+				{
+					const auto reason = status.restriction_reason.empty()
+					    ? ingame_ui::localized("moderation.restriction.reason.unavailable")
+					    : status.restriction_reason;
+					const auto reference = status.restriction_reference_id.empty()
+					    ? account.account_id : status.restriction_reference_id;
+					browser_body = paragraphs({
+					    ingame_ui::localized(
+					        network_blocked ? "moderation.restriction.network_body"
+					                        : "moderation.restriction.server_body"),
+					    ingame_ui::localized("moderation.restriction.reason", {{"reason", reason}}),
+					    ingame_ui::localized("moderation.restriction.expires", {{"expires", restriction_expiry(status.restriction_expires_at_unix_ms)}}),
+					    ingame_ui::localized("moderation.restriction.reference", {{"reference", reference}}),
+					    ingame_ui::localized("network_ban.support", {{"url", std::string(support_url)}})});
+				}
+				else if (!status.error.empty())
 					browser_body = status.error;
 				else if (directory.loading)
 					browser_body = ingame_ui::localized("browser.loading");
@@ -840,18 +896,23 @@ namespace big::native_multiplayer_menu
 					        ? ingame_ui::localized("browser.password.yes")
 					        : ingame_ui::localized("browser.password.no")}});
 				}
-				browser_body = paragraphs({browser_body, ingame_ui::localized("browser.controls")});
+				if (!network_blocked)
+					browser_body = paragraphs({browser_body, ingame_ui::localized("browser.controls")});
 				page.information = ingame_ui::information_panel{
-				    ingame_ui::localized("browser.title"), browser_body, {}};
+				    ingame_ui::localized(restricted ? "moderation.restriction.title" : "browser.title"), browser_body, {}};
+				if (restricted)
+					page.add_button(
+					    std::string(support_button),
+					    ingame_ui::localized("network_ban.action.support"));
 				const auto visible_search = search.empty()
 				    ? ingame_ui::localized("browser.search.empty") : search;
 				page.add_button(std::string(search_button),
 				    (editing == edit_field::server_search ? edit_prefix : std::string{})
-				        + ingame_ui::localized("browser.action.search", {{"value", visible_search}}), settings_locked);
+				        + ingame_ui::localized("browser.action.search", {{"value", visible_search}}), settings_locked || network_blocked);
 				if (!search.empty())
-					page.add_button(std::string(clear_search_button), ingame_ui::localized("browser.action.clear_search"), settings_locked);
-				page.add_button(std::string(refresh_button), ingame_ui::localized("browser.action.refresh"), directory.loading);
-				if (selected != matches.end())
+					page.add_button(std::string(clear_search_button), ingame_ui::localized("browser.action.clear_search"), settings_locked || network_blocked);
+				page.add_button(std::string(refresh_button), ingame_ui::localized("browser.action.refresh"), directory.loading || network_blocked);
+				if (!network_blocked && selected != matches.end())
 				{
 					const auto &server = **selected;
 					if (server.password_protected)
@@ -912,6 +973,7 @@ namespace big::native_multiplayer_menu
 			case edit_field::none:
 				page.selected_button = pending_join ? cancel_pending_button
 				    : status.state != kcd2o::client_state::disconnected ? disconnect_button
+				    : (is_network_ban_error(status.error) || !status.restriction_kind.empty()) ? support_button
 				    : !status.error.empty() ? refresh_button
 				    : selected != matches.end() ? connect_button
 				    : refresh_button;
@@ -1287,6 +1349,10 @@ namespace big::native_multiplayer_menu
 					value.account_feedback_key.clear();
 				}
 				show_account_page();
+			}
+			else if (button == support_button)
+			{
+				(void)open_support_page();
 			}
 			else if (button == account_accept_button
 			    || button == account_retry_button)

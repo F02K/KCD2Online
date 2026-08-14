@@ -4,6 +4,9 @@
 #include "fonts/fonts.hpp"
 #include "gui.hpp"
 #include "gui/ingame_chat.hpp"
+#include "gui/ingame_player_hub.hpp"
+#include "gui/ingame_social_panel.hpp"
+#include "gui/ingame_staff_panel.hpp"
 #include "hooks/hooking.hpp"
 
 #include <backends/imgui_impl_dx12.h>
@@ -305,7 +308,10 @@ namespace big
 	{
 		// The chat owns its own presentation-rate ImGui frame while it is open.
 		// Do not let the engine update consume queued text input in a second frame.
-		if (ingame_chat::blocks_game_input())
+		if (ingame_chat::blocks_game_input()
+		    || ingame_player_hub::blocks_game_input()
+		    || ingame_social_panel::blocks_game_input()
+		    || ingame_staff_panel::blocks_game_input())
 		{
 			return;
 		}
@@ -998,9 +1004,15 @@ namespace big
 				{
 					// Opening the main GUI must also release a chat input capture before
 					// the next engine-driven UI frame is allowed to run.
-					if (ingame_chat::blocks_game_input())
+					if (ingame_chat::blocks_game_input()
+					    || ingame_player_hub::blocks_game_input()
+					    || ingame_social_panel::blocks_game_input()
+					    || ingame_staff_panel::blocks_game_input())
 					{
 						ingame_chat::render(true);
+						ingame_player_hub::render(true);
+						ingame_social_panel::render(true);
+						ingame_staff_panel::render(true);
 					}
 				}
 				else if (g_gui)
@@ -1008,7 +1020,19 @@ namespace big
 					ImGui_ImplDX12_NewFrame();
 					ImGui_ImplWin32_NewFrame();
 					ImGui::NewFrame();
-					ingame_chat::render(false);
+					ingame_chat::render(
+					    ingame_player_hub::blocks_game_input()
+					    || ingame_social_panel::blocks_game_input()
+					    || ingame_staff_panel::blocks_game_input());
+					ingame_player_hub::render(
+					    ingame_social_panel::blocks_game_input()
+					    || ingame_staff_panel::blocks_game_input());
+					ingame_social_panel::render(
+					    ingame_player_hub::blocks_game_input()
+					    || ingame_staff_panel::blocks_game_input());
+					ingame_staff_panel::render(
+					    ingame_player_hub::blocks_game_input()
+					    || ingame_social_panel::blocks_game_input());
 					ImGui::Render();
 					chat_draw_data = ImGui::GetDrawData();
 					g_imgui_frame_source = imgui_frame_source::chat;

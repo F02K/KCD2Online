@@ -1,6 +1,9 @@
 #include "gui.hpp"
 
 #include "gui/ingame_chat.hpp"
+#include "gui/ingame_player_hub.hpp"
+#include "gui/ingame_social_panel.hpp"
+#include "gui/ingame_staff_panel.hpp"
 #include "gui/native_multiplayer_menu.hpp"
 #include "gui/renderer.hpp"
 #include "hooks/hooking.hpp"
@@ -353,9 +356,9 @@ namespace big
 			ImGui::EndDisabled();
 
 			ImGui::SeparatorText("Players");
-			const auto players = client.remote_players();
+			const auto players = client.players();
 			ImGui::Text(
-			    "You: %llu | Remote players: %zu",
+			    "You: %llu | Players: %zu",
 			    static_cast<unsigned long long>(status.local_player_id),
 			    players.size());
 			if (status.state == kcd2o::client_state::connected
@@ -568,6 +571,11 @@ namespace big
 	{
 		m_is_open = toggle;
 
+		sync_mouse_capture();
+	}
+
+	void gui::sync_mouse_capture()
+	{
 		toggle_mouse();
 	}
 
@@ -2199,9 +2207,38 @@ namespace big
 		    msg,
 		    wparam,
 		    lparam);
-		ingame_chat::on_window_message(
-		    msg,
-		    static_cast<std::uintptr_t>(wparam));
+		const auto player_hub_was_open =
+		    ingame_player_hub::blocks_game_input();
+		const auto social_was_open =
+		    ingame_social_panel::blocks_game_input();
+		const auto staff_was_open = ingame_staff_panel::blocks_game_input();
+		if (!social_was_open && !staff_was_open)
+		{
+			ingame_player_hub::on_window_message(
+			    msg,
+			    static_cast<std::uintptr_t>(wparam));
+		}
+		if (!player_hub_was_open && !staff_was_open)
+		{
+			ingame_social_panel::on_window_message(
+			    msg,
+			    static_cast<std::uintptr_t>(wparam));
+		}
+		if (!player_hub_was_open && !social_was_open)
+		{
+			ingame_staff_panel::on_window_message(
+			    msg,
+			    static_cast<std::uintptr_t>(wparam));
+		}
+		if (!player_hub_was_open && !social_was_open && !staff_was_open
+		    && !ingame_player_hub::blocks_game_input()
+		    && !ingame_social_panel::blocks_game_input()
+		    && !ingame_staff_panel::blocks_game_input())
+		{
+			ingame_chat::on_window_message(
+			    msg,
+			    static_cast<std::uintptr_t>(wparam));
+		}
 
 		if (msg == WM_RBUTTONUP)
 		{
@@ -2251,7 +2288,11 @@ namespace big
 
 	static BOOL hook_ClipCursor(const RECT* lpRect)
 	{
-		if (!g_gui || !g_gui->is_open())
+		if (!g_gui
+		    || (!g_gui->is_open()
+		        && !ingame_player_hub::blocks_game_input()
+		        && !ingame_social_panel::blocks_game_input()
+		        && !ingame_staff_panel::blocks_game_input()))
 		{
 			return orig_ClipCursor(lpRect);
 		}
@@ -2262,39 +2303,45 @@ namespace big
 	void gui::toggle_mouse()
 	{
 		auto& io = ImGui::GetIO();
+		const auto release_mouse = m_is_open
+		    || ingame_player_hub::blocks_game_input()
+		    || ingame_social_panel::blocks_game_input()
+		    || ingame_staff_panel::blocks_game_input();
 
-		if (m_is_open)
+		// Install the guard during GUI initialization so an in-game panel can be
+		// the first overlay opened in a session.
+		static bool first_time = true;
+		if (first_time)
+		{
+			first_time = false;
+
+			if (GetModuleHandleA("user32.dll"))
+			{
+				orig_ClipCursor = &ClipCursor;
+
+				EachImportFunction(::GetModuleHandleA("WHGame.dll"),
+				                   "user32.dll",
+				                   [](const char* funcname, void*& func)
+				                   {
+					                   //if (strcmp(funcname, "SetCursorPos") == 0)
+					                   if (strcmp(funcname, "ClipCursor") == 0)
+					                   {
+						                   ForceWrite<void*>(func, hook_ClipCursor);
+					                   }
+				                   });
+			}
+			else
+			{
+				LOG(ERROR) << "no user32 hook setcus";
+			}
+		}
+
+		if (release_mouse)
 		{
 			io.MouseDrawCursor  = true;
 			io.ConfigFlags     &= ~ImGuiConfigFlags_NoMouse;
 			io.ConfigFlags     &= ~ImGuiConfigFlags_NoMouseCursorChange;
-
-			// TODO: Cleanup all this
-			static bool first_time = true;
-			if (first_time)
-			{
-				first_time = false;
-
-				if (GetModuleHandleA("user32.dll"))
-				{
-					orig_ClipCursor = &ClipCursor;
-
-					EachImportFunction(::GetModuleHandleA("WHGame.dll"),
-					                   "user32.dll",
-					                   [](const char* funcname, void*& func)
-					                   {
-						                   //if (strcmp(funcname, "SetCursorPos") == 0)
-						                   if (strcmp(funcname, "ClipCursor") == 0)
-						                   {
-							                   ForceWrite<void*>(func, hook_ClipCursor);
-						                   }
-					                   });
-				}
-				else
-				{
-					LOG(ERROR) << "no user32 hook setcus";
-				}
-			}
+			ClipCursor(nullptr);
 		}
 		else
 		{

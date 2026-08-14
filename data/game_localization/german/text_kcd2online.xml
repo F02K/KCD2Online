@@ -3,4 +3,7 @@
 <Row><Cell>kcd2o_keybind_chat</Cell><Cell>Multiplayer chat</Cell><Cell>Multiplayer-Chat</Cell></Row>
 <Row><Cell>kcd2o_keybind_voice</Cell><Cell>Push-to-talk</Cell><Cell>Push-to-Talk</Cell></Row>
 <Row><Cell>kcd2o_keybind_emote</Cell><Cell>Emote wheel</Cell><Cell>Gestenrad</Cell></Row>
+<Row><Cell>kcd2o_keybind_player_hub</Cell><Cell>Player hub</Cell><Cell>Spieler-Hub</Cell></Row>
+<Row><Cell>kcd2o_keybind_social</Cell><Cell>Social panel</Cell><Cell>Social-Panel</Cell></Row>
+<Row><Cell>kcd2o_keybind_staff</Cell><Cell>Staff panel</Cell><Cell>Staff-Panel</Cell></Row>
 </Table>

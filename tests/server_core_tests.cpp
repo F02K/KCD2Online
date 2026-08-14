@@ -586,10 +586,11 @@ int main()
 		config.max_players = 1;
 		constexpr std::string_view account_id =
 		    "0c997ac1-8ae3-45b0-9b7f-bf3bd45ea21e";
+		std::vector<moderation_action> moderation_actions;
 		server_core core(
 		    config,
 		    {},
-		    [&](std::string_view token, std::string &error)
+		    [&](std::string_view token, authentication_failure &failure)
 		    {
 			    if (token == "valid-access-token")
 				    return std::optional{network_identity{
@@ -610,9 +611,25 @@ int main()
 				    return std::optional{network_identity{
 				        .account_id = "1652dbd5-ad09-4f45-92f5-b2e7da826fb5",
 				        .network_role = "user",
-				        .display_name = "Unlisted User"}};
-			    error = "invalid central token";
+			        .display_name = "Unlisted User"}};
+			    if (token == "banned-access-token")
+			    {
+				    failure.message = "Your account is banned";
+				    failure.error_code = "network_banned";
+				    failure.restriction_scope = "network";
+				    failure.restriction_kind = "network_ban";
+				    failure.restriction_reason = "Test restriction";
+				    failure.reference_id = "case-test";
+				    return std::optional<network_identity>{};
+			    }
+			    failure.message = "invalid central token";
+			    failure.error_code = "invalid_token";
 			    return std::optional<network_identity>{};
+		    },
+		    [&](const moderation_action &action, std::string &)
+		    {
+			    moderation_actions.push_back(action);
+			    return true;
 		    });
 		core.on_transport_connected(90, start);
 		core.on_message(90, hello(), start);
@@ -624,6 +641,16 @@ int main()
 		core.on_message(90, central_auth("invalid"), start + 1ms);
 		outbound = core.take_outbound();
 		assert(has_rejection(outbound, 90, protocol::REJECT_REASON_IDENTITY_REQUIRED));
+		core.on_transport_connected(94, start + 1ms);
+		core.on_message(94, hello(), start + 1ms);
+		(void)core.take_outbound();
+		core.on_message(94, central_auth("banned-access-token"), start + 2ms);
+		outbound = core.take_outbound();
+		assert(has_rejection(outbound, 94, protocol::REJECT_REASON_RESTRICTED));
+		const auto &restriction = outbound.front().envelope.server_rejected();
+		assert(restriction.error_code() == "network_banned");
+		assert(restriction.restriction_reason() == "Test restriction");
+		assert(restriction.support_url() == "https://support.kingdom-online.cc");
 
 		core.on_transport_connected(91, start + 2ms);
 		core.on_message(91, hello(), start + 2ms);
@@ -665,7 +692,28 @@ int main()
 			            == protocol::NETWORK_ROLE_OWNER;
 		    }));
 		assert(core.permissions(2) == std::vector<std::string>{"*"});
-		core.on_message(92, chat_message("muted text"), start + 8ms);
+		core.on_message(92, chat_message("/warn 1 Test warning"), start + 8ms);
+		outbound = core.take_outbound();
+		assert(moderation_actions.size() == 1);
+		assert(moderation_actions.front().kind == "warning");
+		assert(moderation_actions.front().account_id == account_id);
+		assert(std::ranges::any_of(outbound, [](const outbound_message &entry)
+		{
+			return entry.connection == 91 && entry.envelope.has_chat_broadcast()
+			    && entry.envelope.chat_broadcast().text().contains("Test warning");
+		}));
+		core.on_message(92, chat_message("/mute chat 1 10 Repeated spam"), start + 9ms);
+		(void)core.take_outbound();
+		assert(moderation_actions.size() == 2);
+		assert(moderation_actions.back().kind == "chat_mute");
+		core.on_message(91, chat_message("muted locally"), start + 10ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::none_of(outbound, [](const outbound_message &entry)
+		{
+			return entry.envelope.has_chat_broadcast()
+			    && entry.envelope.chat_broadcast().player_id() == 1;
+		}));
+		core.on_message(92, chat_message("muted text"), start + 11ms);
 		outbound = core.take_outbound();
 		assert(std::ranges::none_of(
 		    outbound,
@@ -674,14 +722,14 @@ int main()
 			    return entry.envelope.has_chat_broadcast()
 			        && entry.envelope.chat_broadcast().player_id() == 2;
 		    }));
-		core.on_message(92, voice_frame(1), start + 9ms);
+		core.on_message(92, voice_frame(1), start + 12ms);
 		outbound = core.take_outbound();
 		assert(std::ranges::none_of(
 		    outbound,
 		    [](const outbound_message &entry)
 		    { return entry.envelope.has_server_voice_frame(); }));
 
-		core.on_transport_connected(93, start + 10ms);
+		core.on_transport_connected(93, start + 13ms);
 		core.on_message(93, hello("Unlisted User"), start + 10ms);
 		(void)core.take_outbound();
 		core.on_message(

@@ -100,6 +100,30 @@ namespace kcd2o
 			return position_error <= 0.01F && rotation_dot >= 0.9999F;
 		}
 
+		inline void clear_owner_authoritative_avatar_state(
+		    protocol::AvatarDescriptor &avatar)
+		{
+			// The local Human owns its transient weapon/combat lifecycle. The
+			// native profile backend intentionally observes these fields after an
+			// apply instead of forcing the server echo back onto the player. They
+			// therefore cannot be part of the transactional profile verification.
+			avatar.clear_stance();
+			avatar.clear_weapon_class();
+			avatar.clear_weapon_drawn();
+			avatar.clear_active_weapon_set();
+			avatar.clear_combat_mode();
+			avatar.clear_active_in_combat();
+		}
+
+		inline bool same_transaction_avatar_state(
+		    protocol::AvatarDescriptor left,
+		    protocol::AvatarDescriptor right)
+		{
+			clear_owner_authoritative_avatar_state(left);
+			clear_owner_authoritative_avatar_state(right);
+			return left.SerializeAsString() == right.SerializeAsString();
+		}
+
 		inline bool same_profile(
 		    const protocol::PlayerProfile &left,
 		    const protocol::PlayerProfile &right)
@@ -112,8 +136,8 @@ namespace kcd2o
 			    || left.money() != right.money()
 			    || left.money_subunits() != right.money_subunits()
 			    || left.transform_valid() != right.transform_valid()
-			    || left.avatar().SerializeAsString()
-			        != right.avatar().SerializeAsString()
+			    || !same_transaction_avatar_state(
+			        left.avatar(), right.avatar())
 			    || left.stats_size() != right.stats_size()
 			    || left.skills_size() != right.skills_size()
 			    || left.inventory_size() != right.inventory_size()

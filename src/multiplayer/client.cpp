@@ -39,6 +39,16 @@ namespace kcd2o
 			    300'000)};
 		}
 
+		void update_environment_status(
+		    client_status &status,
+		    const protocol::EnvironmentState &environment)
+		{
+			status.environment_available = true;
+			status.time_of_day_hours = environment.time_of_day_hours();
+			status.time_scale = environment.time_scale();
+			status.weather_id = environment.weather_id();
+		}
+
 		std::uint64_t milliseconds(std::chrono::steady_clock::time_point value)
 		{
 			return static_cast<std::uint64_t>(
@@ -884,6 +894,30 @@ namespace kcd2o
 		return m_update_rates;
 	}
 
+	std::vector<remote_player_view> multiplayer_client::players() const
+	{
+		std::scoped_lock lock(m_state_mutex);
+		std::vector<remote_player_view> result;
+		result.reserve(m_remote_players.size() + 1);
+		if (m_status.local_player_id != 0 && m_profile)
+		{
+			remote_player_view local;
+			local.id = m_status.local_player_id;
+			local.persistent_id = m_profile->persistent_id();
+			local.display_name = m_profile->display_name();
+			local.connected = m_status.state == client_state::connected;
+			local.network_role = m_status.network_role;
+			result.push_back(std::move(local));
+		}
+		for (const auto &[id, player] : m_remote_players)
+		{
+			(void)id;
+			result.push_back(player.rendered);
+		}
+		std::ranges::sort(result, {}, &remote_player_view::id);
+		return result;
+	}
+
 	std::vector<remote_player_view> multiplayer_client::remote_players() const
 	{
 		std::scoped_lock lock(m_state_mutex);
@@ -1164,6 +1198,16 @@ namespace kcd2o
 							            accepted.server_name();
 							        m_status.network_role =
 							            accepted.network_role();
+							        m_status.effective_permissions.assign(
+							            accepted.effective_permissions().begin(),
+							            accepted.effective_permissions().end());
+							        m_status.error_code.clear();
+							        m_status.restriction_scope.clear();
+							        m_status.restriction_kind.clear();
+							        m_status.restriction_reason.clear();
+							        m_status.restriction_expires_at_unix_ms = 0;
+							        m_status.restriction_reference_id.clear();
+							        m_status.support_url.clear();
 							        m_status.level_id = accepted.level_id();
 							        m_update_rates.tick_rate =
 							            accepted.tick_rate();
@@ -1328,10 +1372,21 @@ namespace kcd2o
 								        return;
 						        }
 					        }
-					        else if (envelope->has_server_rejected())
-					        {
-						        KCD2Online_JOIN_TRACE("join.handshake.server-rejected", envelope->server_rejected().message());
-						        set_state(client_state::disconnected, envelope->server_rejected().message());
+						else if (envelope->has_server_rejected())
+						{
+							const auto &rejected = envelope->server_rejected();
+							KCD2Online_JOIN_TRACE("join.handshake.server-rejected", rejected.message());
+							{
+								std::scoped_lock lock(m_state_mutex);
+								m_status.error_code = rejected.error_code();
+								m_status.restriction_scope = rejected.restriction_scope();
+								m_status.restriction_kind = rejected.restriction_kind();
+								m_status.restriction_reason = rejected.restriction_reason();
+								m_status.restriction_expires_at_unix_ms = rejected.expires_at_unix_ms();
+								m_status.restriction_reference_id = rejected.reference_id();
+								m_status.support_url = rejected.support_url();
+							}
+							set_state(client_state::disconnected, rejected.message());
 						        if (transport)
 						        {
 							        transport->abort_connection("server rejected connection");
@@ -1762,8 +1817,13 @@ namespace kcd2o
 			m_avatar_update_pending = false;
 			m_status.local_player_id = 0;
 			m_status.network_role = protocol::NETWORK_ROLE_USER;
+			m_status.effective_permissions.clear();
 			m_status.ping_ms = -1;
 			m_status.packet_loss_percent = 0.0F;
+			m_status.environment_available = false;
+			m_status.time_of_day_hours = 0.0;
+			m_status.time_scale = 0.0F;
+			m_status.weather_id = 0;
 			m_world_objects.clear();
 			m_pending_world_objects.clear();
 			m_deferred_world_objects.clear();
@@ -2195,6 +2255,7 @@ namespace kcd2o
 			m_pending_bootstrap = bootstrap_copy;
 			m_environment_revision = bootstrap.environment().revision();
 			m_weather_revision = bootstrap.environment().weather_revision();
+			update_environment_status(m_status, bootstrap.environment());
 			m_last_environment_applied = now;
 			m_last_weather_applied = now;
 			m_world_objects.clear();
@@ -2225,6 +2286,7 @@ namespace kcd2o
 		else if (envelope.has_world_snapshot())
 		{
 			const auto &environment = envelope.world_snapshot().environment();
+			update_environment_status(m_status, environment);
 			const bool environment_changed =
 			    environment.revision() > m_environment_revision;
 			const bool environment_current =
@@ -2297,6 +2359,7 @@ namespace kcd2o
 			const auto state = envelope.server_environment_updated().state();
 			if (state.revision() <= m_environment_revision)
 				return;
+			update_environment_status(m_status, state);
 			const bool apply_weather =
 			    state.weather_revision() > m_weather_revision;
 			lock.unlock();
@@ -3228,6 +3291,7 @@ namespace kcd2o
 		}
 		player.display_name = snapshot.display_name();
 		player.rendered.id = snapshot.player_id();
+		player.rendered.persistent_id = snapshot.persistent_id();
 		player.rendered.display_name = snapshot.display_name();
 		player.rendered.network_role = snapshot.network_role();
 		player.rendered.connected = snapshot.connected();

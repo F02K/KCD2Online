@@ -1,14 +1,14 @@
 #pragma once
 
+#include "multiplayer/client_state.hpp"
 #include "multiplayer/game_command_queue.hpp"
 #include "multiplayer/identity_store.hpp"
 #include "multiplayer/networking.hpp"
 #include "multiplayer/remote_transform_sequence.hpp"
 #include "multiplayer/runtime.hpp"
-#include "multiplayer/client_state.hpp"
 
-#include <chrono>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -46,6 +46,7 @@ namespace kcd2o
 	struct remote_player_view
 	{
 		player_id id{};
+		std::string persistent_id;
 		std::string display_name;
 		bool connected{};
 		bool has_transform{};
@@ -84,7 +85,22 @@ namespace kcd2o
 		bool native_keybinds{};
 		std::uint32_t chat_action_generation{};
 		bool emote_action_held{};
+		std::uint32_t staff_action_generation{};
+		std::uint32_t player_hub_action_generation{};
+		std::uint32_t social_action_generation{};
+		bool environment_available{};
+		double time_of_day_hours{};
+		float time_scale{};
+		std::uint32_t weather_id{};
 		protocol::NetworkRole network_role{protocol::NETWORK_ROLE_USER};
+		std::vector<std::string> effective_permissions;
+		std::string error_code;
+		std::string restriction_scope;
+		std::string restriction_kind;
+		std::string restriction_reason;
+		std::uint64_t restriction_expires_at_unix_ms{};
+		std::string restriction_reference_id;
+		std::string support_url;
 	};
 
 	struct client_update_rates
@@ -98,7 +114,7 @@ namespace kcd2o
 	public:
 		explicit multiplayer_client(client_runtime &runtime);
 		~multiplayer_client();
-		multiplayer_client(const multiplayer_client &) = delete;
+		multiplayer_client(const multiplayer_client &)            = delete;
 		multiplayer_client &operator=(const multiplayer_client &) = delete;
 
 		[[nodiscard]] bool connect(client_options options);
@@ -109,25 +125,17 @@ namespace kcd2o
 		[[nodiscard]] bool set_sleeping(bool sleeping);
 		void report_local_death();
 		[[nodiscard]] bool request_respawn();
-		[[nodiscard]] bool begin_local_activity(
-		    protocol::PlayerActivityKind kind,
-		    std::uint64_t station_guid);
-		[[nodiscard]] bool end_local_activity(
-		    std::optional<protocol::TransformState> final_transform = std::nullopt);
+		[[nodiscard]] bool begin_local_activity(protocol::PlayerActivityKind kind, std::uint64_t station_guid);
+		[[nodiscard]] bool end_local_activity(std::optional<protocol::TransformState> final_transform = std::nullopt);
 		[[nodiscard]] std::optional<std::string> take_activity_denial();
 		void runtime_epoch_changed();
-		[[nodiscard]] bool reserve_local_avatar_sample(
-		    std::chrono::steady_clock::time_point now =
-		        std::chrono::steady_clock::now());
-		void game_tick(
-		    std::optional<protocol::TransformState> local_transform,
-		    std::optional<protocol::AvatarDescriptor> local_avatar_visual,
-		    std::string_view current_level,
-		    std::chrono::steady_clock::time_point now =
-		        std::chrono::steady_clock::now());
+		[[nodiscard]] bool reserve_local_avatar_sample(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+		void game_tick(std::optional<protocol::TransformState> local_transform, std::optional<protocol::AvatarDescriptor> local_avatar_visual, std::string_view current_level, std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
 
 		[[nodiscard]] client_status status() const;
 		[[nodiscard]] client_update_rates update_rates() const;
+		// Complete UI/staff roster, including the local player.
+		[[nodiscard]] std::vector<remote_player_view> players() const;
 		[[nodiscard]] std::vector<remote_player_view> remote_players() const;
 		[[nodiscard]] std::vector<chat_entry> chat_history() const;
 		[[nodiscard]] std::optional<protocol::TransformState> take_local_correction();
@@ -139,90 +147,90 @@ namespace kcd2o
 		{
 			client_options options;
 		};
+
 		struct disconnect_command
 		{
 		};
+
 		struct transform_command
 		{
 			protocol::TransformState transform;
 		};
+
 		struct chat_command
 		{
 			std::string text;
 		};
+
 		struct world_ready_command
 		{
 			protocol::ClientWorldReady message;
 		};
+
 		struct world_failed_command
 		{
 			protocol::ClientWorldFailed message;
 		};
+
 		struct profile_command
 		{
 			protocol::ClientProfileUpdate message;
 		};
+
 		struct avatar_command
 		{
 			protocol::ClientAvatarUpdate message;
 		};
+
 		struct world_object_command
 		{
 			protocol::ClientWorldObjectUpdate message;
 		};
+
 		struct world_item_command
 		{
 			protocol::ClientWorldItemUpdate message;
 		};
+
 		struct npc_discovery_command
 		{
 			protocol::ClientNpcDiscovery message;
 		};
+
 		struct npc_update_batch_command
 		{
 			protocol::ClientNpcUpdateBatch message;
 		};
+
 		struct sleep_command
 		{
 			bool sleeping{};
 		};
+
 		struct death_command
 		{
 		};
+
 		struct respawn_command
 		{
 		};
+
 		struct activity_start_command
 		{
 			protocol::ClientActivityStart message;
 		};
+
 		struct activity_end_command
 		{
 			protocol::ClientActivityEnd message;
 		};
+
 		struct voice_command
 		{
 			protocol::ClientVoiceFrame message;
 		};
-		using network_command = std::variant<
-		    connect_command,
-		    disconnect_command,
-		    transform_command,
-		    chat_command,
-		    world_ready_command,
-		    world_failed_command,
-		    profile_command,
-		    avatar_command,
-		    world_object_command,
-		    world_item_command,
-		    npc_discovery_command,
-		    npc_update_batch_command,
-		    sleep_command,
-		    death_command,
-		    respawn_command,
-		    activity_start_command,
-		    activity_end_command,
-		    voice_command>;
+
+		using network_command = std::variant<connect_command, disconnect_command, transform_command, chat_command, world_ready_command, world_failed_command, profile_command, avatar_command, world_object_command, world_item_command, npc_discovery_command, npc_update_batch_command, sleep_command, death_command, respawn_command, activity_start_command, activity_end_command, voice_command>;
 
 		struct timed_transform
 		{
@@ -244,36 +252,18 @@ namespace kcd2o
 		void advance_runtime_preflight();
 		void ensure_network_thread();
 		bool set_state(client_state state, std::string error = {});
-		[[nodiscard]] bool transition_state_locked(
-		    client_state state,
-		    std::string error = {});
+		[[nodiscard]] bool transition_state_locked(client_state state, std::string error = {});
 		void queue_network(network_command command);
-		void queue_profile_snapshot(
-		    protocol::PlayerProfile profile,
-		    bool allow_closing = false);
-		void queue_world_object_updates(
-		    std::vector<protocol::WorldObjectState> updates);
-		void queue_world_item_updates(
-		    std::vector<protocol::WorldItemState> updates);
-		void queue_npc_observations(
-		    std::vector<protocol::NpcObservation> observations,
-		    std::chrono::steady_clock::time_point now);
-		void handle_game_envelope(
-		    const protocol::Envelope &envelope,
-		    std::chrono::steady_clock::time_point now);
+		void queue_profile_snapshot(protocol::PlayerProfile profile, bool allow_closing = false);
+		void queue_world_object_updates(std::vector<protocol::WorldObjectState> updates);
+		void queue_world_item_updates(std::vector<protocol::WorldItemState> updates);
+		void queue_npc_observations(std::vector<protocol::NpcObservation> observations, std::chrono::steady_clock::time_point now);
+		void handle_game_envelope(const protocol::Envelope &envelope, std::chrono::steady_clock::time_point now);
 		void advance_sandbox_bootstrap();
 		void update_interpolation(std::chrono::steady_clock::time_point now);
-		void accept_snapshot_player(
-		    const protocol::PlayerSnapshot &snapshot,
-		    std::chrono::steady_clock::time_point now,
-		    bool reset_transform_stream = false);
-		[[nodiscard]] static protocol::TransformState interpolate(
-		    const protocol::TransformState &from,
-		    const protocol::TransformState &to,
-		    float factor);
-		[[nodiscard]] static protocol::TransformState extrapolate(
-		    const protocol::TransformState &from,
-		    float seconds);
+		void accept_snapshot_player(const protocol::PlayerSnapshot &snapshot, std::chrono::steady_clock::time_point now, bool reset_transform_stream = false);
+		[[nodiscard]] static protocol::TransformState interpolate(const protocol::TransformState &from, const protocol::TransformState &to, float factor);
+		[[nodiscard]] static protocol::TransformState extrapolate(const protocol::TransformState &from, float seconds);
 
 		mutable std::mutex m_state_mutex;
 		client_status m_status;
@@ -300,17 +290,12 @@ namespace kcd2o
 		std::optional<protocol::ServerBootstrap> m_pending_bootstrap;
 		std::optional<client_options> m_pending_connect;
 		bool m_profile_update_pending{};
-		std::unordered_map<std::uint64_t, protocol::WorldObjectState>
-		    m_world_objects;
-		std::unordered_map<std::uint64_t, protocol::WorldObjectState>
-		    m_pending_world_objects;
-		std::unordered_map<std::uint64_t, protocol::WorldObjectState>
-		    m_deferred_world_objects;
+		std::unordered_map<std::uint64_t, protocol::WorldObjectState> m_world_objects;
+		std::unordered_map<std::uint64_t, protocol::WorldObjectState> m_pending_world_objects;
+		std::unordered_map<std::uint64_t, protocol::WorldObjectState> m_deferred_world_objects;
 		std::unordered_map<std::string, protocol::WorldItemState> m_world_items;
-		std::unordered_map<std::string, protocol::WorldItemState>
-		    m_pending_world_items;
-		std::unordered_map<std::string, protocol::WorldItemState>
-		    m_deferred_world_items;
+		std::unordered_map<std::string, protocol::WorldItemState> m_pending_world_items;
+		std::unordered_map<std::string, protocol::WorldItemState> m_deferred_world_items;
 		std::unordered_map<std::uint64_t, protocol::NpcState> m_npcs;
 		std::unordered_map<std::uint64_t, std::uint64_t> m_npc_by_guid;
 		// Motion and gameplay use independent delivery streams. Keep the latest

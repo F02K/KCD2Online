@@ -1,6 +1,6 @@
 # Multiplayer architecture and prototype status
 
-This document describes KCD2Online **v0.1.5**. The implementation is an active
+This document describes KCD2Online **v0.1.6**. The implementation is an active
 prototype and is not intended for production servers or valuable saves.
 
 ## Versioning and compatibility
@@ -13,7 +13,7 @@ KCD2Online has one semantic project version shared by:
 - packaged artifacts; and
 - the multiplayer handshake.
 
-The current version is `0.1.5`. There is no separate public protocol or KCSE C
+The current version is `0.1.6`. There is no separate public protocol or KCSE C
 ABI version. The KCSE query boundary reads the same generated major, minor, and
 patch components as the rest of the project. During the prototype phase, all
 components must match exactly; a mismatch is rejected before authentication or
@@ -106,6 +106,22 @@ The ABI accepts only the catalog enum, never a caller-supplied Lua snippet or
 animation fragment. The existing animation observation and replication path
 then presents that one-shot to nearby remote avatars.
 
+Connected players can open the player hub with `F2` (rebindable in the
+KCD2Online controls). Its overview shows the current server, roster count,
+authoritative time and weather profile, sleep vote, local identity, and session
+references. Separate tabs expose connection and voice health, a copyable
+diagnostic summary, support and disconnect actions, and the multiplayer control
+reference. The hub captures game input while open and closes with `F2` or
+`Escape`.
+
+The `F3` social panel lists the verified server roster and network-role badges.
+Players can search the roster, locally hide another player's chat, locally mute
+or adjust that player's proximity-voice volume, copy the stable RP identity or
+a report reference containing the server and session IDs, and open support.
+Local communication preferences reset when the multiplayer session changes and
+are never presented as server moderation actions. `F3` is rebindable in the
+KCD2Online controls, and `Escape` closes the panel.
+
 ## Server authority and persistence
 
 The dedicated server owns the canonical multiplayer state. Its
@@ -122,14 +138,25 @@ The dedicated server owns the canonical multiplayer state. Its
 The `[permissions].owners` UUIDs implicitly receive `*`. Other grants support
 exact scopes and suffix wildcards such as `admin.*`. Available GM scopes are
 `admin.players`, `admin.announce`, `admin.kick`, `admin.teleport`,
-`admin.freeze`, and `admin.permissions`. They guard `/players`, `/announce`,
-`/kick`, `/goto`, `/bring`, `/freeze`, `/unfreeze`, and `/perm` on the server.
+`admin.freeze`, `admin.permissions`, `admin.warn`, `admin.ban`, and `admin.mute`.
+They guard `/players`, `/announce`, `/kick`, `/warn`, `/ban`, `/unban`,
+`/mute`, `/unmute`, `/goto`, `/bring`, `/freeze`, `/unfreeze`, and `/perm`.
+Ban and mute commands require a public reason plus either a duration in minutes
+or `permanent`; unban and unmute also accept an offline account UUID.
 The dedicated console can bootstrap access with `permission grant <player_id>
 <scope>`; console and in-game changes are audited.
 
+Authorized staff can open the in-game staff panel with `F7` (rebindable in the
+KCD2Online controls). The panel exposes the same server-authorized player,
+announcement, moderation, teleport, freeze, and permission operations as the
+GM chat commands. Buttons are hidden or disabled according to the effective
+scopes reported by the server, destructive actions require confirmation, and
+their results appear in the panel's GM log.
+
 When central account authentication is enabled, token introspection also returns the
 current network role. Supporters, moderators, admins, and owners bypass the server
-password, player limit, and backend-managed server membership ban. The server copies
+password and player limit, but an explicit server membership ban applies to every role.
+The server copies
 the role into authoritative player snapshots and chat broadcasts so clients can show
 a non-spoofable badge. Network admins and owners additionally receive effective `*`
 permission without an entry in `permissions.json`. Version, game-build, content, and
@@ -138,6 +165,13 @@ protocol checks are never bypassed.
 Servers can opt into the backend-managed membership whitelist with
 `[auth].whitelist_enabled = true`. Regular accounts then need `whitelisted=true` in
 their server membership record; network staff retain their join bypass.
+
+Warnings, server bans, and server-local chat/voice mutes are written through the
+authenticated backend server API and kept in its moderation history. They are applied
+to the current session immediately. Each 30-second heartbeat returns the effective
+restriction state of every active account, so backend changes and expired measures are
+also enforced without requiring the player to reconnect. The dedicated console uses
+the equivalent `moderate` command.
 
 Persistence uses a temporary sibling followed by atomic replacement. Player
 IDs, object identities, item instance UUIDs, and revisions survive restarts.

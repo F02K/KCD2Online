@@ -232,6 +232,14 @@ class StartupSafetyTests(unittest.TestCase):
         self.assertNotIn("interface->Open(1)", runtime)
         self.assertIn("return changed && !unload_transition;", runtime)
 
+        end = runtime.index("void native_runtime::end_sandbox")
+        end_sandbox = runtime[end:runtime.index(
+            "std::string native_runtime::current_level_id", end
+        )]
+        self.assertIn("cancel_preparation_only = true;", end_sandbox)
+        self.assertIn("if (cancel_preparation_only)", end_sandbox)
+        self.assertNotIn("const auto world_loaded", end_sandbox)
+
         self.assertIn("previous == client_state::closing", client)
         self.assertIn("!m_status.error.empty()", client)
         self.assertIn("m_runtime.end_sandbox(reason);", client)

@@ -33,13 +33,14 @@ namespace kcd2o::kcse
 	public:
 		native_voice();
 		~native_voice();
-		native_voice(const native_voice &) = delete;
+		native_voice(const native_voice &)            = delete;
 		native_voice &operator=(const native_voice &) = delete;
 
 		void set_active(bool active) noexcept;
 		[[nodiscard]] voice_capture_state capture_state() const noexcept;
 		[[nodiscard]] std::vector<protocol::ClientVoiceFrame> poll_outbound();
 		void receive(const protocol::ServerVoiceFrame &frame);
+		[[nodiscard]] bool set_player_volume(player_id player, float volume) noexcept;
 		void update_players(std::span<const voice_player_pose> players);
 		void tick();
 		void reset();
@@ -48,4 +49,4 @@ namespace kcd2o::kcse
 		class implementation;
 		std::unique_ptr<implementation> m_impl;
 	};
-}
+} // namespace kcd2o::kcse

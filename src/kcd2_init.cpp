@@ -8,6 +8,9 @@
 #include <config/config.hpp>
 #include <gui/gui.hpp>
 #include <gui/ingame_chat.hpp>
+#include <gui/ingame_player_hub.hpp>
+#include <gui/ingame_social_panel.hpp>
+#include <gui/ingame_staff_panel.hpp>
 #include <gui/native_multiplayer_menu.hpp>
 #include <gui/renderer.hpp>
 #include <kcse/client_proxy.hpp>
@@ -372,6 +375,18 @@ namespace big
 	static void hook_PostInputEvent(char **a1, __int64 a2, __int64 a3, __int64 a4)
 	{
 		if (native_multiplayer_menu::blocks_game_input())
+		{
+			return;
+		}
+		if (ingame_staff_panel::blocks_game_input())
+		{
+			return;
+		}
+		if (ingame_player_hub::blocks_game_input())
+		{
+			return;
+		}
+		if (ingame_social_panel::blocks_game_input())
 		{
 			return;
 		}

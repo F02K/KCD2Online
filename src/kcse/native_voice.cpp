@@ -462,6 +462,20 @@ namespace kcd2o::kcse
 			m_inbound.push_back(frame);
 		}
 
+		[[nodiscard]] bool set_player_volume(
+		    player_id player, float volume) noexcept
+		{
+			if (player == 0 || !std::isfinite(volume))
+				return false;
+
+			{
+				std::scoped_lock lock(m_player_volume_mutex);
+				m_player_volumes[player] = std::clamp(volume, 0.0F, 1.5F);
+			}
+			m_player_volume_generation.fetch_add(1, std::memory_order_release);
+			return true;
+		}
+
 		void update_players(std::span<const voice_player_pose> players)
 		{
 			std::unordered_set<player_id> present;
@@ -483,10 +497,16 @@ namespace kcd2o::kcse
 				reset_game_thread();
 			drain_inbound();
 			(void)ensure_fmod();
+			const auto player_volume_generation =
+			    m_player_volume_generation.load(std::memory_order_acquire);
+			const auto player_volume_changed =
+			    player_volume_generation != m_applied_player_volume_generation;
 			const auto now = clock::now();
 			for (auto iterator = m_speakers.begin(); iterator != m_speakers.end();)
 			{
 				auto &speaker = *iterator->second;
+				if (player_volume_changed)
+					apply_range(speaker);
 				if (const auto pose = m_poses.find(speaker.id); pose != m_poses.end())
 				{
 					speaker.entity_id = pose->second.entity_id;
@@ -511,6 +531,7 @@ namespace kcd2o::kcse
 					++iterator;
 				}
 			}
+			m_applied_player_volume_generation = player_volume_generation;
 		}
 
 		void reset()
@@ -527,6 +548,11 @@ namespace kcd2o::kcse
 				std::scoped_lock lock(m_inbound_mutex);
 				m_inbound.clear();
 			}
+			{
+				std::scoped_lock lock(m_player_volume_mutex);
+				m_player_volumes.clear();
+			}
+			m_player_volume_generation.fetch_add(1, std::memory_order_release);
 			m_reset_requested.store(true, std::memory_order_release);
 			m_clear_requested.store(true, std::memory_order_release);
 		}
@@ -1028,6 +1054,12 @@ namespace kcd2o::kcse
 			}
 			(void)m_api.channel_set_3d_min_max_distance(
 			    speaker.channel, voice_min_distance, maximum);
+			{
+				std::scoped_lock lock(m_player_volume_mutex);
+				if (const auto found = m_player_volumes.find(speaker.id);
+				    found != m_player_volumes.end())
+					volume *= found->second;
+			}
 			(void)m_api.channel_set_volume(speaker.channel, volume);
 		}
 
@@ -1308,6 +1340,10 @@ namespace kcd2o::kcse
 		std::deque<protocol::ClientVoiceFrame> m_outbound;
 		std::mutex m_inbound_mutex;
 		std::deque<protocol::ServerVoiceFrame> m_inbound;
+		std::mutex m_player_volume_mutex;
+		std::unordered_map<player_id, float> m_player_volumes;
+		std::atomic<std::uint64_t> m_player_volume_generation{};
+		std::uint64_t m_applied_player_volume_generation{};
 		std::unordered_map<player_id, voice_player_pose> m_poses;
 		std::unordered_map<player_id, std::unique_ptr<speaker_state>> m_speakers;
 		fmod_api m_api;
@@ -1339,6 +1375,11 @@ namespace kcd2o::kcse
 	void native_voice::receive(const protocol::ServerVoiceFrame &frame)
 	{
 		m_impl->receive(frame);
+	}
+
+	bool native_voice::set_player_volume(player_id player, float volume) noexcept
+	{
+		return m_impl->set_player_volume(player, volume);
 	}
 
 	void native_voice::update_players(std::span<const voice_player_pose> players)

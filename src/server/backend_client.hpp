@@ -38,8 +38,14 @@ namespace kcd2o::server
 		    const heartbeat_data &data) const;
 		[[nodiscard]] std::optional<network_identity> introspect(
 		    std::string_view access_token,
+		    authentication_failure &failure) const;
+		[[nodiscard]] bool heartbeat(
+		    const heartbeat_data &data,
+		    std::vector<account_restriction> &restrictions,
 		    std::string &error) const;
-		[[nodiscard]] bool heartbeat(const heartbeat_data &data, std::string &error) const;
+		[[nodiscard]] bool moderate(
+		    const moderation_action &action,
+		    std::string &error) const;
 
 	private:
 		[[nodiscard]] std::string post(
