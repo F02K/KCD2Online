@@ -155,6 +155,28 @@ namespace kcd2o::property
 		    player_persistent_id, property->property_id(), requested, now_ms);
 	}
 
+	bool service::authorize_property(
+	    std::string_view player_persistent_id,
+	    std::string_view property_id,
+	    capability requested,
+	    std::uint64_t now_ms) const
+	{
+		return find_property(property_id)
+		    && has_capability(
+		        player_persistent_id, property_id, requested, now_ms);
+	}
+
+	protocol::PropertyRole service::effective_role(
+	    std::string_view player_persistent_id,
+	    std::string_view property_id,
+	    std::uint64_t now_ms) const
+	{
+		const auto *assignment = highest_assignment(
+		    player_persistent_id, property_id, now_ms);
+		return assignment ? assignment->role()
+		                  : protocol::PROPERTY_ROLE_UNSPECIFIED;
+	}
+
 	bool service::system_assign_owner(
 	    std::string_view property_id,
 	    std::string_view target_player_id,
@@ -186,6 +208,53 @@ namespace kcd2o::property
 		assignment->set_subject_player_id(target_player_id);
 		assignment->set_role(protocol::PROPERTY_ROLE_OWNER);
 		assignment->set_created_at_ms(now_ms);
+		m_ledger.set_revision(m_ledger.revision() + 1);
+		error.clear();
+		return true;
+	}
+
+	bool service::system_set_owner(
+	    std::string_view property_id,
+	    std::string_view target_player_id,
+	    std::string assignment_id,
+	    std::uint64_t now_ms,
+	    std::string &error)
+	{
+		if (!find_property(property_id) || !is_uuid(target_player_id)
+		    || !is_uuid(assignment_id))
+		{
+			error = "property, player identity, or assignment identity is invalid";
+			return false;
+		}
+		std::unordered_set<std::string> removed;
+		for (const auto &assignment : m_ledger.assignments())
+		{
+			if (assignment.property_id() == property_id
+			    && assignment.role() == protocol::PROPERTY_ROLE_OWNER)
+				removed.insert(assignment.assignment_id());
+		}
+		bool changed = true;
+		while (changed)
+		{
+			changed = false;
+			for (const auto &assignment : m_ledger.assignments())
+			{
+				if (removed.contains(assignment.granted_by_assignment_id())
+				    && removed.insert(assignment.assignment_id()).second)
+					changed = true;
+			}
+		}
+		for (auto index = m_ledger.assignments_size(); index-- > 0;)
+		{
+			if (removed.contains(m_ledger.assignments(index).assignment_id()))
+				m_ledger.mutable_assignments()->DeleteSubrange(index, 1);
+		}
+		auto *owner = m_ledger.add_assignments();
+		owner->set_assignment_id(std::move(assignment_id));
+		owner->set_property_id(property_id);
+		owner->set_subject_player_id(target_player_id);
+		owner->set_role(protocol::PROPERTY_ROLE_OWNER);
+		owner->set_created_at_ms(now_ms);
 		m_ledger.set_revision(m_ledger.revision() + 1);
 		error.clear();
 		return true;
@@ -238,6 +307,50 @@ namespace kcd2o::property
 		assignment->set_role(role);
 		assignment->set_granted_by_player_id(actor_player_id);
 		assignment->set_granted_by_assignment_id(actor->assignment_id());
+		assignment->set_created_at_ms(now_ms);
+		assignment->set_expires_at_ms(expires_at_ms);
+		m_ledger.set_revision(m_ledger.revision() + 1);
+		error.clear();
+		return true;
+	}
+
+	bool service::system_grant_role(
+	    std::string_view property_id,
+	    std::string_view target_player_id,
+	    protocol::PropertyRole role,
+	    std::string assignment_id,
+	    std::uint64_t now_ms,
+	    std::uint64_t expires_at_ms,
+	    std::string &error)
+	{
+		if (!find_property(property_id) || !is_uuid(target_player_id)
+		    || !is_uuid(assignment_id)
+		    || role == protocol::PROPERTY_ROLE_UNSPECIFIED
+		    || role == protocol::PROPERTY_ROLE_OWNER
+		    || (expires_at_ms != 0 && expires_at_ms <= now_ms))
+		{
+			error = "property role grant is invalid";
+			return false;
+		}
+		if (std::ranges::any_of(
+		        m_ledger.assignments(),
+		        [&](const protocol::PropertyRoleAssignment &assignment)
+		        {
+			        return assignment.property_id() == property_id
+			            && assignment.subject_player_id() == target_player_id
+			            && assignment.role() == role
+			            && assignment_active(assignment, now_ms);
+		        }))
+		{
+			error = "player already has this property role";
+			return false;
+		}
+		auto *assignment = m_ledger.add_assignments();
+		assignment->set_assignment_id(std::move(assignment_id));
+		assignment->set_property_id(property_id);
+		assignment->set_subject_player_id(target_player_id);
+		assignment->set_role(role);
+		assignment->set_granted_by_player_id("system");
 		assignment->set_created_at_ms(now_ms);
 		assignment->set_expires_at_ms(expires_at_ms);
 		m_ledger.set_revision(m_ledger.revision() + 1);
@@ -382,7 +495,8 @@ namespace kcd2o::property
 		    || !visited.insert(assignment.assignment_id()).second)
 			return false;
 		if (assignment.granted_by_assignment_id().empty())
-			return assignment.role() == protocol::PROPERTY_ROLE_OWNER;
+			return assignment.role() == protocol::PROPERTY_ROLE_OWNER
+			    || assignment.granted_by_player_id() == "system";
 		const auto parent = std::ranges::find_if(
 		    m_ledger.assignments(),
 		    [&](const protocol::PropertyRoleAssignment &candidate)

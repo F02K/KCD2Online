@@ -30,16 +30,20 @@ namespace
 		}
 		std::size_t resources{};
 		std::size_t markers{};
+		std::size_t ownership_areas{};
 		for (const auto &property : catalog.properties())
 		{
 			resources += static_cast<std::size_t>(property.resources_size());
+			ownership_areas += static_cast<std::size_t>(
+			    property.ownership_area_guids_size());
 			markers += static_cast<std::size_t>(
 			    property.has_marker_position()
 			    && property.marker_entity_guid() != 0);
 		}
 		std::cout << "level " << catalog.level_id() << ": "
 		          << catalog.properties_size() << " properties, " << resources
-		          << " resources, " << markers << " home anchors -> " << output
+		          << " resources, " << ownership_areas << " ownership areas, "
+		          << markers << " home anchors -> " << output
 		          << '\n';
 		return true;
 	}

@@ -136,6 +136,40 @@ namespace kcd2o::kcse
 		return api && api->set_player_voice_volume(player, volume) != 0;
 	}
 
+	voice_settings_view ui_client_proxy::voice_settings() const
+	{
+		voice_settings_view result;
+		const auto *api = load();
+		if (!api || api->get_voice_settings(&result) == 0)
+			copy_text(result.diagnostic, "KCD2Online KCSE client is not loaded.");
+		return result;
+	}
+
+	bool ui_client_proxy::set_voice_settings(
+	    const voice_settings_view &settings) const
+	{
+		const auto *api = load();
+		return api && api->set_voice_settings(&settings) != 0;
+	}
+
+	std::vector<voice_device_view> ui_client_proxy::voice_devices() const
+	{
+		const auto *api = load();
+		if (!api)
+			return {};
+		const auto count = api->copy_voice_devices(nullptr, 0);
+		std::vector<voice_device_view> result(count);
+		if (count != 0)
+			result.resize(std::min(count, api->copy_voice_devices(result.data(), count)));
+		return result;
+	}
+
+	void ui_client_proxy::refresh_voice_devices() const
+	{
+		if (const auto *api = load())
+			api->refresh_voice_devices();
+	}
+
 	void ui_client_proxy::set_diagnostic_logging(bool enabled) const
 	{
 		if (const auto *api = load())
@@ -195,6 +229,11 @@ namespace kcd2o::kcse
 		result.time_of_day_hours            = value.time_of_day_hours;
 		result.time_scale                   = value.time_scale;
 		result.weather_id                   = value.weather_id;
+		result.property_action_generation = value.property_action_generation;
+		result.property_action_entity_guid = value.property_action_entity_guid;
+		result.property_operation_generation = value.property_operation_generation;
+		result.property_operation_success = value.property_operation_success != 0;
+		result.property_operation_message = value.property_operation_message;
 		if (value.network_role <= static_cast<std::uint32_t>(protocol::NETWORK_ROLE_OWNER))
 		{
 			result.network_role = static_cast<protocol::NetworkRole>(value.network_role);
@@ -294,6 +333,56 @@ namespace kcd2o::kcse
 			                      protocol::NETWORK_ROLE_USER});
 		}
 		return result;
+	}
+
+	protocol::PropertyAccessSnapshot ui_client_proxy::property_access() const
+	{
+		protocol::PropertyAccessSnapshot result;
+		const auto *api = load();
+		if (!api)
+			return result;
+		const auto size = api->copy_property_access(nullptr, 0);
+		std::string encoded(size, '\0');
+		if (size != 0
+		    && api->copy_property_access(encoded.data(), size) == size)
+			(void)result.ParseFromString(encoded);
+		return result;
+	}
+
+	bool ui_client_proxy::request_property_role(
+	    std::string property_id,
+	    std::string target_player_id,
+	    protocol::PropertyRole role,
+	    std::uint64_t expires_at_ms) const
+	{
+		const auto *api = load();
+		return api && api->request_property_role(
+		    property_id.c_str(), target_player_id.c_str(),
+		    static_cast<std::uint32_t>(role), expires_at_ms) != 0;
+	}
+
+	bool ui_client_proxy::revoke_property_role(std::string assignment_id) const
+	{
+		const auto *api = load();
+		return api && api->revoke_property_role(assignment_id.c_str()) != 0;
+	}
+
+	bool ui_client_proxy::set_property_owner(
+	    std::string property_id,
+	    std::string target_player_id) const
+	{
+		const auto *api = load();
+		return api && api->set_property_owner(
+		    property_id.c_str(), target_player_id.c_str()) != 0;
+	}
+
+	bool ui_client_proxy::set_property_locked(
+	    std::uint64_t entity_guid,
+	    bool locked) const
+	{
+		const auto *api = load();
+		return api && api->set_property_locked(
+		    entity_guid, locked ? 1U : 0U) != 0;
 	}
 
 	ui_client_proxy &ui_client()

@@ -650,6 +650,11 @@ namespace
 			result->time_of_day_hours            = status.time_of_day_hours;
 			result->time_scale                   = status.time_scale;
 			result->weather_id                   = status.weather_id;
+			result->property_action_generation = status.property_action_generation;
+			result->property_action_entity_guid = status.property_action_entity_guid;
+			result->property_operation_generation = status.property_operation_generation;
+			result->property_operation_success = status.property_operation_success ? 1U : 0U;
+			copy_text(result->property_operation_message, status.property_operation_message);
 			result->network_role                 = static_cast<std::uint32_t>(status.network_role);
 			std::string permissions;
 			for (const auto &permission : status.effective_permissions)
@@ -789,7 +794,201 @@ namespace
 		}
 	}
 
-	const kcd2o::kcse::client_api g_api{sizeof(kcd2o::kcse::client_api), kcd2o::kcd2o_version_major, kcd2o::kcd2o_version_minor, kcd2o::kcd2o_version_patch, abi_get_runtime_status, abi_connect, abi_disconnect, abi_send_chat, abi_play_emote, abi_select_avatar, abi_attempt_sleep, abi_request_respawn, abi_get_status, abi_copy_players, abi_copy_chat, abi_copy_avatar_archetypes, abi_set_diagnostic_logging, sizeof(kcd2o::kcse::client_status_view), sizeof(kcd2o::kcse::remote_player_view), abi_set_player_voice_volume};
+	std::uint32_t __cdecl abi_copy_property_access(
+	    void *output,
+	    std::uint32_t capacity) noexcept
+	{
+		try
+		{
+			if (!g_client)
+				return 0;
+			const auto encoded = g_client->property_access().SerializeAsString();
+			if (!output || capacity == 0)
+				return narrow_count(encoded.size());
+			if (capacity < encoded.size())
+				return 0;
+			std::memcpy(output, encoded.data(), encoded.size());
+			return narrow_count(encoded.size());
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_get_voice_settings(
+	    kcd2o::kcse::voice_settings_view *result) noexcept
+	{
+		try
+		{
+			if (!result || result->struct_size != sizeof(*result) || !g_runtime)
+				return 0;
+			const auto settings = g_runtime->voice_configuration();
+			const auto state = g_runtime->voice_status();
+			copy_text(result->input_device_id, settings.input_device_id);
+			result->input_gain = settings.input_gain;
+			result->output_volume = settings.output_volume;
+			result->noise_suppression_db = settings.noise_suppression_db;
+			result->noise_suppression = settings.noise_suppression ? 1U : 0U;
+			result->automatic_gain = settings.automatic_gain ? 1U : 0U;
+			result->voice_gate = settings.voice_gate ? 1U : 0U;
+			result->voice_gate_probability = settings.voice_gate_probability;
+			result->microphone_test = settings.microphone_test ? 1U : 0U;
+			result->capture_available = state.available ? 1U : 0U;
+			copy_text(result->active_device_name, state.device_name);
+			copy_text(result->diagnostic, state.diagnostic);
+			return 1;
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_set_voice_settings(
+	    const kcd2o::kcse::voice_settings_view *value) noexcept
+	{
+		try
+		{
+			if (!value || value->struct_size != sizeof(*value) || !g_runtime)
+				return 0;
+			const auto device_length = strnlen_s(
+			    value->input_device_id, kcd2o::kcse::text_capacity);
+			if (device_length == kcd2o::kcse::text_capacity)
+				return 0;
+			kcd2o::kcse::voice_settings settings;
+			settings.input_device_id.assign(value->input_device_id, device_length);
+			settings.input_gain = value->input_gain;
+			settings.output_volume = value->output_volume;
+			settings.noise_suppression_db = value->noise_suppression_db;
+			settings.noise_suppression = value->noise_suppression != 0;
+			settings.automatic_gain = value->automatic_gain != 0;
+			settings.voice_gate = value->voice_gate != 0;
+			settings.voice_gate_probability = value->voice_gate_probability;
+			settings.microphone_test = value->microphone_test != 0;
+			return g_runtime->set_voice_configuration(settings) ? 1U : 0U;
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_copy_voice_devices(
+	    kcd2o::kcse::voice_device_view *output,
+	    std::uint32_t capacity) noexcept
+	{
+		try
+		{
+			if (!g_runtime)
+				return 0;
+			const auto devices = g_runtime->voice_input_devices();
+			if (!output || capacity == 0)
+				return narrow_count(devices.size());
+			const auto count = std::min<std::size_t>(devices.size(), capacity);
+			for (std::size_t index{}; index < count; ++index)
+			{
+				output[index] = {};
+				copy_text(output[index].id, devices[index].id);
+				copy_text(output[index].name, devices[index].name);
+				output[index].is_default = devices[index].is_default ? 1U : 0U;
+			}
+			return narrow_count(count);
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	void __cdecl abi_refresh_voice_devices() noexcept
+	{
+		if (g_runtime)
+			g_runtime->refresh_voice_input_devices();
+	}
+
+	std::uint32_t __cdecl abi_request_property_role(
+	    const char *property_id,
+	    const char *target_player_id,
+	    std::uint32_t role,
+	    std::uint64_t expires_at_ms) noexcept
+	{
+		try
+		{
+			if (!g_client || !property_id || !target_player_id)
+				return 0;
+			const auto property_length = strnlen_s(property_id, kcd2o::kcse::text_capacity);
+			const auto player_length = strnlen_s(target_player_id, kcd2o::kcse::short_text_capacity);
+			if (property_length == 0 || property_length == kcd2o::kcse::text_capacity
+			    || player_length == 0 || player_length == kcd2o::kcse::short_text_capacity
+			    || !kcd2o::protocol::PropertyRole_IsValid(static_cast<int>(role)))
+				return 0;
+			return g_client->request_property_role(
+			    std::string(property_id, property_length),
+			    std::string(target_player_id, player_length),
+			    static_cast<kcd2o::protocol::PropertyRole>(role), expires_at_ms) ? 1U : 0U;
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_revoke_property_role(
+	    const char *assignment_id) noexcept
+	{
+		try
+		{
+			if (!g_client || !assignment_id)
+				return 0;
+			const auto length = strnlen_s(assignment_id, kcd2o::kcse::short_text_capacity);
+			return length > 0 && length < kcd2o::kcse::short_text_capacity
+			    && g_client->revoke_property_role(std::string(assignment_id, length));
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_set_property_owner(
+	    const char *property_id,
+	    const char *target_player_id) noexcept
+	{
+		try
+		{
+			if (!g_client || !property_id || !target_player_id)
+				return 0;
+			const auto property_length = strnlen_s(property_id, kcd2o::kcse::text_capacity);
+			const auto player_length = strnlen_s(target_player_id, kcd2o::kcse::short_text_capacity);
+			return property_length > 0 && property_length < kcd2o::kcse::text_capacity
+			    && player_length > 0 && player_length < kcd2o::kcse::short_text_capacity
+			    && g_client->set_property_owner(
+			        std::string(property_id, property_length),
+			        std::string(target_player_id, player_length));
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_set_property_locked(
+	    std::uint64_t entity_guid,
+	    std::uint32_t locked) noexcept
+	{
+		try
+		{
+			return g_client && g_client->set_property_locked(
+			    entity_guid, locked != 0) ? 1U : 0U;
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	const kcd2o::kcse::client_api g_api{sizeof(kcd2o::kcse::client_api), kcd2o::kcd2o_version_major, kcd2o::kcd2o_version_minor, kcd2o::kcd2o_version_patch, abi_get_runtime_status, abi_connect, abi_disconnect, abi_send_chat, abi_play_emote, abi_select_avatar, abi_attempt_sleep, abi_request_respawn, abi_get_status, abi_copy_players, abi_copy_chat, abi_copy_avatar_archetypes, abi_set_diagnostic_logging, sizeof(kcd2o::kcse::client_status_view), sizeof(kcd2o::kcse::remote_player_view), abi_set_player_voice_volume, abi_copy_property_access, abi_request_property_role, abi_revoke_property_role, abi_set_property_owner, abi_set_property_locked, abi_get_voice_settings, abi_set_voice_settings, abi_copy_voice_devices, abi_refresh_voice_devices};
 } // namespace
 
 KCSE_EXPORT KCSE::PluginVersionData KCSEPlugin_Version = {

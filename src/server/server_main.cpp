@@ -3,6 +3,9 @@
 #include "server/server_config.hpp"
 #include "server/server_core.hpp"
 #include "server/backend_client.hpp"
+#include "server/dashboard_config.hpp"
+#include "server/dashboard_server.hpp"
+#include "server/dashboard_telemetry.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -19,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -92,6 +96,16 @@ int main(int argc, char **argv)
 		    ? std::filesystem::path(argv[1])
 		    : std::filesystem::path("server.toml");
 		auto config = kcd2o::server::load_server_config(config_path);
+		const auto dashboard_config_path = argc > 2
+		    ? std::filesystem::path(argv[2])
+		    : std::filesystem::absolute(config_path).parent_path()
+		        / "dashboard.toml";
+		kcd2o::server::dashboard_config dashboard_config;
+		if (std::filesystem::is_regular_file(dashboard_config_path))
+		{
+			dashboard_config = kcd2o::server::load_dashboard_config(
+			    dashboard_config_path);
+		}
 		kcd2o::net::runtime network_runtime;
 		std::unique_ptr<kcd2o::server::backend_client> backend;
 		if (config.account_auth_enabled)
@@ -147,6 +161,14 @@ int main(int argc, char **argv)
 			    }
 			    return backend->moderate(action, error);
 		    });
+		std::unique_ptr<kcd2o::server::dashboard_telemetry> dashboard_telemetry;
+		if (dashboard_config.enabled)
+		{
+			dashboard_telemetry =
+			    std::make_unique<kcd2o::server::dashboard_telemetry>(
+			        config,
+			        dashboard_config);
+		}
 
 		auto console = std::make_shared<command_queue>();
 		std::thread(
@@ -170,10 +192,12 @@ int main(int argc, char **argv)
 			return kcd2o::server::clock::now();
 		};
 
+		std::unordered_set<kcd2o::connection_id> active_connections;
 		kcd2o::net::server_transport transport({
 		    .connected =
 		        [&](kcd2o::connection_id connection)
 		        {
+			        active_connections.insert(connection);
 			        std::cout << "connection " << connection << " accepted from "
 			                  << transport.connection_description(connection) << '\n';
 			        core.on_transport_connected(connection, now());
@@ -183,6 +207,7 @@ int main(int argc, char **argv)
 		            bool allow_reconnect,
 		            std::string reason)
 		        {
+			        active_connections.erase(connection);
 			        std::cout << "connection " << connection << " closed: "
 			                  << reason << '\n';
 			        core.on_transport_disconnected(
@@ -195,10 +220,14 @@ int main(int argc, char **argv)
 		        [&](kcd2o::connection_id connection,
 		            std::span<const std::byte> bytes)
 		        {
+			        if (dashboard_telemetry)
+				        dashboard_telemetry->record_received(bytes.size());
 			        std::string error;
 			        const auto envelope = kcd2o::decode(bytes, &error);
 			        if (!envelope)
 			        {
+				        if (dashboard_telemetry)
+					        dashboard_telemetry->record_malformed();
 				        std::cerr << "connection " << connection
 				                  << " sent malformed data: " << error << '\n';
 				        transport.close(
@@ -215,6 +244,17 @@ int main(int argc, char **argv)
 		std::cout << config.name << " (KCD2Online " << kcd2o::kcd2o_version
 		          << ", prototype) listening on " << config.bind_address << ':'
 		          << config.port << " for level " << config.level_id << '\n';
+		std::unique_ptr<kcd2o::server::dashboard_server> dashboard;
+		if (dashboard_telemetry)
+		{
+			dashboard = std::make_unique<kcd2o::server::dashboard_server>(
+			    dashboard_config,
+			    [&] { return dashboard_telemetry->snapshot(); });
+			dashboard->start();
+			std::cout << "read-only dashboard listening on "
+			          << dashboard->endpoint() << " (token file: "
+			          << dashboard_config.token_file.string() << ")\n";
+		}
 		print_help();
 		std::atomic<std::uint64_t> published_player_count{};
 		std::mutex published_accounts_mutex;
@@ -268,6 +308,7 @@ int main(int argc, char **argv)
 		const auto tick_duration =
 		    std::chrono::duration<double>(1.0 / config.tick_rate);
 		auto next_tick = kcd2o::server::clock::now();
+		auto next_dashboard_publish = next_tick;
 		while (running)
 		{
 			transport.poll();
@@ -774,7 +815,14 @@ int main(int argc, char **argv)
 			}
 			if (tick_now >= next_tick)
 			{
+				const auto tick_started = kcd2o::server::clock::now();
 				core.tick(tick_now);
+				if (dashboard_telemetry)
+				{
+					dashboard_telemetry->record_tick(
+					    std::chrono::duration<double, std::milli>(
+					        kcd2o::server::clock::now() - tick_started));
+				}
 				next_tick = tick_now
 				    + std::chrono::duration_cast<kcd2o::server::clock::duration>(
 				        tick_duration);
@@ -831,6 +879,30 @@ int main(int argc, char **argv)
 					    "connection closed by server",
 					    true);
 				}
+				if (dashboard_telemetry)
+				{
+					dashboard_telemetry->record_sent(
+					    encoded ? encoded->bytes.size() : 0,
+					    kcd2o::lane_for(outbound.envelope),
+					    sent,
+					    congested,
+					    outbound.delivery);
+				}
+			}
+
+			if (dashboard_telemetry && tick_now >= next_dashboard_publish)
+			{
+				std::vector<kcd2o::net::connection_statistics> statistics;
+				statistics.reserve(active_connections.size());
+				for (const auto connection : active_connections)
+				{
+					if (const auto value = transport.statistics(connection))
+						statistics.push_back(*value);
+				}
+				dashboard_telemetry->publish(core, statistics, tick_now);
+				next_dashboard_publish = tick_now
+				    + std::chrono::milliseconds(
+				        dashboard_config.refresh_interval_ms);
 			}
 
 			std::this_thread::sleep_for(1ms);

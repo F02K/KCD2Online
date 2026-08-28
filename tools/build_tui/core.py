@@ -1252,6 +1252,7 @@ def package_artifacts(
             result.server_path.with_suffix(".pdb"),
             result.game_data_generator_path,
             project_root / "server.toml.example",
+            project_root / "dashboard.toml.example",
             project_root / "starter_profile.toml",
             project_root / "data" / "server" / "start_server.bat",
             project_root / "data" / "server" / "README.txt",

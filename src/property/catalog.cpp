@@ -49,6 +49,7 @@ namespace kcd2o::property
 		{
 			std::string root;
 			std::set<std::uint64_t> anchors;
+			std::set<std::uint64_t> ownership_areas;
 			std::set<std::uint64_t> explicit_doors;
 			float confidence{};
 			bool scheduler_backed{};
@@ -490,6 +491,7 @@ namespace kcd2o::property
 				property.root = root;
 				property.anchors.insert(source.guid);
 				property.anchors.insert(area->guid);
+				property.ownership_areas.insert(area->guid);
 				property.confidence = std::max(property.confidence, 0.95F);
 				property.scheduler_backed = true;
 				property.marker_anchor = source.guid;
@@ -514,6 +516,7 @@ namespace kcd2o::property
 			auto &property = candidates[area.normalized_path];
 			property.root = area.normalized_path;
 			property.anchors.insert(area.guid);
+			property.ownership_areas.insert(area.guid);
 			property.confidence = std::max(property.confidence, 0.82F);
 			if (property.marker_anchor == 0)
 				property.marker_anchor = area.guid;
@@ -549,6 +552,8 @@ namespace kcd2o::property
 			definition->set_source_path(root);
 			definition->set_inferred_name(inferred_name(root));
 			definition->set_discovery_confidence(source.confidence);
+			for (const auto area_guid : source.ownership_areas)
+				definition->add_ownership_area_guids(area_guid);
 			const auto anchor = source.marker_anchor != 0
 			    ? source.marker_anchor
 			    : (source.anchors.empty() ? 0 : *source.anchors.begin());

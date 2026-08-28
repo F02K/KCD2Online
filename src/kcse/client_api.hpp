@@ -88,6 +88,11 @@ namespace kcd2o::kcse
 		double time_of_day_hours{};
 		float time_scale{};
 		std::uint32_t weather_id{};
+		std::uint32_t property_action_generation{};
+		std::uint64_t property_action_entity_guid{};
+		std::uint32_t property_operation_generation{};
+		std::uint32_t property_operation_success{};
+		char property_operation_message[text_capacity]{};
 	};
 
 	struct remote_player_view
@@ -108,6 +113,30 @@ namespace kcd2o::kcse
 		char display_name[short_text_capacity]{};
 		char text[text_capacity]{};
 		std::uint32_t network_role{};
+	};
+
+	struct voice_settings_view
+	{
+		std::uint32_t struct_size{sizeof(voice_settings_view)};
+		char input_device_id[text_capacity]{};
+		float input_gain{1.0F};
+		float output_volume{1.0F};
+		std::int32_t noise_suppression_db{-24};
+		std::uint32_t noise_suppression{1};
+		std::uint32_t automatic_gain{1};
+		std::uint32_t voice_gate{};
+		std::int32_t voice_gate_probability{55};
+		std::uint32_t microphone_test{};
+		std::uint32_t capture_available{};
+		char active_device_name[text_capacity]{};
+		char diagnostic[text_capacity]{};
+	};
+
+	struct voice_device_view
+	{
+		char id[text_capacity]{};
+		char name[text_capacity]{};
+		std::uint32_t is_default{};
 	};
 
 	struct client_api
@@ -132,12 +161,21 @@ namespace kcd2o::kcse
 		std::uint32_t status_view_size{sizeof(client_status_view)};
 		std::uint32_t remote_player_view_size{sizeof(remote_player_view)};
 		std::uint32_t(__cdecl *set_player_voice_volume)(std::uint64_t player_id, float volume) noexcept {};
+		std::uint32_t(__cdecl *copy_property_access)(void *output, std::uint32_t capacity) noexcept {};
+		std::uint32_t(__cdecl *request_property_role)(const char *property_id, const char *target_player_id, std::uint32_t role, std::uint64_t expires_at_ms) noexcept {};
+		std::uint32_t(__cdecl *revoke_property_role)(const char *assignment_id) noexcept {};
+		std::uint32_t(__cdecl *set_property_owner)(const char *property_id, const char *target_player_id) noexcept {};
+		std::uint32_t(__cdecl *set_property_locked)(std::uint64_t entity_guid, std::uint32_t locked) noexcept {};
+		std::uint32_t(__cdecl *get_voice_settings)(voice_settings_view *result) noexcept {};
+		std::uint32_t(__cdecl *set_voice_settings)(const voice_settings_view *settings) noexcept {};
+		std::uint32_t(__cdecl *copy_voice_devices)(voice_device_view *output, std::uint32_t capacity) noexcept {};
+		void(__cdecl *refresh_voice_devices)() noexcept {};
 	};
 
 	using query_client = const client_api *(__cdecl *)(std::uint32_t requested_version_major, std::uint32_t requested_version_minor, std::uint32_t requested_version_patch) noexcept;
 
 	[[nodiscard]] constexpr bool compatible(const client_api *api) noexcept
 	{
-		return api && api->struct_size == sizeof(client_api) && api->status_view_size == sizeof(client_status_view) && api->remote_player_view_size == sizeof(remote_player_view) && api->version_major == kcd2o_version_major && api->version_minor == kcd2o_version_minor && api->version_patch == kcd2o_version_patch && api->get_runtime_status && api->connect && api->disconnect && api->send_chat && api->play_emote && api->select_avatar && api->get_status && api->attempt_sleep && api->request_respawn && api->copy_players && api->copy_chat && api->copy_avatar_archetypes && api->set_diagnostic_logging && api->set_player_voice_volume;
+		return api && api->struct_size == sizeof(client_api) && api->status_view_size == sizeof(client_status_view) && api->remote_player_view_size == sizeof(remote_player_view) && api->version_major == kcd2o_version_major && api->version_minor == kcd2o_version_minor && api->version_patch == kcd2o_version_patch && api->get_runtime_status && api->connect && api->disconnect && api->send_chat && api->play_emote && api->select_avatar && api->get_status && api->attempt_sleep && api->request_respawn && api->copy_players && api->copy_chat && api->copy_avatar_archetypes && api->set_diagnostic_logging && api->set_player_voice_volume && api->copy_property_access && api->request_property_role && api->revoke_property_role && api->set_property_owner && api->set_property_locked && api->get_voice_settings && api->set_voice_settings && api->copy_voice_devices && api->refresh_voice_devices;
 	}
 } // namespace kcd2o::kcse

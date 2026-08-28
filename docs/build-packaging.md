@@ -40,7 +40,7 @@ out/package/release/
 |   |   |   `-- README.md
 |   |   `-- KCSE/addresslib/
 |   |       `-- kcd_addresslib_*.bin
-|   `-- KCD2Online-Client-v0.1.6.zip
+|   `-- KCD2Online-Client-v0.1.7.zip
 |-- server/
 |   |-- KCD2OnlineServer.exe
 |   |-- KCD2OnlineServer.pdb
@@ -48,6 +48,7 @@ out/package/release/
 |   |-- start_server.bat
 |   |-- README.txt
 |   |-- server.toml.example
+|   |-- dashboard.toml.example
 |   |-- starter_profile.toml
 |   |-- game_data/
 |   |   |-- content_manifest.json
@@ -59,7 +60,7 @@ out/package/release/
 |   |-- tools/
 |   |   |-- KCD2OnlineSignatureAudit.exe
 |   |   `-- KCD2OnlineSignatureAudit.pdb
-|   `-- KCD2Online-Server-v0.1.6.zip
+|   `-- KCD2Online-Server-v0.1.7.zip
 |-- tests/
 |   |-- KCD2Online*Tests.exe
 |   `-- KCD2Online*Tests.pdb
@@ -117,8 +118,10 @@ the generated `property_catalog_<level_id>.pb` on first use of a world. Runtime
 property discovery therefore does not require the original KCD2 installation
 or its `level.pak` files on the dedicated host.
 
-`start_server.bat` creates `server.toml` from `server.toml.example` when needed
-and refuses to start with a clear setup message while `game_data` is missing.
+`start_server.bat` creates `server.toml` and `dashboard.toml` from their examples
+when needed and refuses to start with a clear setup message while `game_data` is
+missing. The dashboard stays on loopback and requires its generated token by
+default.
 
 ## Standalone packaging
 

@@ -117,7 +117,7 @@ int main()
 	const auto decoded = decode(encoded->bytes, &error);
 	assert(decoded);
 	assert(decoded->client_hello().display_name() == "Henry");
-	assert(decoded->client_hello().version() == "0.1.6");
+	assert(decoded->client_hello().version() == "0.1.7");
 	auto incompatible = envelope;
 	incompatible.mutable_client_hello()->set_version("0.0.8");
 	assert(encode(incompatible, reliability::reliable, &error));
@@ -506,6 +506,9 @@ int main()
 	container_item->set_quality(100.0F);
 	container_item->set_condition(1.0F);
 	assert(is_valid_world_object_state(*container, false));
+	auto impossible_locked_container = *container;
+	impossible_locked_container.set_locked(true);
+	assert(!is_valid_world_object_state(impossible_locked_container, false));
 	assert(encode(
 	    container_update_envelope,
 	    reliability::reliable,
@@ -608,7 +611,7 @@ int main()
 	valid_environment.set_world_time_seconds(-1.0);
 	assert(!is_valid_environment_state(valid_environment));
 
-	assert(kcd2o_version == "0.1.6");
+	assert(kcd2o_version == "0.1.7");
 	auto unknown_address_library = *runtime;
 	unknown_address_library.set_address_library_sha256(std::string(64, '0'));
 	assert(is_valid_address_library_identity(unknown_address_library));

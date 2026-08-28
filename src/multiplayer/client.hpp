@@ -88,6 +88,11 @@ namespace kcd2o
 		std::uint32_t staff_action_generation{};
 		std::uint32_t player_hub_action_generation{};
 		std::uint32_t social_action_generation{};
+		std::uint32_t property_action_generation{};
+		std::uint64_t property_action_entity_guid{};
+		std::uint32_t property_operation_generation{};
+		bool property_operation_success{};
+		std::string property_operation_message;
 		bool environment_available{};
 		double time_of_day_hours{};
 		float time_scale{};
@@ -128,6 +133,19 @@ namespace kcd2o
 		[[nodiscard]] bool begin_local_activity(protocol::PlayerActivityKind kind, std::uint64_t station_guid);
 		[[nodiscard]] bool end_local_activity(std::optional<protocol::TransformState> final_transform = std::nullopt);
 		[[nodiscard]] std::optional<std::string> take_activity_denial();
+		[[nodiscard]] protocol::PropertyAccessSnapshot property_access() const;
+		[[nodiscard]] bool request_property_role(
+		    std::string property_id,
+		    std::string target_player_id,
+		    protocol::PropertyRole role,
+		    std::uint64_t expires_at_ms = 0);
+		[[nodiscard]] bool revoke_property_role(std::string assignment_id);
+		[[nodiscard]] bool set_property_owner(
+		    std::string property_id,
+		    std::string target_player_id);
+		[[nodiscard]] bool set_property_locked(
+		    std::uint64_t entity_guid,
+		    bool locked);
 		void runtime_epoch_changed();
 		[[nodiscard]] bool reserve_local_avatar_sample(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
 		void game_tick(std::optional<protocol::TransformState> local_transform, std::optional<protocol::AvatarDescriptor> local_avatar_visual, std::string_view current_level, std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
@@ -228,9 +246,31 @@ namespace kcd2o
 		struct voice_command
 		{
 			protocol::ClientVoiceFrame message;
+			std::chrono::steady_clock::time_point queued_at{
+			    std::chrono::steady_clock::now()};
 		};
 
-		using network_command = std::variant<connect_command, disconnect_command, transform_command, chat_command, world_ready_command, world_failed_command, profile_command, avatar_command, world_object_command, world_item_command, npc_discovery_command, npc_update_batch_command, sleep_command, death_command, respawn_command, activity_start_command, activity_end_command, voice_command>;
+		struct property_role_grant_command
+		{
+			protocol::ClientPropertyRoleGrant message;
+		};
+
+		struct property_role_revoke_command
+		{
+			protocol::ClientPropertyRoleRevoke message;
+		};
+
+		struct property_owner_set_command
+		{
+			protocol::ClientPropertyOwnerSet message;
+		};
+
+		struct property_resource_lock_command
+		{
+			protocol::ClientPropertyResourceLock message;
+		};
+
+		using network_command = std::variant<connect_command, disconnect_command, transform_command, chat_command, world_ready_command, world_failed_command, profile_command, avatar_command, world_object_command, world_item_command, npc_discovery_command, npc_update_batch_command, sleep_command, death_command, respawn_command, activity_start_command, activity_end_command, voice_command, property_role_grant_command, property_role_revoke_command, property_owner_set_command, property_resource_lock_command>;
 
 		struct timed_transform
 		{
@@ -285,6 +325,7 @@ namespace kcd2o
 		std::optional<protocol::PlayerActivity> m_local_activity;
 		std::optional<protocol::ClientActivityStart> m_pending_activity_start;
 		std::optional<std::string> m_activity_denial;
+		protocol::PropertyAccessSnapshot m_property_access;
 		bool m_manual_disconnect_pending{};
 		bool m_avatar_update_pending{};
 		std::optional<protocol::ServerBootstrap> m_pending_bootstrap;

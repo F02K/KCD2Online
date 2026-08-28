@@ -25,10 +25,27 @@ namespace kcd2o::kcse
 		[[nodiscard]] bool attempt_sleep() const;
 		[[nodiscard]] bool request_respawn() const;
 		[[nodiscard]] bool set_player_voice_volume(player_id player, float volume) const;
+		[[nodiscard]] voice_settings_view voice_settings() const;
+		[[nodiscard]] bool set_voice_settings(const voice_settings_view &settings) const;
+		[[nodiscard]] std::vector<voice_device_view> voice_devices() const;
+		void refresh_voice_devices() const;
 		void set_diagnostic_logging(bool enabled) const;
 		[[nodiscard]] client_status status() const;
 		[[nodiscard]] std::vector<kcd2o::remote_player_view> players() const;
 		[[nodiscard]] std::vector<chat_entry> chat_history() const;
+		[[nodiscard]] protocol::PropertyAccessSnapshot property_access() const;
+		[[nodiscard]] bool request_property_role(
+		    std::string property_id,
+		    std::string target_player_id,
+		    protocol::PropertyRole role,
+		    std::uint64_t expires_at_ms = 0) const;
+		[[nodiscard]] bool revoke_property_role(std::string assignment_id) const;
+		[[nodiscard]] bool set_property_owner(
+		    std::string property_id,
+		    std::string target_player_id) const;
+		[[nodiscard]] bool set_property_locked(
+		    std::uint64_t entity_guid,
+		    bool locked) const;
 
 	private:
 		[[nodiscard]] const client_api *load() const noexcept;

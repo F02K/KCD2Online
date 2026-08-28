@@ -454,6 +454,27 @@ namespace kcd2o
 				    && is_valid_world_object_state(
 				        envelope.world_object_updated().state());
 			}
+			if (envelope.has_client_property_resource_lock())
+				return envelope.client_property_resource_lock().entity_guid() != 0;
+			if (envelope.has_client_property_role_grant())
+			{
+				const auto &message = envelope.client_property_role_grant();
+				return valid_identifier(message.property_id())
+				    && is_uuid(message.target_player_id())
+				    && protocol::PropertyRole_IsValid(static_cast<int>(message.role()))
+				    && message.role() != protocol::PROPERTY_ROLE_UNSPECIFIED
+				    && message.role() != protocol::PROPERTY_ROLE_OWNER;
+			}
+			if (envelope.has_client_property_role_revoke())
+				return is_uuid(envelope.client_property_role_revoke().assignment_id());
+			if (envelope.has_client_property_owner_set())
+				return valid_identifier(envelope.client_property_owner_set().property_id())
+				    && is_uuid(envelope.client_property_owner_set().target_player_id());
+			if (envelope.has_property_operation_result())
+				return valid_utf8_with_codepoint_count(
+				    envelope.property_operation_result().message(), 1, 512);
+			if (envelope.has_server_property_access_updated())
+				return envelope.server_property_access_updated().has_snapshot();
 			if (envelope.has_client_world_item_update())
 			{
 				const auto &message = envelope.client_world_item_update();
@@ -1138,6 +1159,7 @@ namespace kcd2o
 		        static_cast<int>(state.kind()))
 		    || state.kind() == protocol::WORLD_OBJECT_KIND_UNSPECIFIED
 		    || (require_revision && state.revision() == 0)
+		    || (state.locked() && state.opened())
 		    || state.inventory_size()
 		        > static_cast<int>(max_world_object_inventory_items)
 		    || (state.kind() == protocol::WORLD_OBJECT_KIND_DOOR

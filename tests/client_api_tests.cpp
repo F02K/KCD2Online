@@ -64,6 +64,54 @@ namespace
 	{
 		return 1;
 	}
+
+	std::uint32_t __cdecl property_access(void *, std::uint32_t) noexcept
+	{
+		return 0;
+	}
+
+	std::uint32_t __cdecl property_role(
+	    const char *, const char *, std::uint32_t, std::uint64_t) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl one_text(const char *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl two_texts(const char *, const char *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl property_lock(std::uint64_t, std::uint32_t) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl voice_settings(
+	    kcd2o::kcse::voice_settings_view *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl set_voice_settings(
+	    const kcd2o::kcse::voice_settings_view *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl voice_devices(
+	    kcd2o::kcse::voice_device_view *, std::uint32_t) noexcept
+	{
+		return 0;
+	}
+
+	void __cdecl refresh_voice_devices() noexcept
+	{
+	}
 } // namespace
 
 int main()
@@ -81,24 +129,30 @@ int main()
 	static_assert(std::is_trivially_copyable_v<remote_player_view>);
 	static_assert(std::is_standard_layout_v<chat_entry_view>);
 	static_assert(std::is_trivially_copyable_v<chat_entry_view>);
+	static_assert(std::is_standard_layout_v<voice_settings_view>);
+	static_assert(std::is_trivially_copyable_v<voice_settings_view>);
+	static_assert(std::is_standard_layout_v<voice_device_view>);
+	static_assert(std::is_trivially_copyable_v<voice_device_view>);
 	static_assert(std::is_standard_layout_v<client_api>);
 	static_assert(std::is_trivially_copyable_v<client_api>);
 #ifdef _WIN64
 	static_assert(sizeof(fixed_string) == 64);
 	static_assert(sizeof(connect_request) == 836);
 	static_assert(sizeof(runtime_status) == 424);
-	static_assert(sizeof(client_status_view) == 1784);
+	static_assert(sizeof(client_status_view) == 2064);
 	static_assert(sizeof(remote_player_view) == 152);
 	static_assert(sizeof(chat_entry_view) == 344);
-	static_assert(sizeof(client_api) == 136);
+	static_assert(sizeof(voice_settings_view) == 808);
+	static_assert(sizeof(voice_device_view) == 516);
+	static_assert(sizeof(client_api) == 208);
 #endif
 
-	client_api valid{sizeof(client_api), kcd2o::kcd2o_version_major, kcd2o::kcd2o_version_minor, kcd2o::kcd2o_version_patch, runtime, connect, disconnect, text, action_with_value, text, action, action, status, players, chat, archetypes, diagnostic_logging, sizeof(client_status_view), sizeof(remote_player_view), player_voice_volume};
+	client_api valid{sizeof(client_api), kcd2o::kcd2o_version_major, kcd2o::kcd2o_version_minor, kcd2o::kcd2o_version_patch, runtime, connect, disconnect, text, action_with_value, text, action, action, status, players, chat, archetypes, diagnostic_logging, sizeof(client_status_view), sizeof(remote_player_view), player_voice_volume, property_access, property_role, one_text, two_texts, property_lock, voice_settings, set_voice_settings, voice_devices, refresh_voice_devices};
 	assert(compatible(&valid));
-	static_assert(kcd2o::kcd2o_version == "0.1.6");
+	static_assert(kcd2o::kcd2o_version == "0.1.7");
 	static_assert(kcd2o::kcd2o_version_major == 0);
 	static_assert(kcd2o::kcd2o_version_minor == 1);
-	static_assert(kcd2o::kcd2o_version_patch == 6);
+	static_assert(kcd2o::kcd2o_version_patch == 7);
 
 	auto wrong_version = valid;
 	++wrong_version.version_patch;

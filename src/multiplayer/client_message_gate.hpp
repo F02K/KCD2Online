@@ -75,6 +75,8 @@ namespace kcd2o
 			case payload_case::kServerNpcMotion:
 			case payload_case::kServerNpcGameplayUpdate:
 			case payload_case::kServerVoiceFrame:
+			case payload_case::kServerPropertyAccessUpdated:
+			case payload_case::kPropertyOperationResult:
 				return true;
 			default:
 				return false;

@@ -16,6 +16,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace wh::playermodule
 {
@@ -70,6 +72,10 @@ namespace kcd2o::kcse
 		void remove_npc_state(std::uint64_t npc_id, std::uint32_t generation) override;
 		[[nodiscard]] bool apply_environment_state(const protocol::EnvironmentState &state, bool apply_weather) override;
 		[[nodiscard]] bool set_home_marker(const std::optional<protocol::PropertyHomeMarker> &marker) override;
+		void set_property_access(
+		    const protocol::PropertyAccessSnapshot &snapshot) override;
+		[[nodiscard]] std::optional<property_interaction>
+		poll_property_interaction() override;
 		[[nodiscard]] bool apply_authoritative_profile(const protocol::PlayerProfile &profile) override;
 		[[nodiscard]] bool respawn_local_player(const protocol::TransformState &spawn) override;
 		[[nodiscard]] bool local_player_dead() const;
@@ -77,7 +83,12 @@ namespace kcd2o::kcse
 		[[nodiscard]] bool play_emote(std::string_view fragment);
 		void show_multiplayer_notice(std::string_view message) override;
 		void set_voice_active(bool active) override;
-		[[nodiscard]] voice_capture_state voice_status() const noexcept;
+		void set_voice_server_config(const protocol::VoiceConfig &config) override;
+		[[nodiscard]] voice_capture_state voice_status() const;
+		[[nodiscard]] voice_settings voice_configuration() const;
+		[[nodiscard]] bool set_voice_configuration(const voice_settings &settings);
+		[[nodiscard]] std::vector<voice_input_device> voice_input_devices() const;
+		void refresh_voice_input_devices() noexcept;
 		[[nodiscard]] std::vector<protocol::ClientVoiceFrame> poll_outbound_voice() override;
 		void receive_voice(const protocol::ServerVoiceFrame &frame) override;
 		[[nodiscard]] bool set_player_voice_volume(player_id player, float volume) noexcept;
@@ -118,6 +129,9 @@ namespace kcd2o::kcse
 		void poll_local_activity();
 		void refresh_home_marker();
 		void remove_home_marker();
+		void refresh_property_ownership(bool access_changed);
+		void restore_property_ownership();
+		void refresh_property_interactions();
 		[[nodiscard]] wh::playermodule::I_Minigame *find_local_minigame(protocol::PlayerActivityKind kind) const;
 
 		const KCSE::IKCSEInterface &m_kcse;
@@ -175,6 +189,18 @@ namespace kcd2o::kcse
 		protocol::PlayerActivityKind m_native_activity_kind{protocol::PLAYER_ACTIVITY_KIND_NONE};
 		bool m_activity_end_pending{};
 		std::optional<protocol::PropertyHomeMarker> m_home_marker;
+		protocol::PropertyAccessSnapshot m_property_access;
+		bool m_property_access_dirty{};
+		std::uint32_t m_property_refresh_frame{};
+		struct property_area_override
+		{
+			std::uintptr_t object_identity{};
+			std::uint64_t original_owner{};
+			std::uint64_t local_owner{};
+		};
+		std::unordered_map<std::uint64_t, property_area_override>
+		    m_property_area_overrides;
+		std::unordered_set<std::uint64_t> m_property_wrapped_resources;
 		std::chrono::steady_clock::time_point m_next_home_marker_attempt{};
 		std::shared_ptr<wh::guimodule::S_EntityMapMark> m_native_home_mark;
 		wh::guimodule::C_UIMap *m_native_home_map{};

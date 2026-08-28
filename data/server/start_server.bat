@@ -18,6 +18,21 @@ if not exist "server.toml" (
     echo Edit server.toml to customize the server configuration.
 )
 
+if not exist "dashboard.toml" (
+    if not exist "dashboard.toml.example" (
+        echo ERROR: dashboard.toml.example is missing.
+        pause
+        exit /b 1
+    )
+    copy /Y "dashboard.toml.example" "dashboard.toml" >nul
+    if errorlevel 1 (
+        echo ERROR: Could not create dashboard.toml from dashboard.toml.example.
+        pause
+        exit /b 1
+    )
+    echo Created dashboard.toml with local-only, token-protected access.
+)
+
 if not exist "game_data\content_manifest.json" (
     goto missing_game_data
 )

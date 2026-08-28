@@ -427,6 +427,9 @@ class PackagingTests(unittest.TestCase):
             "project(KCD2Online VERSION 0.1.0 LANGUAGES CXX)\n", encoding="utf-8"
         )
         (project / "server.toml.example").write_text("[server]\n", encoding="utf-8")
+        (project / "dashboard.toml.example").write_text(
+            "[dashboard]\nenabled = false\n", encoding="utf-8"
+        )
         (project / "starter_profile.toml").write_text("money = 0\n", encoding="utf-8")
         (project / "data" / "server" / "start_server.bat").write_text(
             "@echo off\n", encoding="utf-8"
@@ -552,6 +555,9 @@ class PackagingTests(unittest.TestCase):
                 (package.server_root / "tools" / "KCD2OnlineSignatureAudit.exe").is_file()
             )
             self.assertTrue((package.server_root / "start_server.bat").is_file())
+            self.assertTrue(
+                (package.server_root / "dashboard.toml.example").is_file()
+            )
             self.assertTrue((package.server_root / "README.txt").is_file())
             self.assertTrue(package.server_zip.is_file())
             with zipfile.ZipFile(package.server_zip) as archive:

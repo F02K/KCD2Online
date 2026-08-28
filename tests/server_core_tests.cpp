@@ -174,7 +174,8 @@ namespace
 		voice->set_sequence(sequence);
 		voice->set_capture_time_ms(sequence * 20);
 		voice->set_range(range);
-		voice->set_opus("opus");
+		// Standard 20 ms Opus comfort-noise/DTX packet.
+		voice->set_opus("\xF8\xFF\xFE", 3);
 		voice->set_visemes(std::string(voice_viseme_count, '\0'));
 		return envelope;
 	}
@@ -495,6 +496,11 @@ int main()
 		assert(outbound.front().delivery == reliability::unreliable);
 		assert(outbound.front().envelope.server_voice_frame().sequence() == 2);
 
+		auto malformed_voice = voice_frame(20);
+		malformed_voice.mutable_client_voice_frame()->set_opus("\x03", 1);
+		core.on_message(101, malformed_voice, start + 262ms);
+		assert(core.take_outbound().empty());
+
 		core.on_message(102, client_transform(3, 30.0F), start + 265ms);
 		assert(core.take_outbound().empty());
 		core.on_message(
@@ -577,6 +583,29 @@ int main()
 	temporary_world central_auth_world;
 	{
 		auto config = config_for(central_auth_world.path);
+		const auto game_data = central_auth_world.path / "game_data";
+		std::filesystem::create_directories(game_data);
+		protocol::PropertyCatalog property_catalog;
+		property_catalog.set_schema(property::catalog_schema);
+		property_catalog.set_level_id("sandbox");
+		property_catalog.set_content_fingerprint("central-auth-fixture");
+		auto *property_definition = property_catalog.add_properties();
+		property_definition->set_property_id("sandbox:central-auth-fixture");
+		property_definition->set_level_id("sandbox");
+		property_definition->set_anchor_guid("0000002a-0000-0000");
+		property_definition->set_inferred_name("Central auth fixture");
+		property_definition->set_source_path("fixture/central_auth_property");
+		property_definition->set_discovery_confidence(1.0F);
+		auto *property_door = property_definition->add_resources();
+		property_door->set_entity_guid(42);
+		property_door->set_kind(protocol::PROPERTY_RESOURCE_KIND_DOOR);
+		{
+			std::ofstream output(
+			    game_data / "property_catalog_sandbox.pb",
+			    std::ios::binary | std::ios::trunc);
+			assert(output && property_catalog.SerializeToOstream(&output));
+		}
+		config.property_game_data = game_data;
 		config.account_auth_enabled = true;
 		config.account_whitelist_enabled = true;
 		config.account_service_url = "https://api.kingdom-online.cc";
@@ -691,7 +720,37 @@ int main()
 			        && entry.envelope.server_accepted().network_role()
 			            == protocol::NETWORK_ROLE_OWNER;
 		    }));
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    if (entry.connection != 92
+			        || !entry.envelope.has_server_property_access_updated())
+				    return false;
+			    const auto &snapshot =
+			        entry.envelope.server_property_access_updated().snapshot();
+			    return snapshot.properties_size() == 1
+			        && snapshot.properties(0).can_manage()
+			        && !snapshot.properties(0).can_secure();
+		    }));
 		assert(core.permissions(2) == std::vector<std::string>{"*"});
+		protocol::Envelope foreign_lock_request;
+		foreign_lock_request.mutable_client_property_resource_lock()
+		    ->set_entity_guid(42);
+		foreign_lock_request.mutable_client_property_resource_lock()
+		    ->set_locked(true);
+		core.on_message(92, foreign_lock_request, start + 8ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.connection == 92
+			        && entry.envelope.has_property_operation_result()
+			        && !entry.envelope.property_operation_result().success()
+			        && entry.envelope.property_operation_result().message()
+			               == "Property lock permission denied.";
+		    }));
 		core.on_message(92, chat_message("/warn 1 Test warning"), start + 8ms);
 		outbound = core.take_outbound();
 		assert(moderation_actions.size() == 1);

@@ -35,10 +35,14 @@
 #include <REL/Module.h>
 #include <rpgmodule/C_Soul.h>
 #include <string_view>
+#include <unordered_map>
 #include <xgenaimodule/C_AIObjectManager.h>
+#include <xgenaimodule/C_AreaUnion.h>
 #include <xgenaimodule/C_LinkableObject.h>
+#include <xgenaimodule/C_TriggerArea.h>
 #include <xgenaimodule/C_XGenAIModule.h>
 #include <xgenaimodule/I_AIPuppet.h>
+#include <xgenaimodule/I_Ownership.h>
 
 namespace kcd2o::kcse
 {
@@ -329,6 +333,31 @@ namespace kcd2o::kcse
 #endif
 		}
 
+		std::optional<std::uint32_t> take_script_global_u32(
+		    const char *name) noexcept
+		{
+			auto *environment = SSystemGlobalEnvironment::GetInstance();
+			if (!environment || !environment->pScriptSystem || !name || !*name)
+				return std::nullopt;
+#ifdef _WIN32
+			__try
+			{
+#endif
+				ScriptAnyValue value;
+				const auto found = environment->pScriptSystem->GetGlobalAny(name, value);
+				environment->pScriptSystem->SetGlobalToNull(name);
+				if (!found || value.type != ANY_TNUMBER || value.number < 1.0F)
+					return std::nullopt;
+				return static_cast<std::uint32_t>(value.number);
+#ifdef _WIN32
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				return std::nullopt;
+			}
+#endif
+		}
+
 		player_respawn_identity capture_player_respawn_identity(const native_player_view &player) noexcept
 		{
 			player_respawn_identity result;
@@ -597,6 +626,98 @@ namespace kcd2o::kcse
 			        .count());
 		}
 
+		struct native_property_area
+		{
+			wh::xgenaimodule::I_Ownership *ownership{};
+			std::uintptr_t object_identity{};
+			std::uint32_t entity_id{};
+		};
+
+		bool resolve_property_area_native(
+		    std::uint64_t guid,
+		    native_property_area &result)
+		{
+			auto *environment = SSystemGlobalEnvironment::GetInstance();
+			auto *system = environment ? environment->pEntitySystem : nullptr;
+			if (!system || guid == 0)
+				return false;
+			const auto entity_id = system->FindEntityByGuid(guid);
+			auto *object = find_linkable_object(entity_id);
+			if (!object
+			    || (!kcd_cast<wh::xgenaimodule::C_TriggerArea *>(object)
+			        && !kcd_cast<wh::xgenaimodule::C_AreaUnion *>(object)))
+				return false;
+			auto *ownership = object->GetOwnership();
+			if (!ownership)
+				return false;
+			result = {
+			    ownership,
+			    reinterpret_cast<std::uintptr_t>(object),
+			    entity_id};
+			return true;
+		}
+
+		bool guarded_resolve_property_area(
+		    std::uint64_t guid,
+		    native_property_area &result) noexcept
+		{
+#ifdef _WIN32
+			__try
+			{
+				return resolve_property_area_native(guid, result);
+			}
+			__except (KCD2Online_JOIN_SEH_FILTER("property.ownership.resolve.seh"))
+			{
+				return false;
+			}
+#else
+			return resolve_property_area_native(guid, result);
+#endif
+		}
+
+		bool guarded_read_override_owner(
+		    wh::xgenaimodule::I_Ownership *ownership,
+		    std::uint64_t &owner) noexcept
+		{
+#ifdef _WIN32
+			__try
+			{
+#endif
+				const auto *value = ownership ? ownership->GetOverrideOwner() : nullptr;
+				if (!value)
+					return false;
+				owner = value->m_value;
+				return true;
+#ifdef _WIN32
+			}
+			__except (KCD2Online_JOIN_SEH_FILTER("property.ownership.read.seh"))
+			{
+				return false;
+			}
+#endif
+		}
+
+		bool guarded_set_override_owner(
+		    wh::xgenaimodule::I_Ownership *ownership,
+		    std::uint64_t owner) noexcept
+		{
+#ifdef _WIN32
+			__try
+			{
+#endif
+				if (!ownership)
+					return false;
+				ownership->SetOwner(wh::framework::WUID{owner});
+				return true;
+#ifdef _WIN32
+			}
+			__except (KCD2Online_JOIN_SEH_FILTER("property.ownership.write.seh"))
+			{
+				return false;
+			}
+#endif
+		}
+
 	} // namespace
 
 	native_runtime::native_runtime(const KCSE::IKCSEInterface &kcse) :
@@ -670,6 +791,7 @@ namespace kcd2o::kcse
 		}
 		refresh_cached_state();
 		refresh_home_marker();
+		refresh_property_interactions();
 		poll_local_activity();
 		advance_native_world_start();
 		finish_native_unload_if_complete();
@@ -1515,6 +1637,354 @@ namespace kcd2o::kcse
 		return true;
 	}
 
+	void native_runtime::set_property_access(
+	    const protocol::PropertyAccessSnapshot &snapshot)
+	{
+		if (m_property_access.SerializeAsString() == snapshot.SerializeAsString())
+			return;
+		join_trace::write_diagnostic(
+		    "property.interaction.access-updated",
+		    std::format(
+		        "properties={} ledger_revision={}",
+		        snapshot.properties_size(),
+		        snapshot.ledger_revision()));
+		m_property_access = snapshot;
+		m_property_access_dirty = true;
+		refresh_property_interactions();
+	}
+
+	std::optional<client_runtime::property_interaction>
+	native_runtime::poll_property_interaction()
+	{
+		const auto action = take_script_global_u32("KCD2Online_PropertyAction");
+		const auto entity_id = take_script_global_u32("KCD2Online_PropertyEntity");
+		if (!action && !entity_id)
+			return std::nullopt;
+		if (!action || !entity_id || *action < 1 || *action > 3)
+		{
+			join_trace::write_critical(
+			    "property.interaction.callback-invalid",
+			    std::format(
+			        "action={} entity_id={} reason=incomplete-or-invalid-script-globals",
+			        action.value_or(0),
+			        entity_id.value_or(0)));
+			return std::nullopt;
+		}
+		auto *environment = SSystemGlobalEnvironment::GetInstance();
+		auto *system = environment ? environment->pEntitySystem : nullptr;
+		auto *entity = system ? system->GetEntity(*entity_id) : nullptr;
+		if (!entity || entity->GetGuid() == 0)
+		{
+			join_trace::write_critical(
+			    "property.interaction.entity-resolution-failed",
+			    std::format(
+			        "action={} entity_id={} entity_found={} guid={}",
+			        *action,
+			        *entity_id,
+			        entity != nullptr,
+			        entity ? entity->GetGuid() : 0));
+			return std::nullopt;
+		}
+		property_interaction result;
+		result.entity_guid = entity->GetGuid();
+		result.action = *action == 1
+		    ? property_interaction::kind::manage
+		    : (*action == 2 ? property_interaction::kind::lock
+		                    : property_interaction::kind::unlock);
+		join_trace::write_critical(
+		    "property.interaction.callback-received",
+		    std::format(
+		        "action={} entity_id={} entity_guid={}",
+		        *action,
+		        *entity_id,
+		        result.entity_guid));
+		return result;
+	}
+
+	void native_runtime::refresh_property_ownership(bool access_changed)
+	{
+		const auto player = m_entities.player();
+		const auto *soul = player.actor ? player.actor->m_pSoul : nullptr;
+		const auto local_owner = soul ? soul->m_selfWuid.m_value : 0;
+		if (!soul || local_owner == 0 || soul->m_selfWuid.tag() != 5)
+		{
+			if (access_changed)
+				join_trace::write_diagnostic(
+				    "property.ownership.apply-deferred",
+				    "reason=local-player-soul-unavailable");
+			return;
+		}
+
+		std::unordered_set<std::uint64_t> desired;
+		for (const auto &access : m_property_access.properties())
+		{
+			// Global property managers can inspect a foreign property, but only an
+			// actual property role grants local vanilla access to its private areas.
+			if (access.effective_role()
+			    == protocol::PROPERTY_ROLE_UNSPECIFIED)
+				continue;
+			for (const auto guid : access.property().ownership_area_guids())
+			{
+				if (guid != 0)
+					desired.insert(guid);
+			}
+		}
+
+		std::size_t restored{};
+		std::size_t restore_skipped{};
+		for (auto iterator = m_property_area_overrides.begin();
+		     iterator != m_property_area_overrides.end();)
+		{
+			if (desired.contains(iterator->first))
+			{
+				++iterator;
+				continue;
+			}
+			native_property_area native;
+			std::uint64_t current_owner{};
+			if (guarded_resolve_property_area(iterator->first, native)
+			    && native.object_identity == iterator->second.object_identity
+			    && guarded_read_override_owner(native.ownership, current_owner)
+			    && current_owner == iterator->second.local_owner
+			    && guarded_set_override_owner(
+			        native.ownership, iterator->second.original_owner))
+				++restored;
+			else
+				++restore_skipped;
+			iterator = m_property_area_overrides.erase(iterator);
+		}
+
+		std::size_t installed{};
+		std::size_t already_installed{};
+		std::size_t streamed_missing{};
+		std::size_t failed{};
+		for (const auto guid : desired)
+		{
+			native_property_area native;
+			if (!guarded_resolve_property_area(guid, native))
+			{
+				++streamed_missing;
+				continue;
+			}
+			std::uint64_t current_owner{};
+			if (!guarded_read_override_owner(native.ownership, current_owner))
+			{
+				++failed;
+				continue;
+			}
+			auto existing = m_property_area_overrides.find(guid);
+			if (existing != m_property_area_overrides.end()
+			    && existing->second.object_identity == native.object_identity
+			    && current_owner == existing->second.local_owner)
+			{
+				if (existing->second.local_owner == local_owner)
+				{
+					++already_installed;
+					continue;
+				}
+				// The local player Soul can change after a native respawn. Keep the
+				// original area owner but replace the stale local override.
+				existing->second.local_owner = local_owner;
+				if (guarded_set_override_owner(native.ownership, local_owner))
+					++installed;
+				else
+					++failed;
+				continue;
+			}
+
+			property_area_override replacement{
+			    native.object_identity, current_owner, local_owner};
+			if (!guarded_set_override_owner(native.ownership, local_owner))
+			{
+				++failed;
+				continue;
+			}
+			m_property_area_overrides.insert_or_assign(guid, replacement);
+			++installed;
+		}
+
+		if (access_changed || restored != 0 || failed != 0)
+			join_trace::write_diagnostic(
+			    failed == 0 ? "property.ownership.apply-complete"
+			                : "property.ownership.apply-failed",
+			    std::format(
+			        "desired={} active={} installed={} already={} restored={} "
+			        "restore_skipped={} missing={} failed={} local_soul_wuid={}",
+			        desired.size(),
+			        m_property_area_overrides.size(),
+			        installed,
+			        already_installed,
+			        restored,
+			        restore_skipped,
+			        streamed_missing,
+			        failed,
+			        local_owner));
+	}
+
+	void native_runtime::restore_property_ownership()
+	{
+		std::size_t restored{};
+		std::size_t skipped{};
+		for (const auto &[guid, applied] : m_property_area_overrides)
+		{
+			native_property_area native;
+			std::uint64_t current_owner{};
+			if (guarded_resolve_property_area(guid, native)
+			    && native.object_identity == applied.object_identity
+			    && guarded_read_override_owner(native.ownership, current_owner)
+			    && current_owner == applied.local_owner
+			    && guarded_set_override_owner(native.ownership, applied.original_owner))
+				++restored;
+			else
+				++skipped;
+		}
+		m_property_area_overrides.clear();
+		if (restored != 0 || skipped != 0)
+			join_trace::write_diagnostic(
+			    "property.ownership.restore-complete",
+			    std::format("restored={} skipped={}", restored, skipped));
+	}
+
+	void native_runtime::refresh_property_interactions()
+	{
+		if (!sandbox_active())
+			return;
+		const bool access_changed = m_property_access_dirty;
+		if (!access_changed && ++m_property_refresh_frame % 180 != 0)
+			return;
+		m_property_refresh_frame = 0;
+		m_property_access_dirty = false;
+		refresh_property_ownership(access_changed);
+		auto *environment = SSystemGlobalEnvironment::GetInstance();
+		auto *system = environment ? environment->pEntitySystem : nullptr;
+		if (!system)
+		{
+			if (access_changed)
+				join_trace::write_diagnostic(
+				    "property.interaction.install-deferred",
+				    "reason=entity-system-unavailable");
+			return;
+		}
+
+		struct flags
+		{
+			bool manage{};
+			bool secure{};
+			protocol::PropertyResourceKind kind{
+			    protocol::PROPERTY_RESOURCE_KIND_UNSPECIFIED};
+		};
+		std::unordered_map<std::uint64_t, flags> desired;
+		for (const auto &access : m_property_access.properties())
+		{
+			for (const auto &resource : access.property().resources())
+			{
+				auto &entry = desired[resource.entity_guid()];
+				entry.manage = entry.manage || access.can_manage();
+				entry.secure = entry.secure || (access.can_secure()
+				    && (resource.kind() == protocol::PROPERTY_RESOURCE_KIND_DOOR
+				        || resource.kind()
+				            == protocol::PROPERTY_RESOURCE_KIND_CONTAINER));
+				if (entry.kind == protocol::PROPERTY_RESOURCE_KIND_UNSPECIFIED)
+					entry.kind = resource.kind();
+			}
+		}
+
+		for (const auto guid : m_property_wrapped_resources)
+		{
+			if (desired.contains(guid))
+				continue;
+			const auto id = system->FindEntityByGuid(guid);
+			if (id != 0)
+			{
+				(void)execute_script(std::format(
+				    "local e=System.GetEntity({}) if e and e.KCD2OnlineOriginalGetActions then "
+				    "e.GetActions=e.KCD2OnlineOriginalGetActions "
+				    "e.KCD2OnlineOriginalGetActions=nil e.KCD2OnlinePropertyWrapped=nil "
+				    "e.KCD2OnlinePropertyWrapperVersion=nil "
+				    "e.KCD2OnlinePropertyManageAction=nil e.KCD2OnlinePropertySecureAction=nil "
+				    "e.KCD2OnlineCanManage=nil e.KCD2OnlineCanSecure=nil end",
+				    id));
+			}
+		}
+		m_property_wrapped_resources.clear();
+		if (desired.empty())
+		{
+			if (access_changed)
+				join_trace::write_diagnostic(
+				    "property.interaction.install-complete",
+				    "desired=0 installed=0 missing=0 script_failed=0");
+			return;
+		}
+
+		std::size_t streamed_missing{};
+		std::size_t script_failed{};
+		for (const auto &[guid, access] : desired)
+		{
+			const auto id = system->FindEntityByGuid(guid);
+			if (id == 0)
+			{
+				++streamed_missing;
+				continue;
+			}
+			const auto manage_interaction =
+			    access.kind == protocol::PROPERTY_RESOURCE_KIND_DOOR ?
+			        "inr_doorOpen" :
+			    access.kind == protocol::PROPERTY_RESOURCE_KIND_CONTAINER ?
+			        "inr_stashOpen" :
+			        "inr_scriptTrigger";
+			const auto secure_interaction =
+			    access.kind == protocol::PROPERTY_RESOURCE_KIND_DOOR ?
+			        "inr_doorLockpick" :
+			        "inr_stashLockpick";
+			const auto script = std::format(
+			    "local e=System.GetEntity({}) if e and e.GetActions then "
+			    "e.KCD2OnlineCanManage={} e.KCD2OnlineCanSecure={} "
+			    "if e.KCD2OnlinePropertyWrapperVersion~=2 then "
+			    "if not e.KCD2OnlineOriginalGetActions then e.KCD2OnlineOriginalGetActions=e.GetActions end "
+			    "e.KCD2OnlinePropertyManageAction=function(...) "
+			    "KCD2Online_PropertyAction=1 KCD2Online_PropertyEntity={} "
+			    "if System.LogAlways then System.LogAlways('[KCD2Online][Property] manage callback entity_id={}') end end "
+			    "e.KCD2OnlinePropertySecureAction=function(...) "
+			    "local t=System.GetEntity({}) if t then "
+			    "KCD2Online_PropertyAction=(t.bLocked==true and 3 or 2) "
+			    "KCD2Online_PropertyEntity={} "
+			    "if System.LogAlways then System.LogAlways('[KCD2Online][Property] secure callback entity_id={}') end end end "
+			    "e.GetActions=function(self,user,firstFast) "
+			    "local r=self:KCD2OnlineOriginalGetActions(user,firstFast) or {{}} "
+			    "if user~=nil and self.KCD2OnlineCanManage then "
+			    "AddInteractorAction(r,firstFast,Action():hint('Manage Property'):action('use'):hintType(AHT_HOLD):enabled(true):func(self.KCD2OnlinePropertyManageAction):interaction({}):uiOrder(50)) end "
+			    "if user~=nil and self.KCD2OnlineCanSecure then "
+			    "local h=(self.bLocked==true and 'Unlock' or 'Lock') "
+			    "AddInteractorAction(r,firstFast,Action():hint(h):action('use_other'):hintType(AHT_HOLD):enabled(true):func(self.KCD2OnlinePropertySecureAction):interaction({}):uiOrder(51)) end "
+			    "return r end e.KCD2OnlinePropertyWrapped=true "
+			    "e.KCD2OnlinePropertyWrapperVersion=2 end end",
+			    id,
+			    access.manage ? "true" : "false",
+			    access.secure ? "true" : "false",
+			    id,
+			    id,
+			    id,
+			    id,
+			    id,
+			    manage_interaction,
+			    secure_interaction);
+			if (execute_script(script))
+				m_property_wrapped_resources.insert(guid);
+			else
+				++script_failed;
+		}
+		if (access_changed || script_failed != 0)
+			join_trace::write_diagnostic(
+			    script_failed == 0 ? "property.interaction.install-complete"
+			                       : "property.interaction.install-failed",
+			    std::format(
+			        "desired={} installed={} missing={} script_failed={}",
+			        desired.size(),
+			        m_property_wrapped_resources.size(),
+			        streamed_missing,
+			        script_failed));
+	}
+
 	void native_runtime::refresh_home_marker()
 	{
 		if (!m_home_marker || m_native_home_mark || !sandbox_active()
@@ -1782,9 +2252,36 @@ namespace kcd2o::kcse
 		m_voice.set_active(active && sandbox_active());
 	}
 
-	voice_capture_state native_runtime::voice_status() const noexcept
+	void native_runtime::set_voice_server_config(
+	    const protocol::VoiceConfig &config)
+	{
+		m_voice.set_server_config(config);
+	}
+
+	voice_capture_state native_runtime::voice_status() const
 	{
 		return m_voice.capture_state();
+	}
+
+	voice_settings native_runtime::voice_configuration() const
+	{
+		return m_voice.settings();
+	}
+
+	bool native_runtime::set_voice_configuration(
+	    const voice_settings &settings)
+	{
+		return m_voice.set_settings(settings);
+	}
+
+	std::vector<voice_input_device> native_runtime::voice_input_devices() const
+	{
+		return m_voice.input_devices();
+	}
+
+	void native_runtime::refresh_voice_input_devices() noexcept
+	{
+		m_voice.refresh_input_devices();
 	}
 
 	std::vector<protocol::ClientVoiceFrame> native_runtime::poll_outbound_voice()
@@ -1878,6 +2375,9 @@ namespace kcd2o::kcse
 	void native_runtime::invalidate_epoch_on_game_thread()
 	{
 		remove_home_marker();
+		restore_property_ownership();
+		m_property_wrapped_resources.clear();
+		m_property_access_dirty = true;
 		m_pending_activity_start.reset();
 		m_native_activity_kind         = protocol::PLAYER_ACTIVITY_KIND_NONE;
 		m_activity_end_pending         = false;

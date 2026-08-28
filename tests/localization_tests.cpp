@@ -31,6 +31,9 @@ int main()
 	assert(catalog.text("hub.title") == "SPIELER-HUB");
 	assert(catalog.text("hub.controls.rebind").find("neu belegt")
 	    != std::string::npos);
+	assert(catalog.text("property.title") == "PROPERTY-VERWALTUNG");
+	assert(catalog.text("property.role.owner") == "EIGENT\xC3\x9C" "MER");
+	assert(catalog.text("property.resource.door") == "T\xC3\x9C" "R");
 	assert(catalog.text("social.title") == "SOCIAL");
 	assert(catalog.text("social.local_hint").find("Client")
 	    != std::string::npos);
@@ -56,15 +59,17 @@ int main()
 	           {{"players", "2"},
 	            {"max", "8"},
 	            {"level", "3"},
-	            {"version", "0.1.6"},
+	            {"version", "0.1.7"},
 	            {"password", "JA"},
 	            {"id", "srv_test"}})
-	    == "SPIELER: 2/8\nLEVEL: 3\nVERSION: 0.1.6\nPASSWORT: JA\nSERVER-ID: srv_test");
+	    == "SPIELER: 2/8\nLEVEL: 3\nVERSION: 0.1.7\nPASSWORT: JA\nSERVER-ID: srv_test");
 
 	assert(catalog.load(directory, "french", error));
 	assert(catalog.language() == "fr");
 	assert(catalog.text("menu.action.connect") == "CONNECT");
 	assert(catalog.text("chat.input_hint") == "Write a message...");
+	assert(catalog.text("property.title") == "PROPERTY MANAGEMENT");
+	assert(catalog.text("property.role.steward") == "STEWARD");
 	assert(catalog.text("missing.key") == "[[missing.key]]");
 	return 0;
 }

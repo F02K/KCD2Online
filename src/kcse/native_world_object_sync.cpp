@@ -39,7 +39,9 @@ namespace kcd2o::kcse
 		{
 			none,
 			open,
-			close
+			close,
+			lock,
+			unlock
 		};
 
 		world_script_event guarded_world_script_event(
@@ -54,6 +56,10 @@ namespace kcd2o::kcse
 					return world_script_event::open;
 				if (std::strcmp(name, "Close") == 0)
 					return world_script_event::close;
+				if (std::strcmp(name, "Lock") == 0)
+					return world_script_event::lock;
+				if (std::strcmp(name, "Unlock") == 0)
+					return world_script_event::unlock;
 				return world_script_event::none;
 			}
 			__except(EXCEPTION_EXECUTE_HANDLER)
@@ -65,6 +71,10 @@ namespace kcd2o::kcse
 				return world_script_event::open;
 			if (std::strcmp(name, "Close") == 0)
 				return world_script_event::close;
+			if (std::strcmp(name, "Lock") == 0)
+				return world_script_event::lock;
+			if (std::strcmp(name, "Unlock") == 0)
+				return world_script_event::unlock;
 			return world_script_event::none;
 #endif
 		}
@@ -121,6 +131,7 @@ namespace kcd2o::kcse
 			world_inventory_source inventory_source{
 			    world_inventory_source::none};
 			bool opened{};
+			bool locked{};
 			std::uint64_t inventory_wuid{};
 		};
 
@@ -140,6 +151,7 @@ namespace kcd2o::kcse
 			const auto script = std::format(
 			    "KCD2Online_world_inventory_source=0 "
 			    "KCD2Online_world_is_door=false KCD2Online_world_open=false "
+			    "KCD2Online_world_locked=false "
 			    "KCD2Online_world_inventory=nil local e=System.GetEntity({}) "
 			    "if e then if e.GetInventoryToOpen~=nil then "
 			    "KCD2Online_world_inventory_source=1 "
@@ -149,7 +161,8 @@ namespace kcd2o::kcse
 			    "KCD2Online_world_inventory_source=2 "
 			    "KCD2Online_world_inventory=e.inventoryId "
 			    "elseif e.LockType=='door' then KCD2Online_world_is_door=true end "
-			    "KCD2Online_world_open=(e.bOpened==1 or e.nDirection==1) end",
+			    "KCD2Online_world_open=(e.bOpened==1 or e.nDirection==1) "
+			    "KCD2Online_world_locked=(e.bLocked==true) end",
 			    entity->GetId());
 			if (!execute_script(script))
 				return std::nullopt;
@@ -157,6 +170,7 @@ namespace kcd2o::kcse
 			ScriptAnyValue inventory_source;
 			ScriptAnyValue is_door;
 			ScriptAnyValue opened;
+			ScriptAnyValue locked;
 			if (!read_script_global(
 			        "KCD2Online_world_inventory_source", inventory_source)
 			    || inventory_source.type != ANY_TNUMBER
@@ -165,7 +179,9 @@ namespace kcd2o::kcse
 			    || !read_script_global("KCD2Online_world_is_door", is_door)
 			    || is_door.type != ANY_TBOOLEAN
 			    || !read_script_global("KCD2Online_world_open", opened)
-			    || opened.type != ANY_TBOOLEAN)
+			    || opened.type != ANY_TBOOLEAN
+			    || !read_script_global("KCD2Online_world_locked", locked)
+			    || locked.type != ANY_TBOOLEAN)
 			{
 				return std::nullopt;
 			}
@@ -176,6 +192,7 @@ namespace kcd2o::kcse
 			result.kind = classify_world_object(
 			    result.inventory_source, is_door.b);
 			result.opened = opened.b;
+			result.locked = locked.b;
 			if (result.kind == protocol::WORLD_OBJECT_KIND_UNSPECIFIED)
 				return std::nullopt;
 			if (result.kind == protocol::WORLD_OBJECT_KIND_CONTAINER)
@@ -278,6 +295,9 @@ namespace kcd2o::kcse
 		    inspected->kind,
 		    inspected->opened,
 		    m_open_containers.contains(entity->GetGuid())));
+		state.set_locked(inspected->locked);
+		if (state.locked())
+			state.set_opened(false);
 		state.set_revision(0);
 		if (inspected->kind == protocol::WORLD_OBJECT_KIND_CONTAINER)
 		{
@@ -427,10 +447,14 @@ namespace kcd2o::kcse
 		m_applying_world_state = true;
 		const auto script = std::format(
 		    "local e=System.GetEntity({}) if e then "
-		    "if e.Unlock~=nil then e:Unlock() end "
+		    "if {} then "
+		    "if e.Event_Close~=nil then e:Event_Close() end "
+		    "if e.Event_Lock~=nil then e:Event_Lock() elseif e.Lock~=nil then e:Lock() end "
+		    "else if e.Event_Unlock~=nil then e:Event_Unlock() elseif e.Unlock~=nil then e:Unlock() end "
 		    "if {} then if e.Event_Open~=nil then e:Event_Open() end "
-		    "else if e.Event_Close~=nil then e:Event_Close() end end end",
+		    "else if e.Event_Close~=nil then e:Event_Close() end end end end",
 		    id,
+		    state.locked() ? "true" : "false",
 		    state.opened() ? "true" : "false");
 		const bool script_applied = execute_script(script);
 		const bool inventory_applied = apply_inventory(entity, state, error);
@@ -499,7 +523,17 @@ namespace kcd2o::kcse
 		auto state = capture(entity);
 		if (!state)
 			return false;
-		state->set_opened(script_event == world_script_event::open);
+		if (script_event == world_script_event::open)
+			state->set_opened(true);
+		else if (script_event == world_script_event::close)
+			state->set_opened(false);
+		else if (script_event == world_script_event::lock)
+		{
+			state->set_locked(true);
+			state->set_opened(false);
+		}
+		else if (script_event == world_script_event::unlock)
+			state->set_locked(false);
 		state->set_revision(0);
 		const auto guid = state->entity_guid();
 		if (state->kind() == protocol::WORLD_OBJECT_KIND_CONTAINER)

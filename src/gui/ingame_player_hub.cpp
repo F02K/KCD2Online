@@ -6,11 +6,13 @@
 	#include "gui/native_ui_localization.hpp"
 #endif
 #include "kcse/client_proxy.hpp"
+#include "multiplayer/ui_settings.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <ctime>
 #include <format>
 #include <imgui.h>
@@ -42,6 +44,21 @@ namespace big::ingame_player_hub
 			{
 				g_gui->sync_mouse_capture();
 			}
+			if (!open)
+			{
+				try
+				{
+					auto settings = kcd2o::kcse::ui_client().voice_settings();
+					if (settings.microphone_test != 0)
+					{
+						settings.microphone_test = 0;
+						(void)kcd2o::kcse::ui_client().set_voice_settings(settings);
+					}
+				}
+				catch (...)
+				{
+				}
+			}
 		}
 
 		std::string text(std::string_view key)
@@ -69,6 +86,7 @@ namespace big::ingame_player_hub
 			{
 				return "CONTROLS";
 			}
+			if (key == "hub.tab.voice") return "VOICE";
 			if (key == "hub.server")
 			{
 				return "SERVER";
@@ -249,6 +267,20 @@ namespace big::ingame_player_hub
 			{
 				return "SHOUT";
 			}
+			if (key == "hub.voice.input_device") return "MICROPHONE";
+			if (key == "hub.voice.system_default") return "SYSTEM DEFAULT (COMMUNICATIONS)";
+			if (key == "hub.voice.refresh") return "REFRESH DEVICES";
+			if (key == "hub.voice.input_gain") return "INPUT GAIN";
+			if (key == "hub.voice.output_volume") return "VOICE PLAYBACK VOLUME";
+			if (key == "hub.voice.noise_suppression") return "NOISE SUPPRESSION";
+			if (key == "hub.voice.noise_strength") return "NOISE REDUCTION";
+			if (key == "hub.voice.agc") return "AUTOMATIC GAIN";
+			if (key == "hub.voice.gate") return "VOICE GATE";
+			if (key == "hub.voice.gate_threshold") return "GATE SENSITIVITY";
+			if (key == "hub.voice.test") return "MICROPHONE TEST (METER ONLY)";
+			if (key == "hub.voice.active_device") return "ACTIVE DEVICE";
+			if (key == "hub.voice.level") return "PROCESSED LEVEL";
+			if (key == "hub.voice.processing_hint") return "Noise removal, high-pass filtering and resampling are applied before transmission.";
 			if (key == "hub.controls.chat")
 			{
 				return "Enter - multiplayer chat";
@@ -551,6 +583,120 @@ namespace big::ingame_player_hub
 			ImGui::Spacing();
 			ImGui::TextWrapped("%s", text("hub.controls.rebind").c_str());
 		}
+
+		bool apply_voice_settings(
+		    kcd2o::kcse::ui_client_proxy &client,
+		    bool microphone_test)
+		{
+			auto &stored = kcd2o::ui_settings();
+			kcd2o::kcse::voice_settings_view value;
+			(void)strncpy_s(
+			    value.input_device_id, stored.voice_input_device_id.c_str(),
+			    _TRUNCATE);
+			value.input_gain = std::clamp(stored.voice_input_gain, 0.0F, 3.0F);
+			value.output_volume = std::clamp(stored.voice_output_volume, 0.0F, 1.5F);
+			value.noise_suppression_db = std::clamp(stored.voice_noise_suppression_db, -50, 0);
+			value.noise_suppression = stored.voice_noise_suppression ? 1U : 0U;
+			value.automatic_gain = stored.voice_automatic_gain ? 1U : 0U;
+			value.voice_gate = stored.voice_gate ? 1U : 0U;
+			value.voice_gate_probability = std::clamp(stored.voice_gate_probability, 0, 100);
+			value.microphone_test = microphone_test ? 1U : 0U;
+			return client.set_voice_settings(value);
+		}
+
+		void draw_voice(
+		    const kcd2o::client_status &status,
+		    kcd2o::kcse::ui_client_proxy &client,
+		    float scale)
+		{
+			auto &stored = kcd2o::ui_settings();
+			auto runtime = client.voice_settings();
+			auto devices = client.voice_devices();
+			bool changed{};
+
+			section_title(text("hub.voice.input_device"));
+			std::string preview = text("hub.voice.system_default");
+			for (const auto &device : devices)
+			{
+				if (stored.voice_input_device_id == device.id)
+				{
+					preview = device.name[0] ? device.name : preview;
+					break;
+				}
+			}
+			if (ImGui::BeginCombo("##VoiceInputDevice", preview.c_str()))
+			{
+				for (const auto &device : devices)
+				{
+					const auto selected = stored.voice_input_device_id == device.id;
+					const auto label = device.id[0] ? std::string(device.name)
+					                                : text("hub.voice.system_default");
+					if (ImGui::Selectable(label.c_str(), selected))
+					{
+						stored.voice_input_device_id = device.id;
+						changed = true;
+					}
+					if (selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::Button(text("hub.voice.refresh").c_str(), {190.0F * scale, 0.0F}))
+				client.refresh_voice_devices();
+			if (runtime.active_device_name[0])
+				label_value(text("hub.voice.active_device"), runtime.active_device_name);
+
+			ImGui::Spacing();
+			section_title(text("hub.voice"));
+			changed |= ImGui::SliderFloat(
+			    text("hub.voice.input_gain").c_str(), &stored.voice_input_gain,
+			    0.0F, 3.0F, "%.2fx");
+			changed |= ImGui::SliderFloat(
+			    text("hub.voice.output_volume").c_str(), &stored.voice_output_volume,
+			    0.0F, 1.5F, "%.2fx");
+			changed |= ImGui::Checkbox(
+			    text("hub.voice.noise_suppression").c_str(),
+			    &stored.voice_noise_suppression);
+			if (stored.voice_noise_suppression)
+				changed |= ImGui::SliderInt(
+				    text("hub.voice.noise_strength").c_str(),
+				    &stored.voice_noise_suppression_db, -50, 0, "%d dB");
+			changed |= ImGui::Checkbox(
+			    text("hub.voice.agc").c_str(), &stored.voice_automatic_gain);
+			changed |= ImGui::Checkbox(
+			    text("hub.voice.gate").c_str(), &stored.voice_gate);
+			if (stored.voice_gate)
+				changed |= ImGui::SliderInt(
+				    text("hub.voice.gate_threshold").c_str(),
+				    &stored.voice_gate_probability, 0, 100, "%d%%");
+
+			bool microphone_test = runtime.microphone_test != 0;
+			if (ImGui::Checkbox(text("hub.voice.test").c_str(), &microphone_test))
+				(void)apply_voice_settings(client, microphone_test);
+			if (changed)
+			{
+				stored.voice_input_gain = std::clamp(stored.voice_input_gain, 0.0F, 3.0F);
+				stored.voice_output_volume = std::clamp(stored.voice_output_volume, 0.0F, 1.5F);
+				stored.voice_noise_suppression_db = std::clamp(stored.voice_noise_suppression_db, -50, 0);
+				stored.voice_gate_probability = std::clamp(stored.voice_gate_probability, 0, 100);
+				stored.persist_voice();
+				(void)apply_voice_settings(client, microphone_test);
+			}
+
+			label_value(
+			    text("hub.status"),
+			    status.voice_recording ? text("hub.voice.recording")
+			                           : text("hub.voice.idle"));
+			ImGui::TextDisabled("%s", text("hub.voice.level").c_str());
+			ImGui::ProgressBar(
+			    std::clamp(status.voice_level, 0.0F, 1.0F),
+			    {std::min(520.0F * scale, ImGui::GetContentRegionAvail().x),
+			     12.0F * scale}, "");
+			ImGui::TextWrapped("%s", text("hub.voice.processing_hint").c_str());
+			if (runtime.diagnostic[0])
+				ImGui::TextColored(
+				    {0.94F, 0.38F, 0.28F, 1.0F}, "%s", runtime.diagnostic);
+		}
 	} // namespace
 
 	void render(bool another_panel_open)
@@ -560,6 +706,12 @@ namespace big::ingame_player_hub
 		static std::uint32_t player_hub_action_generation{};
 		static bool disconnect_confirmation{};
 		static double feedback_until{};
+		static bool voice_settings_applied{};
+		if (!voice_settings_applied && client.available())
+		{
+			voice_settings_applied = apply_voice_settings(client, false);
+			client.refresh_voice_devices();
+		}
 		const auto available = (status.state == kcd2o::client_state::connected || status.state == kcd2o::client_state::reconnecting) && !another_panel_open;
 		g_can_open.store(available, std::memory_order_release);
 		g_native_bindings_active.store(status.native_keybinds, std::memory_order_release);
@@ -656,6 +808,11 @@ namespace big::ingame_player_hub
 				if (ImGui::BeginTabItem(text("hub.tab.controls").c_str()))
 				{
 					draw_controls();
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem(text("hub.tab.voice").c_str()))
+				{
+					draw_voice(status, client, scale);
 					ImGui::EndTabItem();
 				}
 				ImGui::EndTabBar();

@@ -185,6 +185,18 @@ namespace kcd2o
 				return "ClientVoiceFrame";
 			case protocol::Envelope::kServerVoiceFrame:
 				return "ServerVoiceFrame";
+			case protocol::Envelope::kServerPropertyAccessUpdated:
+				return "ServerPropertyAccessUpdated";
+			case protocol::Envelope::kClientPropertyRoleGrant:
+				return "ClientPropertyRoleGrant";
+			case protocol::Envelope::kClientPropertyRoleRevoke:
+				return "ClientPropertyRoleRevoke";
+			case protocol::Envelope::kClientPropertyOwnerSet:
+				return "ClientPropertyOwnerSet";
+			case protocol::Envelope::kClientPropertyResourceLock:
+				return "ClientPropertyResourceLock";
+			case protocol::Envelope::kPropertyOperationResult:
+				return "PropertyOperationResult";
 			case protocol::Envelope::PAYLOAD_NOT_SET: return "PayloadNotSet";
 			}
 			return "InvalidEnvelopePayload";
@@ -423,6 +435,7 @@ namespace kcd2o
 			m_pending_connect.reset();
 			m_remote_players.clear();
 			m_local_correction.reset();
+			m_property_access.Clear();
 		}
 	}
 
@@ -539,6 +552,7 @@ namespace kcd2o
 			message.set_station_guid(station_guid);
 			m_pending_activity_start = message;
 			m_activity_denial.reset();
+			m_property_access.Clear();
 		}
 		queue_network(activity_start_command{std::move(message)});
 		return true;
@@ -569,6 +583,82 @@ namespace kcd2o
 		auto result = std::move(m_activity_denial);
 		m_activity_denial.reset();
 		return result;
+	}
+
+	protocol::PropertyAccessSnapshot multiplayer_client::property_access() const
+	{
+		std::scoped_lock lock(m_state_mutex);
+		return m_property_access;
+	}
+
+	bool multiplayer_client::request_property_role(
+	    std::string property_id,
+	    std::string target_player_id,
+	    protocol::PropertyRole role,
+	    std::uint64_t expires_at_ms)
+	{
+		protocol::ClientPropertyRoleGrant message;
+		{
+			std::scoped_lock lock(m_state_mutex);
+			if (m_status.state != client_state::connected || property_id.empty()
+			    || !is_uuid(target_player_id)
+			    || role == protocol::PROPERTY_ROLE_UNSPECIFIED
+			    || role == protocol::PROPERTY_ROLE_OWNER)
+				return false;
+			message.set_property_id(std::move(property_id));
+			message.set_target_player_id(std::move(target_player_id));
+			message.set_role(role);
+			message.set_expires_at_ms(expires_at_ms);
+		}
+		queue_network(property_role_grant_command{std::move(message)});
+		return true;
+	}
+
+	bool multiplayer_client::revoke_property_role(std::string assignment_id)
+	{
+		protocol::ClientPropertyRoleRevoke message;
+		{
+			std::scoped_lock lock(m_state_mutex);
+			if (m_status.state != client_state::connected
+			    || !is_uuid(assignment_id))
+				return false;
+			message.set_assignment_id(std::move(assignment_id));
+		}
+		queue_network(property_role_revoke_command{std::move(message)});
+		return true;
+	}
+
+	bool multiplayer_client::set_property_owner(
+	    std::string property_id,
+	    std::string target_player_id)
+	{
+		protocol::ClientPropertyOwnerSet message;
+		{
+			std::scoped_lock lock(m_state_mutex);
+			if (m_status.state != client_state::connected || property_id.empty()
+			    || !is_uuid(target_player_id))
+				return false;
+			message.set_property_id(std::move(property_id));
+			message.set_target_player_id(std::move(target_player_id));
+		}
+		queue_network(property_owner_set_command{std::move(message)});
+		return true;
+	}
+
+	bool multiplayer_client::set_property_locked(
+	    std::uint64_t entity_guid,
+	    bool locked)
+	{
+		protocol::ClientPropertyResourceLock message;
+		{
+			std::scoped_lock lock(m_state_mutex);
+			if (m_status.state != client_state::connected || entity_guid == 0)
+				return false;
+			message.set_entity_guid(entity_guid);
+			message.set_locked(locked);
+		}
+		queue_network(property_resource_lock_command{std::move(message)});
+		return true;
 	}
 
 	void multiplayer_client::runtime_epoch_changed()
@@ -741,6 +831,39 @@ namespace kcd2o
 		}
 		if (avatar_update)
 			queue_network(avatar_command{std::move(*avatar_update)});
+		if (connected)
+		{
+			if (const auto interaction = m_runtime.poll_property_interaction())
+			{
+				if (interaction->action
+			    == client_runtime::property_interaction::kind::manage)
+				{
+					std::scoped_lock lock(m_state_mutex);
+					m_status.property_action_entity_guid = interaction->entity_guid;
+					++m_status.property_action_generation;
+					kcse::join_trace::write_critical(
+					    "property.interaction.manage-forwarded",
+					    std::format(
+					        "entity_guid={} generation={}",
+					        interaction->entity_guid,
+					        m_status.property_action_generation));
+				}
+				else
+				{
+					kcse::join_trace::write_critical(
+					    "property.interaction.secure-requested",
+					    std::format(
+					        "entity_guid={} locked={}",
+					        interaction->entity_guid,
+					        interaction->action
+					            == client_runtime::property_interaction::kind::lock));
+					(void)set_property_locked(
+					    interaction->entity_guid,
+					    interaction->action
+					        == client_runtime::property_interaction::kind::lock);
+				}
+			}
+		}
 		m_runtime.set_voice_active(connected);
 		if (connected && canonical_level_id(current_level) != canonical_level_id(expected_level))
 		{
@@ -1658,12 +1781,47 @@ namespace kcd2o
 			else if constexpr (
 			    std::is_same_v<type, voice_command>)
 			{
+				if (std::chrono::steady_clock::now() - typed.queued_at
+				    > std::chrono::milliseconds(300))
+					return;
 				protocol::Envelope envelope;
 				*envelope.mutable_client_voice_frame() =
 				    std::move(typed.message);
 				(void)send_envelope(
 				    envelope,
 				    reliability::unreliable);
+			}
+			else if constexpr (
+			    std::is_same_v<type, property_role_grant_command>)
+			{
+				protocol::Envelope envelope;
+				*envelope.mutable_client_property_role_grant() =
+				    std::move(typed.message);
+				(void)send_envelope(envelope, reliability::reliable);
+			}
+			else if constexpr (
+			    std::is_same_v<type, property_role_revoke_command>)
+			{
+				protocol::Envelope envelope;
+				*envelope.mutable_client_property_role_revoke() =
+				    std::move(typed.message);
+				(void)send_envelope(envelope, reliability::reliable);
+			}
+			else if constexpr (
+			    std::is_same_v<type, property_owner_set_command>)
+			{
+				protocol::Envelope envelope;
+				*envelope.mutable_client_property_owner_set() =
+				    std::move(typed.message);
+				(void)send_envelope(envelope, reliability::reliable);
+			}
+			else if constexpr (
+			    std::is_same_v<type, property_resource_lock_command>)
+			{
+				protocol::Envelope envelope;
+				*envelope.mutable_client_property_resource_lock() =
+				    std::move(typed.message);
+				(void)send_envelope(envelope, reliability::reliable);
 			}
 					    },
 					    command);
@@ -1865,6 +2023,30 @@ namespace kcd2o
 	void multiplayer_client::queue_network(network_command command)
 	{
 		std::scoped_lock lock(m_network_mutex);
+		if (std::holds_alternative<voice_command>(command))
+		{
+			const auto now = std::chrono::steady_clock::now();
+			std::erase_if(m_network_commands, [&](const network_command &queued)
+			{
+				const auto *voice = std::get_if<voice_command>(&queued);
+				return voice && now - voice->queued_at > std::chrono::milliseconds(300);
+			});
+			const auto voice_count = std::ranges::count_if(
+			    m_network_commands, [](const network_command &queued)
+			    {
+				    return std::holds_alternative<voice_command>(queued);
+			    });
+			if (voice_count >= 20)
+			{
+				const auto oldest = std::ranges::find_if(
+				    m_network_commands, [](const network_command &queued)
+				    {
+					    return std::holds_alternative<voice_command>(queued);
+				    });
+				if (oldest != m_network_commands.end())
+					m_network_commands.erase(oldest);
+			}
+		}
 		if (std::holds_alternative<chat_command>(command))
 		{
 			const auto first_sync = std::ranges::find_if(
@@ -2143,12 +2325,18 @@ namespace kcd2o
 		{
 			m_status.avatar_policy =
 			    envelope.server_accepted().avatar_policy();
+			const auto voice_config =
+			    envelope.server_accepted().voice_config();
+			m_property_access.Clear();
+			const auto property_access = m_property_access;
 			std::optional<protocol::PropertyHomeMarker> home_marker;
 			if (envelope.server_accepted().has_home_marker())
 				home_marker = envelope.server_accepted().home_marker();
 			lock.unlock();
 			const bool marker_accepted =
 			    m_runtime.set_home_marker(home_marker);
+			m_runtime.set_voice_server_config(voice_config);
+			m_runtime.set_property_access(property_access);
 			lock.lock();
 			if (!marker_accepted)
 				m_status.error = "home marker is waiting for the native map runtime";
@@ -2165,6 +2353,40 @@ namespace kcd2o
 			lock.unlock();
 			m_runtime.show_multiplayer_notice(
 			    "VOIP: V = sprechen, Strg+V = fluestern, Umschalt+V = rufen.");
+			lock.lock();
+		}
+		else if (envelope.has_server_property_access_updated())
+		{
+			const auto &updated = envelope.server_property_access_updated();
+			if (updated.reset())
+				m_property_access.Clear();
+			m_property_access.set_ledger_revision(
+			    updated.snapshot().ledger_revision());
+			for (const auto &access : updated.snapshot().properties())
+				*m_property_access.add_properties() = access;
+			if (updated.complete())
+			{
+				const auto snapshot = m_property_access;
+				kcse::join_trace::write_diagnostic(
+				    "property.interaction.snapshot-complete",
+				    std::format(
+				        "properties={} ledger_revision={}",
+				        snapshot.properties_size(),
+				        snapshot.ledger_revision()));
+				lock.unlock();
+				m_runtime.set_property_access(snapshot);
+				lock.lock();
+			}
+		}
+		else if (envelope.has_property_operation_result())
+		{
+			const auto &result = envelope.property_operation_result();
+			m_status.property_operation_success = result.success();
+			m_status.property_operation_message = result.message();
+			++m_status.property_operation_generation;
+			const auto notice = result.message();
+			lock.unlock();
+			m_runtime.show_multiplayer_notice(notice);
 			lock.lock();
 		}
 		else if (envelope.has_server_home_marker_updated())

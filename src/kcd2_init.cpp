@@ -9,6 +9,7 @@
 #include <gui/gui.hpp>
 #include <gui/ingame_chat.hpp>
 #include <gui/ingame_player_hub.hpp>
+#include <gui/ingame_property_panel.hpp>
 #include <gui/ingame_social_panel.hpp>
 #include <gui/ingame_staff_panel.hpp>
 #include <gui/native_multiplayer_menu.hpp>
@@ -387,6 +388,10 @@ namespace big
 			return;
 		}
 		if (ingame_social_panel::blocks_game_input())
+		{
+			return;
+		}
+		if (ingame_property_panel::blocks_game_input())
 		{
 			return;
 		}

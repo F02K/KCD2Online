@@ -234,6 +234,18 @@ namespace kcd2o::server
 		void handle_world_object_update(
 		    player_session &player,
 		    const protocol::ClientWorldObjectUpdate &message);
+		void handle_property_role_grant(
+		    player_session &player,
+		    const protocol::ClientPropertyRoleGrant &message);
+		void handle_property_role_revoke(
+		    player_session &player,
+		    const protocol::ClientPropertyRoleRevoke &message);
+		void handle_property_owner_set(
+		    player_session &player,
+		    const protocol::ClientPropertyOwnerSet &message);
+		void handle_property_resource_lock(
+		    player_session &player,
+		    const protocol::ClientPropertyResourceLock &message);
 		void handle_world_item_update(
 		    player_session &player,
 		    const protocol::ClientWorldItemUpdate &message);
@@ -322,6 +334,17 @@ namespace kcd2o::server
 		void send_world_objects(connection_id connection);
 		void send_world_items(connection_id connection);
 		void broadcast_home_markers();
+		[[nodiscard]] protocol::PropertyAccessSnapshot property_access_for(
+		    const player_session &player) const;
+		[[nodiscard]] bool has_permission(
+		    const player_session &player,
+		    std::string_view permission) const;
+		void send_property_result(
+		    player_session &player,
+		    bool success,
+		    std::string message);
+		void send_property_access(player_session &player);
+		void broadcast_property_access();
 		void advance_environment_clock(time_point now);
 		void broadcast_environment(time_point now);
 		void broadcast_sleep_state(bool time_skipped = false);

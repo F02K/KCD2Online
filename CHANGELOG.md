@@ -8,6 +8,42 @@ changes. Client and server versions must match exactly.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-08-28
+
+### Added
+
+- Added an embedded, read-only dedicated-server operations dashboard with
+  token authentication, loopback-only defaults, request limiting, and live
+  tick, network, traffic-lane, CPU, and memory telemetry.
+- Added server-authoritative Property management with contextual in-game
+  actions for role and owner administration, permission-filtered access
+  snapshots, and persistent locking of Property doors and containers.
+- Added a Voice tab to the player hub with microphone selection, persistent
+  input gain and playback volume, noise suppression, automatic gain, an
+  optional voice gate, device diagnostics, and a meter-only microphone test.
+- Added Property ownership-area discovery so native area, trespass, private-area,
+  and crime reactions can follow the authoritative Property assignment.
+
+### Changed
+
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.7`.
+- Applied the server's proximity-voice enablement and distance ranges to the
+  client, and added SpeexDSP preprocessing and resampling before Opus encoding.
+- Bounded queued voice traffic by age and count so stale realtime audio is
+  discarded instead of increasing latency under network pressure.
+- Included the standalone dashboard configuration in server packages and made
+  the packaged launcher create it on first start.
+
+### Fixed
+
+- Rejected malformed Opus frames and impossible locked-and-open world-object
+  states before they can enter the authoritative simulation.
+- Enforced Property lock permissions for both explicit lock requests and direct
+  world-object updates, and closed doors or containers before locking them.
+- Coordinated input capture between the new Property panel and the existing
+  player, social, and staff panels.
+
 ## [0.1.6] - 2026-08-14
 
 ### Added
