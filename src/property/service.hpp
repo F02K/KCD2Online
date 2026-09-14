@@ -19,6 +19,7 @@ namespace kcd2o::property
 		use_container,
 		use_bed,
 		use_workstation,
+		secure,
 		manage_roles,
 		transfer_title
 	};
@@ -49,6 +50,15 @@ namespace kcd2o::property
 		    std::uint64_t entity_guid,
 		    capability requested,
 		    std::uint64_t now_ms = 0) const;
+		[[nodiscard]] bool authorize_property(
+		    std::string_view player_persistent_id,
+		    std::string_view property_id,
+		    capability requested,
+		    std::uint64_t now_ms = 0) const;
+		[[nodiscard]] protocol::PropertyRole effective_role(
+		    std::string_view player_persistent_id,
+		    std::string_view property_id,
+		    std::uint64_t now_ms = 0) const;
 
 		[[nodiscard]] bool system_assign_owner(
 		    std::string_view property_id,
@@ -56,8 +66,22 @@ namespace kcd2o::property
 		    std::string assignment_id,
 		    std::uint64_t now_ms,
 		    std::string &error);
+		[[nodiscard]] bool system_set_owner(
+		    std::string_view property_id,
+		    std::string_view target_player_id,
+		    std::string assignment_id,
+		    std::uint64_t now_ms,
+		    std::string &error);
 		[[nodiscard]] bool grant_role(
 		    std::string_view actor_player_id,
+		    std::string_view property_id,
+		    std::string_view target_player_id,
+		    protocol::PropertyRole role,
+		    std::string assignment_id,
+		    std::uint64_t now_ms,
+		    std::uint64_t expires_at_ms,
+		    std::string &error);
+		[[nodiscard]] bool system_grant_role(
 		    std::string_view property_id,
 		    std::string_view target_player_id,
 		    protocol::PropertyRole role,

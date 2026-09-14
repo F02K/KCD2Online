@@ -81,8 +81,8 @@ namespace kcd2o::server
 		std::uint32_t script_instruction_limit{250'000};
 		std::uint32_t script_error_limit{3};
 		std::filesystem::path starter_profile_path{"starter_profile.toml"};
-		// Generated from the audited retail level PAKs and shipped beside the
-		// dedicated server. Production levels use it as an NPC GUID/kind allowlist.
+		// Generated locally from the operator's retail level PAKs. Production
+		// levels use it as an NPC GUID/kind allowlist.
 		std::filesystem::path npc_world_catalog_path;
 		// Generated dedicated-server data. When configured, the matching property
 		// catalog is imported once and persisted in world_directory.

@@ -2,6 +2,7 @@
 
 #include "multiplayer/protocol.hpp"
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -15,6 +16,14 @@ namespace kcd2o::net
 	constexpr int server_rejected_reason = 1002;
 	constexpr int server_shutdown_reason = 1003;
 	constexpr int server_kicked_reason = 1004;
+
+	struct connection_statistics
+	{
+		int ping_ms{-1};
+		float packet_loss_percent{};
+		std::size_t pending_send_bytes{};
+		std::array<std::size_t, traffic_lane_count> pending_lane_bytes{};
+	};
 
 	class runtime
 	{
@@ -55,6 +64,8 @@ namespace kcd2o::net
 		[[nodiscard]] std::optional<std::size_t> pending_send_bytes(
 		    connection_id connection,
 		    traffic_lane lane) const;
+		[[nodiscard]] std::optional<connection_statistics> statistics(
+		    connection_id connection) const;
 		void close(
 		    connection_id connection,
 		    int reason,

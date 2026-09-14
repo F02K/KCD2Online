@@ -132,6 +132,7 @@ namespace kcd2o::server
 			std::unordered_set<std::uint64_t> resources;
 			for (const auto &definition : catalog.properties())
 			{
+				std::unordered_set<std::uint64_t> ownership_areas;
 				const bool has_marker_position =
 				    definition.has_marker_position();
 				const bool has_marker_entity =
@@ -161,6 +162,12 @@ namespace kcd2o::server
 					    || !resources.insert(resource.entity_guid()).second)
 						return false;
 				}
+				for (const auto area_guid : definition.ownership_area_guids())
+				{
+					if (area_guid == 0
+					    || !ownership_areas.insert(area_guid).second)
+						return false;
+				}
 			}
 			for (const auto &definition : catalog.properties())
 			{
@@ -184,10 +191,14 @@ namespace kcd2o::server
 			std::unordered_set<std::string> assignments;
 			for (const auto &assignment : ledger.assignments())
 			{
+				const bool system_granted =
+				    assignment.granted_by_player_id() == "system"
+				    && assignment.granted_by_assignment_id().empty();
 				if (!is_uuid(assignment.assignment_id())
 				    || !properties.contains(assignment.property_id())
 				    || !is_uuid(assignment.subject_player_id())
 				    || (!assignment.granted_by_player_id().empty()
+				        && assignment.granted_by_player_id() != "system"
 				        && !is_uuid(assignment.granted_by_player_id()))
 				    || (!assignment.granted_by_assignment_id().empty()
 				        && !is_uuid(assignment.granted_by_assignment_id()))
@@ -205,10 +216,18 @@ namespace kcd2o::server
 			{
 				const bool owner =
 				    assignment.role() == protocol::PROPERTY_ROLE_OWNER;
-				if (owner != assignment.granted_by_player_id().empty()
-				    || owner != assignment.granted_by_assignment_id().empty())
+				const bool system_granted =
+				    assignment.granted_by_player_id() == "system"
+				    && assignment.granted_by_assignment_id().empty();
+				if (owner
+				    && (!assignment.granted_by_player_id().empty()
+				        || !assignment.granted_by_assignment_id().empty()))
 					return false;
-				if (!owner
+				if (!owner && !system_granted
+				    && (assignment.granted_by_player_id().empty()
+				        || assignment.granted_by_assignment_id().empty()))
+					return false;
+				if (!owner && !system_granted
 				    && !assignments.contains(
 				        assignment.granted_by_assignment_id()))
 					return false;

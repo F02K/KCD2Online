@@ -27,6 +27,8 @@ namespace big
 
 		bool is_open();
 		void toggle(bool toggle);
+		// Re-applies cursor/input ownership after an independent overlay changes state.
+		void sync_mouse_capture();
 
 		ImGuiMouseCursor m_mouse_cursor = ImGuiMouseCursor_Arrow;
 

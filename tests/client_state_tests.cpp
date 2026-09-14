@@ -125,6 +125,12 @@ int main()
 	assert(is_server_message_allowed(
 	    client_state::connected,
 	    payload::kServerNpcGameplayUpdate));
+	assert(is_server_message_allowed(
+	    client_state::connected,
+	    payload::kServerPropertyAccessUpdated));
+	assert(is_server_message_allowed(
+	    client_state::connected,
+	    payload::kPropertyOperationResult));
 	assert(!is_server_message_allowed(
 	    client_state::authenticating,
 	    payload::kWorldSnapshot));

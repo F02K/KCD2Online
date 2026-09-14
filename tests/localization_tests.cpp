@@ -28,6 +28,30 @@ int main()
 	           {{"server", "Kuttenberg"}})
 	    == "VERBUNDEN: Kuttenberg");
 	assert(catalog.text("chat.title") == "MEHRSPIELER-CHAT");
+	assert(catalog.text("hub.title") == "SPIELER-HUB");
+	assert(catalog.text("hub.controls.rebind").find("neu belegt")
+	    != std::string::npos);
+	assert(catalog.text("property.title") == "PROPERTY-VERWALTUNG");
+	assert(catalog.text("property.role.owner") == "EIGENT\xC3\x9C" "MER");
+	assert(catalog.text("property.resource.door") == "T\xC3\x9C" "R");
+	assert(catalog.text("social.title") == "SOCIAL");
+	assert(catalog.text("social.local_hint").find("Client")
+	    != std::string::npos);
+	assert(catalog.text("staff.title") == "STAFF-PANEL");
+	assert(catalog.text("account.action.recover") == "BESTEHENDEN ACCOUNT WIEDERHERSTELLEN");
+	assert(catalog.text("legal.action.open") == "RECHTLICHES & DATENSCHUTZ");
+	assert(catalog.text("legal.action.privacy") == "DATENSCHUTZERKLÄRUNG");
+	assert(catalog.text("network_ban.title") == "NETZWERKZUGANG GESPERRT");
+	assert(catalog.text("moderation.restriction.title").find("ZUGRIFF")
+	    != std::string::npos);
+	assert(catalog.format(
+	           "moderation.restriction.reason",
+	           {{"reason", "Testgrund"}})
+	    == "GRUND: Testgrund");
+	assert(catalog.format(
+	           "network_ban.support",
+	           {{"url", "https://support.kingdom-online.cc"}})
+	    == "SUPPORT: https://support.kingdom-online.cc");
 	assert(catalog.text("chat.help").find("schlie\xC3\x9F" "en")
 	    != std::string::npos);
 	assert(catalog.format(
@@ -35,15 +59,17 @@ int main()
 	           {{"players", "2"},
 	            {"max", "8"},
 	            {"level", "3"},
-	            {"version", "0.1.4"},
+	            {"version", "0.1.7"},
 	            {"password", "JA"},
 	            {"id", "srv_test"}})
-	    == "SPIELER: 2/8\nLEVEL: 3\nVERSION: 0.1.4\nPASSWORT: JA\nSERVER-ID: srv_test");
+	    == "SPIELER: 2/8\nLEVEL: 3\nVERSION: 0.1.7\nPASSWORT: JA\nSERVER-ID: srv_test");
 
 	assert(catalog.load(directory, "french", error));
 	assert(catalog.language() == "fr");
 	assert(catalog.text("menu.action.connect") == "CONNECT");
 	assert(catalog.text("chat.input_hint") == "Write a message...");
+	assert(catalog.text("property.title") == "PROPERTY MANAGEMENT");
+	assert(catalog.text("property.role.steward") == "STEWARD");
 	assert(catalog.text("missing.key") == "[[missing.key]]");
 	return 0;
 }

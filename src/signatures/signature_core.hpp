@@ -17,7 +17,7 @@ namespace kcd2::signatures
 	constexpr uint32_t supported_image_size = 0x5B2D000;
 	constexpr std::string_view supported_sha256 =
 	    "BDF8F9E4A11257A72B64C84700E284C29E4C4CCAF5B8D4BFA7D0B2A7294479F7";
-	constexpr size_t expected_signature_count = 68;
+	constexpr size_t expected_signature_count = 67;
 
 	enum class resolution_kind
 	{

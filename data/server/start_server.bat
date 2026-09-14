@@ -18,7 +18,33 @@ if not exist "server.toml" (
     echo Edit server.toml to customize the server configuration.
 )
 
-if not exist "game_data\WHGame.dll" (
+if not exist "dashboard.toml" (
+    if not exist "dashboard.toml.example" (
+        echo ERROR: dashboard.toml.example is missing.
+        pause
+        exit /b 1
+    )
+    copy /Y "dashboard.toml.example" "dashboard.toml" >nul
+    if errorlevel 1 (
+        echo ERROR: Could not create dashboard.toml from dashboard.toml.example.
+        pause
+        exit /b 1
+    )
+    echo Created dashboard.toml with local-only, token-protected access.
+)
+
+if not exist "game_data\content_manifest.json" (
+    goto missing_game_data
+)
+if not exist "game_data\npc_archetypes.json" (
+    goto missing_game_data
+)
+if not exist "game_data\npc_world_catalog.json" (
+    goto missing_game_data
+)
+goto game_data_ready
+
+:missing_game_data
     echo.
     echo ERROR: The required game_data folder has not been generated yet.
     echo.
@@ -28,7 +54,8 @@ if not exist "game_data\WHGame.dll" (
     echo.
     pause
     exit /b 1
-)
+
+:game_data_ready
 
 "%~dp0KCD2OnlineServer.exe" "%~dp0server.toml"
 set "KCD2Online_SERVER_EXIT=%ERRORLEVEL%"

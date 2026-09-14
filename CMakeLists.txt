@@ -8,7 +8,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
 
-project(KCD2Online VERSION 0.1.4 LANGUAGES CXX C ASM ASM_MASM)
+project(KCD2Online VERSION 0.1.7 LANGUAGES CXX C ASM ASM_MASM)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/multiplayer/version.hpp.in"
@@ -77,6 +77,22 @@ if(KCD2Online_BUILD_KCSE)
     find_package(spdlog CONFIG REQUIRED)
     find_package(boost_container CONFIG REQUIRED)
     find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
+    find_path(KCD2Online_SPEEXDSP_INCLUDE_DIR
+        NAMES speex/speex_preprocess.h
+        REQUIRED
+    )
+    find_library(KCD2Online_SPEEXDSP_LIBRARY
+        NAMES speexdsp libspeexdsp
+        REQUIRED
+    )
+    add_library(KCD2OnlineSpeexDSP UNKNOWN IMPORTED)
+    set_target_properties(KCD2OnlineSpeexDSP PROPERTIES
+        IMPORTED_LOCATION "${KCD2Online_SPEEXDSP_LIBRARY}"
+        IMPORTED_LOCATION_DEBUG "${KCD2Online_SPEEXDSP_LIBRARY}"
+        IMPORTED_LOCATION_RELEASE "${KCD2Online_SPEEXDSP_LIBRARY}"
+        IMPORTED_LOCATION_RELWITHDEBINFO "${KCD2Online_SPEEXDSP_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${KCD2Online_SPEEXDSP_INCLUDE_DIR}"
+    )
 
     set(KCD2Online_LIBKCD2_ROOT "${PROJECT_SOURCE_DIR}/libKCD2")
     set(KCD2Online_KCSE_ROOT "${KCD2Online_LIBKCD2_ROOT}/Projects/KCSE")
@@ -394,6 +410,8 @@ target_compile_definitions(KCD2OnlineScripting PRIVATE
 set_property(TARGET KCD2OnlineScripting PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
 add_library(KCD2OnlineServerCore STATIC
+	"${SRC_DIR}/server/dashboard_config.cpp"
+	"${SRC_DIR}/server/dashboard_config.hpp"
 	"${SRC_DIR}/server/item_ledger.cpp"
 	"${SRC_DIR}/server/item_ledger.hpp"
 	"${SRC_DIR}/server/npc_registry.cpp"
@@ -431,13 +449,20 @@ add_executable(KCD2OnlineServer "${SRC_DIR}/server/server_main.cpp")
 target_sources(KCD2OnlineServer PRIVATE
     "${SRC_DIR}/server/backend_client.cpp"
     "${SRC_DIR}/server/backend_client.hpp"
+	"${SRC_DIR}/server/dashboard_assets.hpp"
+	"${SRC_DIR}/server/dashboard_server.cpp"
+	"${SRC_DIR}/server/dashboard_server.hpp"
+	"${SRC_DIR}/server/dashboard_telemetry.cpp"
+	"${SRC_DIR}/server/dashboard_telemetry.hpp"
 )
+target_link_libraries(KCD2OnlineServerCore PRIVATE Opus::opus)
 set_property(TARGET KCD2OnlineServer PROPERTY CXX_STANDARD 23)
 target_include_directories(KCD2OnlineServer PRIVATE "${SRC_DIR}")
 target_link_libraries(KCD2OnlineServer PRIVATE
     KCD2OnlineServerCore
     KCD2OnlineNetworking
     nlohmann_json::nlohmann_json
+	ws2_32
     winhttp
 )
 target_compile_definitions(KCD2OnlineServer PRIVATE
@@ -450,11 +475,13 @@ add_custom_command(TARGET KCD2OnlineServer POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PROJECT_SOURCE_DIR}/server.toml.example"
         "$<TARGET_FILE_DIR:KCD2OnlineServer>/server.toml.example"
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+		"${PROJECT_SOURCE_DIR}/dashboard.toml.example"
+		"$<TARGET_FILE_DIR:KCD2OnlineServer>/dashboard.toml.example"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PROJECT_SOURCE_DIR}/starter_profile.toml"
         "$<TARGET_FILE_DIR:KCD2OnlineServer>/starter_profile.toml"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${PROJECT_SOURCE_DIR}/data/npc_archetypes.json"
+    COMMAND "${CMAKE_COMMAND}" -E rm -f
         "$<TARGET_FILE_DIR:KCD2OnlineServer>/npc_archetypes.json"
 )
 
@@ -487,6 +514,8 @@ if(KCD2Online_BUILD_KCSE)
         advapi32
         bcrypt
         crypt32
+        ole32
+        shell32
         winhttp
     )
     set_property(TARGET KCD2OnlineAccount PROPERTY COMPILE_WARNING_AS_ERROR ON)
@@ -497,7 +526,9 @@ if(KCD2Online_BUILD_KCSE)
 		"${SRC_DIR}/gui/native_ingame_menu_api.hpp"
 		"${SRC_DIR}/gui/native_ui_localization.cpp"
 		"${SRC_DIR}/gui/native_ui_localization.hpp"
-        "${SRC_DIR}/gui/native_multiplayer_menu.cpp"
+		"${SRC_DIR}/gui/terms_of_service.hpp"
+		"${SRC_DIR}/gui/privacy_policy.hpp"
+		"${SRC_DIR}/gui/native_multiplayer_menu.cpp"
         "${SRC_DIR}/gui/native_multiplayer_menu.hpp"
     )
     set_property(TARGET KCD2OnlineNativeMultiplayerMenu PROPERTY CXX_STANDARD 23)
@@ -634,8 +665,9 @@ if(KCD2Online_BUILD_KCSE)
     target_link_libraries(KCD2OnlineKCSENativeRuntime PRIVATE
         kcd_re
         KCD2OnlineNpcCatalog
-        KCD2OnlineProtocol
+		KCD2OnlineProtocol
 		Opus::opus
+		KCD2OnlineSpeexDSP
 		ole32
     )
     set_property(TARGET KCD2OnlineKCSENativeRuntime PROPERTY COMPILE_WARNING_AS_ERROR ON)
@@ -918,6 +950,14 @@ if (BUILD_TESTING)
     set_property(TARGET KCD2OnlineServerCoreTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     add_test(NAME KCD2OnlineServerCoreTests COMMAND KCD2OnlineServerCoreTests)
 
+	add_executable(KCD2OnlineDashboardConfigTests
+		"${PROJECT_SOURCE_DIR}/tests/dashboard_config_tests.cpp"
+	)
+	set_property(TARGET KCD2OnlineDashboardConfigTests PROPERTY CXX_STANDARD 23)
+	target_link_libraries(KCD2OnlineDashboardConfigTests PRIVATE KCD2OnlineServerCore)
+	set_property(TARGET KCD2OnlineDashboardConfigTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
+	add_test(NAME KCD2OnlineDashboardConfigTests COMMAND KCD2OnlineDashboardConfigTests)
+
 	add_executable(KCD2OnlineItemLedgerTests
 		"${PROJECT_SOURCE_DIR}/tests/item_ledger_tests.cpp"
 	)
@@ -1033,9 +1073,6 @@ if (BUILD_TESTING)
     )
     set_property(TARGET KCD2OnlineNpcCatalogTests PROPERTY CXX_STANDARD 23)
     target_link_libraries(KCD2OnlineNpcCatalogTests PRIVATE KCD2OnlineNpcCatalog)
-    target_compile_definitions(KCD2OnlineNpcCatalogTests PRIVATE
-        "KCD2Online_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\""
-    )
     set_property(TARGET KCD2OnlineNpcCatalogTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
     add_test(NAME KCD2OnlineNpcCatalogTests COMMAND KCD2OnlineNpcCatalogTests)
 
@@ -1145,6 +1182,7 @@ if (BUILD_TESTING)
             KCD2OnlineEnginePathTests
             KCD2OnlineProtocolTests
             KCD2OnlineServerCoreTests
+			KCD2OnlineDashboardConfigTests
 			KCD2OnlineItemLedgerTests
 			KCD2OnlineNpcRegistryTests
             KCD2OnlinePropertyTests

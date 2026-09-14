@@ -347,6 +347,48 @@ namespace kcd2o::net
 		        std::max(0, lane_status.m_cbPendingUnreliable));
 	}
 
+	std::optional<connection_statistics> server_transport::statistics(
+	    connection_id connection) const
+	{
+		SteamNetConnectionRealTimeStatus_t status{};
+		std::array<SteamNetConnectionRealTimeLaneStatus_t, traffic_lane_count>
+		    lanes{};
+		if (m_impl->sockets->GetConnectionRealTimeStatus(
+		        static_cast<HSteamNetConnection>(connection),
+		        &status,
+		        static_cast<int>(lanes.size()),
+		        lanes.data())
+		    != k_EResultOK)
+			return std::nullopt;
+
+		connection_statistics result;
+		result.ping_ms = status.m_nPing;
+		float quality = 1.0F;
+		if (status.m_flConnectionQualityLocal >= 0.0F
+		    && status.m_flConnectionQualityRemote >= 0.0F)
+		{
+			quality = std::min(
+			    status.m_flConnectionQualityLocal,
+			    status.m_flConnectionQualityRemote);
+		}
+		else if (status.m_flConnectionQualityLocal >= 0.0F)
+			quality = status.m_flConnectionQualityLocal;
+		else if (status.m_flConnectionQualityRemote >= 0.0F)
+			quality = status.m_flConnectionQualityRemote;
+		result.packet_loss_percent =
+		    (1.0F - std::clamp(quality, 0.0F, 1.0F)) * 100.0F;
+		for (std::size_t index{}; index < lanes.size(); ++index)
+		{
+			result.pending_lane_bytes[index] =
+			    static_cast<std::size_t>(
+			        std::max(0, lanes[index].m_cbPendingReliable))
+			    + static_cast<std::size_t>(
+			        std::max(0, lanes[index].m_cbPendingUnreliable));
+			result.pending_send_bytes += result.pending_lane_bytes[index];
+		}
+		return result;
+	}
+
 	void server_transport::close(
 	    connection_id connection,
 	    int reason,

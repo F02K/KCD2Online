@@ -77,6 +77,11 @@ int main()
 	    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 	    100,
 	    error));
+	assert(permissions.authorize(owner_id, 10, capability::secure, 100));
+	assert(permissions.authorize_property(
+	    owner_id, "3:fixture", capability::manage_roles, 100));
+	assert(permissions.effective_role(owner_id, "3:fixture", 100)
+	    == protocol::PROPERTY_ROLE_OWNER);
 	const auto home = permissions.home_marker_for(owner_id, 100);
 	assert(home);
 	assert(home->property_id() == "3:fixture");
@@ -96,6 +101,7 @@ int main()
 	    error));
 	assert(permissions.authorize(
 	    steward_id, 11, capability::use_container, 102));
+	assert(permissions.authorize(steward_id, 10, capability::secure, 102));
 	assert(permissions.grant_role(
 	    steward_id,
 	    "3:fixture",
@@ -108,6 +114,7 @@ int main()
 	assert(permissions.authorize(guest_id, 10, capability::enter, 150));
 	assert(!permissions.authorize(
 	    guest_id, 11, capability::use_container, 150));
+	assert(!permissions.authorize(guest_id, 10, capability::secure, 150));
 	assert(!permissions.authorize(guest_id, 10, capability::enter, 201));
 	assert(permissions.revoke_role(
 	    owner_id,
@@ -125,8 +132,31 @@ int main()
 	assert(scan_level_pak(pak, "3", discovered, error));
 	assert(discovered.properties_size() == 1);
 	assert(discovered.properties(0).resources_size() == 2);
+	assert(discovered.properties(0).ownership_area_guids_size() == 1);
+	assert(discovered.properties(0).ownership_area_guids(0) == 2);
 	assert(discovered.properties(0).marker_entity_guid() == 1);
 	assert(discovered.properties(0).has_marker_position());
 	assert(discovered.properties(0).marker_position().x() == 10.5F);
+
+	server::server_config config;
+	config.world_directory = root / "world";
+	config.level_id = "3";
+	config.required_content_hash = "fixture";
+	server::world_store store(config);
+	store.save_property_catalog(catalog());
+	service system_permissions(catalog(), store.property_ledger());
+	assert(system_permissions.system_grant_role(
+	    "3:fixture",
+	    guest_id,
+	    protocol::PROPERTY_ROLE_GUEST,
+	    "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+	    200,
+	    0,
+	    error));
+	store.save_property_ledger(system_permissions.ledger());
+	server::world_store reloaded(config);
+	assert(reloaded.property_ledger().assignments_size() == 1);
+	assert(reloaded.property_ledger().assignments(0).granted_by_player_id()
+	    == "system");
 	std::filesystem::remove_all(root);
 }

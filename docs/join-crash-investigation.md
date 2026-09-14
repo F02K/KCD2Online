@@ -263,12 +263,13 @@ relocation/vtable helper implementations listed above.
 ## Failure return behavior
 
 Join/runtime failures no longer call `EndGameContext` directly from KCSE's
-`PostUpdate` callback. The client queues CryEngine's native `unload` command in
-the deferred console FIFO, waits until both the game context and client entity
-are gone, and then opens the native root main menu. Expected unload lifecycle
-events do not invalidate the stored failure cause. The native multiplayer page
-opens automatically and renders a literal English heading and the original
-English error text (also as its tooltip).
+`PostUpdate` callback. The client queues CryEngine's native `disconnect` command
+in the deferred console FIFO. CryEngine tears down the game context and performs
+its canonical return-to-frontend transition; KCD2Online no longer calls the
+native menu VTable while world teardown is in flight. Expected disconnect
+lifecycle events do not invalidate the stored failure cause. The native
+multiplayer page opens automatically and renders a literal English heading and
+the original English error text (also as its tooltip).
 
 ## Follow-up: joining an occupied server
 
@@ -292,15 +293,25 @@ Actor.
 
 ## Follow-up: manual disconnect
 
-The native Disconnect button no longer captures the player profile from its UI
+The native Disconnect button does not capture the player profile from its UI
 callback. It only changes the client to `Closing` and records a shutdown
-request. On the next KCSE game-thread frame, the client optionally captures and
-queues the final profile update, then queues the reliable transport close.
+request. On the next KCSE game-thread frame, the client queues the reliable
+transport close without performing another optional native profile capture.
 Remote-avatar synchronization and server corrections accept only `Connected`,
 so no native multiplayer mutation can race the shutdown. `Closing` immediately
-starts the same deferred `unload` transition used for handled join failures;
-after the game context is gone, KCD2Online opens the native main menu. No quit or
+starts the same deferred native `disconnect` transition used for handled join
+failures. CryEngine then returns through its regular frontend flow. No quit or
 process-termination command is issued.
+
+A later reproduction showed that queuing CryEngine's canonical command was not
+alone sufficient. The full-world path still ran ordinary per-avatar removal:
+native equipment was detached and a timed Lua `System.RemoveEntity` was queued
+immediately before the whole game context was destroyed. Full unload now drops
+only KCD2Online's avatar handles, lets CryEngine own Actor/inventory destruction,
+and waits until the following game frame before queuing `disconnect`. The final
+optional profile capture was also removed from shutdown. Sparse disconnect
+milestones are written durably even when verbose join diagnostics are disabled,
+so a crash after KCSE returns to CryEngine still leaves an exact last boundary.
 
 ## Trace output and interpretation
 
@@ -330,10 +341,8 @@ Important last-line mappings:
 | `join.sandbox.spawn-selection.ok` | selected source and exact transform |
 | `join.sandbox.target-profile.invalid` | target rejected before native mutation |
 | `join.sandbox.profile-apply.failed` | includes attempted/succeeded rollback and unload decision |
-| `join.sandbox.unload.command.queued` | deferred engine map unload is waiting in the console FIFO |
+| `join.sandbox.unload.command.queued` | deferred engine disconnect/frontend return is waiting in the console FIFO |
 | `join.sandbox.unload.complete` | game context and client entity are gone |
-| `join.sandbox.main-menu.opened` | native root main menu is visible |
-| `join.sandbox.OpenMainMenu.seh` | guarded native main-menu open raised SEH and will be retried |
 | `join.kcse-post-update.seh` | caught engine-side SEH; includes code/address |
 
 For the verification reproduction, the expected initializer sequence is

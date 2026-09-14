@@ -4,7 +4,10 @@
 
 #include <Windows.h>
 #include <dpapi.h>
+#include <ShlObj.h>
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iterator>
 #include <nlohmann/json.hpp>
@@ -174,6 +177,35 @@ namespace kcd2o::account
 			throw std::runtime_error("LOCALAPPDATA is unavailable");
 		buffer.resize(length);
 		return std::filesystem::path(buffer) / "KCD2Online" / "account.bin";
+	}
+
+	std::filesystem::path account_store::save_data_export(
+	    std::string_view account_id,
+	    std::string_view json)
+	{
+		if (account_id.empty() || account_id.size() > 64
+		    || !std::ranges::all_of(account_id, [](unsigned char character)
+		       { return std::isalnum(character) || character == '-'; })
+		    || json.empty())
+			throw std::invalid_argument("Account data export is invalid");
+		PWSTR documents{};
+		std::filesystem::path directory;
+		if (SUCCEEDED(SHGetKnownFolderPath(
+		        FOLDERID_Documents, KF_FLAG_CREATE, nullptr, &documents)))
+		{
+			directory = documents;
+			CoTaskMemFree(documents);
+		}
+		else
+		{
+			directory = default_path().parent_path();
+		}
+		directory /= "KCD2Online";
+		const auto target = directory
+		    / ("KCD2Online-account-data-" + std::string(account_id) + ".json");
+		atomic_write(target, {
+		    reinterpret_cast<const std::byte *>(json.data()), json.size()});
+		return target;
 	}
 
 	void account_store::load()

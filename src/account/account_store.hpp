@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace kcd2o::account
@@ -38,6 +39,9 @@ namespace kcd2o::account
 		[[nodiscard]] const std::filesystem::path &path() const noexcept;
 
 		[[nodiscard]] static std::filesystem::path default_path();
+		[[nodiscard]] static std::filesystem::path save_data_export(
+		    std::string_view account_id,
+		    std::string_view json);
 
 	private:
 		void load();

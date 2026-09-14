@@ -48,6 +48,7 @@ enum RejectReason {
   REJECT_REASON_SESSION_MISMATCH = 11;
   REJECT_REASON_BOOTSTRAP_FAILED = 12;
   REJECT_REASON_PROFILE_CONFLICT = 13;
+  REJECT_REASON_RESTRICTED = 14;
 }
 
 enum BootstrapMode {
@@ -331,6 +332,7 @@ message WorldObjectState {
   bool opened = 4;
   bool has_inventory = 5;
   repeated InventoryItem inventory = 6;
+  bool locked = 7;
 }
 
 message ClientWorldObjectUpdate {
@@ -427,6 +429,9 @@ message PropertyDefinition {
   // from the property's SchedulerHub (or its crime-area anchor as fallback).
   Vec3 marker_position = 9;
   uint64 marker_entity_guid = 10;
+  // Native TriggerArea/AreaUnion entities whose ownership controls trespass,
+  // private-area UI and crime reactions for this property.
+  repeated uint64 ownership_area_guids = 11;
 }
 
 message PropertyCatalog {
@@ -474,7 +479,63 @@ message PropertyHomeMarker {
   PropertyRole role = 6;
 }
 
+// Client-specific projection. The server only includes assignments and
+// capabilities the receiving player may inspect.
+message PropertyAccess {
+  PropertyDefinition property = 1;
+  PropertyRole effective_role = 2;
+  bool can_manage = 3;
+  bool can_secure = 4;
+  bool can_edit_owner = 5;
+  repeated PropertyRoleAssignment assignments = 6;
+}
+
+message PropertyAccessSnapshot {
+  uint64 ledger_revision = 1;
+  repeated PropertyAccess properties = 2;
+}
+
+message ServerPropertyAccessUpdated {
+  PropertyAccessSnapshot snapshot = 1;
+  bool reset = 2;
+  bool complete = 3;
+}
+
+message ClientPropertyRoleGrant {
+  string property_id = 1;
+  string target_player_id = 2;
+  PropertyRole role = 3;
+  uint64 expires_at_ms = 4;
+}
+
+message ClientPropertyRoleRevoke {
+  string assignment_id = 1;
+}
+
+message ClientPropertyOwnerSet {
+  string property_id = 1;
+  string target_player_id = 2;
+}
+
+message ClientPropertyResourceLock {
+  uint64 entity_guid = 1;
+  bool locked = 2;
+}
+
+message PropertyOperationResult {
+  bool success = 1;
+  string message = 2;
+}
+
+message VoiceConfig {
+  bool enabled = 1;
+  float whisper_range_m = 2;
+  float normal_range_m = 3;
+  float shout_range_m = 4;
+}
+
 message ServerAccepted {
+  reserved 14;
   uint64 player_id = 1;
   string resume_token = 2;
   uint32 tick_rate = 3;
@@ -487,6 +548,8 @@ message ServerAccepted {
   AvatarPolicy avatar_policy = 10;
   PropertyHomeMarker home_marker = 11;
   NetworkRole network_role = 12;
+  repeated string effective_permissions = 13;
+  VoiceConfig voice_config = 15;
 }
 
 message ServerHomeMarkerUpdated {
@@ -498,6 +561,13 @@ message ServerHomeMarkerUpdated {
 message ServerRejected {
   RejectReason reason = 1;
   string message = 2;
+  string error_code = 3;
+  string restriction_scope = 4;
+  string restriction_kind = 5;
+  string restriction_reason = 6;
+  uint64 expires_at_unix_ms = 7;
+  string reference_id = 8;
+  string support_url = 9;
 }
 
 message PlayerJoined {
@@ -974,14 +1044,20 @@ message Envelope {
     ServerNpcGameplayUpdate server_npc_gameplay_update = 55;
     ClientVoiceFrame client_voice_frame = 56;
     ServerVoiceFrame server_voice_frame = 57;
-    ServerResourceManifest server_resource_manifest = 58;
-    ClientResourceRequest client_resource_request = 59;
-    ServerResourceChunk server_resource_chunk = 60;
-    ClientResourcesReady client_resources_ready = 61;
-    ClientResourceEvent client_resource_event = 62;
-    ServerResourceEvent server_resource_event = 63;
-    ServerUiUpdate server_ui_update = 64;
-    ServerInputBinding server_input_binding = 65;
-    ClientUiEvent client_ui_event = 66;
+    ServerPropertyAccessUpdated server_property_access_updated = 58;
+    ClientPropertyRoleGrant client_property_role_grant = 59;
+    ClientPropertyRoleRevoke client_property_role_revoke = 60;
+    ClientPropertyOwnerSet client_property_owner_set = 61;
+    ClientPropertyResourceLock client_property_resource_lock = 62;
+    PropertyOperationResult property_operation_result = 63;
+    ServerResourceManifest server_resource_manifest = 64;
+    ClientResourceRequest client_resource_request = 65;
+    ServerResourceChunk server_resource_chunk = 66;
+    ClientResourcesReady client_resources_ready = 67;
+    ClientResourceEvent client_resource_event = 68;
+    ServerResourceEvent server_resource_event = 69;
+    ServerUiUpdate server_ui_update = 70;
+    ServerInputBinding server_input_binding = 71;
+    ClientUiEvent client_ui_event = 72;
   }
 }

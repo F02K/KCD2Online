@@ -7,48 +7,123 @@
 
 namespace
 {
-	std::uint32_t __cdecl runtime(
-	    kcd2o::kcse::runtime_status *) noexcept
+	std::uint32_t __cdecl runtime(kcd2o::kcse::runtime_status *) noexcept
 	{
 		return 1;
 	}
-	std::uint32_t __cdecl connect(
-	    const kcd2o::kcse::connect_request *) noexcept
+
+	std::uint32_t __cdecl connect(const kcd2o::kcse::connect_request *) noexcept
 	{
 		return 1;
 	}
-	void __cdecl disconnect() noexcept {}
-	std::uint32_t __cdecl text(const char *) noexcept { return 1; }
-	std::uint32_t __cdecl action() noexcept { return 1; }
-	std::uint32_t __cdecl action_with_value(std::uint32_t) noexcept { return 1; }
-	std::uint32_t __cdecl status(
-	    kcd2o::kcse::client_status_view *) noexcept
+
+	void __cdecl disconnect() noexcept
+	{
+	}
+
+	std::uint32_t __cdecl text(const char *) noexcept
 	{
 		return 1;
 	}
-	std::uint32_t __cdecl players(
-	    kcd2o::kcse::remote_player_view *,
-	    std::uint32_t) noexcept
+
+	std::uint32_t __cdecl action() noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl action_with_value(std::uint32_t) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl status(kcd2o::kcse::client_status_view *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl players(kcd2o::kcse::remote_player_view *, std::uint32_t) noexcept
 	{
 		return 0;
 	}
-	std::uint32_t __cdecl chat(
-	    kcd2o::kcse::chat_entry_view *,
-	    std::uint32_t) noexcept
+
+	std::uint32_t __cdecl chat(kcd2o::kcse::chat_entry_view *, std::uint32_t) noexcept
 	{
 		return 0;
 	}
-	std::uint32_t __cdecl archetypes(
-	    kcd2o::kcse::fixed_string *,
-	    std::uint32_t) noexcept
+
+	std::uint32_t __cdecl archetypes(kcd2o::kcse::fixed_string *, std::uint32_t) noexcept
 	{
 		return 0;
 	}
-	void __cdecl diagnostic_logging(std::uint32_t) noexcept {}
-	std::uint32_t __cdecl resource_ui(char *, std::uint32_t) noexcept { return 0; }
+
+	void __cdecl diagnostic_logging(std::uint32_t) noexcept
+	{
+	}
+
+	std::uint32_t __cdecl player_voice_volume(std::uint64_t, float) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl property_access(void *, std::uint32_t) noexcept
+	{
+		return 0;
+	}
+
+	std::uint32_t __cdecl property_role(
+	    const char *, const char *, std::uint32_t, std::uint64_t) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl one_text(const char *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl two_texts(const char *, const char *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl property_lock(std::uint64_t, std::uint32_t) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl voice_settings(
+	    kcd2o::kcse::voice_settings_view *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl set_voice_settings(
+	    const kcd2o::kcse::voice_settings_view *) noexcept
+	{
+		return 1;
+	}
+
+	std::uint32_t __cdecl voice_devices(
+	    kcd2o::kcse::voice_device_view *, std::uint32_t) noexcept
+	{
+		return 0;
+	}
+
+	void __cdecl refresh_voice_devices() noexcept
+	{
+	}
+
+	std::uint32_t __cdecl resource_ui(char *, std::uint32_t) noexcept
+	{
+		return 0;
+	}
+
 	std::uint32_t __cdecl submit_resource_ui(
-	    const kcd2o::kcse::resource_ui_event_request *) noexcept { return 1; }
-}
+	    const kcd2o::kcse::resource_ui_event_request *) noexcept
+	{
+		return 1;
+	}
+} // namespace
 
 int main()
 {
@@ -65,6 +140,10 @@ int main()
 	static_assert(std::is_trivially_copyable_v<remote_player_view>);
 	static_assert(std::is_standard_layout_v<chat_entry_view>);
 	static_assert(std::is_trivially_copyable_v<chat_entry_view>);
+	static_assert(std::is_standard_layout_v<voice_settings_view>);
+	static_assert(std::is_trivially_copyable_v<voice_settings_view>);
+	static_assert(std::is_standard_layout_v<voice_device_view>);
+	static_assert(std::is_trivially_copyable_v<voice_device_view>);
 	static_assert(std::is_standard_layout_v<client_api>);
 	static_assert(std::is_trivially_copyable_v<client_api>);
 	static_assert(std::is_standard_layout_v<resource_ui_event_request>);
@@ -73,11 +152,13 @@ int main()
 	static_assert(sizeof(fixed_string) == 64);
 	static_assert(sizeof(connect_request) == 836);
 	static_assert(sizeof(runtime_status) == 424);
-	static_assert(sizeof(client_status_view) == 720);
-	static_assert(sizeof(remote_player_view) == 88);
+	static_assert(sizeof(client_status_view) == 2064);
+	static_assert(sizeof(remote_player_view) == 152);
 	static_assert(sizeof(chat_entry_view) == 344);
 	static_assert(sizeof(resource_ui_event_request) == 33028);
-	static_assert(sizeof(client_api) == 136);
+	static_assert(sizeof(voice_settings_view) == 808);
+	static_assert(sizeof(voice_device_view) == 516);
+	static_assert(sizeof(client_api) == 224);
 #endif
 
 	client_api valid{
@@ -98,28 +179,51 @@ int main()
 	    chat,
 	    archetypes,
 	    diagnostic_logging,
+	    sizeof(client_status_view),
+	    sizeof(remote_player_view),
+	    player_voice_volume,
+	    property_access,
+	    property_role,
+	    one_text,
+	    two_texts,
+	    property_lock,
+	    voice_settings,
+	    set_voice_settings,
+	    voice_devices,
+	    refresh_voice_devices,
 	    resource_ui,
 	    submit_resource_ui};
 	assert(compatible(&valid));
-	static_assert(kcd2o::kcd2o_version == "0.1.4");
+	static_assert(kcd2o::kcd2o_version == "0.1.7");
 	static_assert(kcd2o::kcd2o_version_major == 0);
 	static_assert(kcd2o::kcd2o_version_minor == 1);
-	static_assert(kcd2o::kcd2o_version_patch == 4);
+	static_assert(kcd2o::kcd2o_version_patch == 7);
 
 	auto wrong_version = valid;
 	++wrong_version.version_patch;
 	assert(!compatible(&wrong_version));
 
-	auto short_struct = valid;
-	short_struct.struct_size =
-	    static_cast<std::uint32_t>(offsetof(client_api, copy_chat));
+	auto short_struct        = valid;
+	short_struct.struct_size = static_cast<std::uint32_t>(offsetof(client_api, copy_chat));
 	assert(!compatible(&short_struct));
 
 	auto future_struct = valid;
 	++future_struct.struct_size;
 	assert(!compatible(&future_struct));
 
-	auto missing_function = valid;
+	auto missing_function         = valid;
 	missing_function.copy_players = nullptr;
 	assert(!compatible(&missing_function));
+
+	auto missing_voice_control                    = valid;
+	missing_voice_control.set_player_voice_volume = nullptr;
+	assert(!compatible(&missing_voice_control));
+
+	auto wrong_status_view = valid;
+	--wrong_status_view.status_view_size;
+	assert(!compatible(&wrong_status_view));
+
+	auto wrong_player_view = valid;
+	--wrong_player_view.remote_player_view_size;
+	assert(!compatible(&wrong_player_view));
 }

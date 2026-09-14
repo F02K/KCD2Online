@@ -64,12 +64,16 @@ namespace kcd2o::server
 		using token_generator = std::function<std::string()>;
 		using account_authenticator = std::function<std::optional<network_identity>(
 		    std::string_view,
+		    authentication_failure &)>;
+		using moderation_executor = std::function<bool(
+		    const moderation_action &,
 		    std::string &)>;
 
 		explicit server_core(
 		    server_config config,
 		    token_generator generate_token = {},
-		    account_authenticator authenticate_account = {});
+		    account_authenticator authenticate_account = {},
+		    moderation_executor moderate_account = {});
 
 		void on_transport_connected(connection_id connection, time_point now);
 		void on_transport_disconnected(
@@ -140,6 +144,12 @@ namespace kcd2o::server
 		[[nodiscard]] std::size_t pending_connection_count() const;
 		[[nodiscard]] std::uint64_t server_tick() const;
 		[[nodiscard]] const server_config &config() const;
+		void apply_account_restrictions(
+		    const std::vector<account_restriction> &restrictions,
+		    time_point now);
+		void apply_moderation_action(
+		    const moderation_action &action,
+		    time_point now);
 
 	private:
 		enum class pending_stage
@@ -235,6 +245,18 @@ namespace kcd2o::server
 		void handle_world_object_update(
 		    player_session &player,
 		    const protocol::ClientWorldObjectUpdate &message);
+		void handle_property_role_grant(
+		    player_session &player,
+		    const protocol::ClientPropertyRoleGrant &message);
+		void handle_property_role_revoke(
+		    player_session &player,
+		    const protocol::ClientPropertyRoleRevoke &message);
+		void handle_property_owner_set(
+		    player_session &player,
+		    const protocol::ClientPropertyOwnerSet &message);
+		void handle_property_resource_lock(
+		    player_session &player,
+		    const protocol::ClientPropertyResourceLock &message);
 		void handle_world_item_update(
 		    player_session &player,
 		    const protocol::ClientWorldItemUpdate &message);
@@ -338,7 +360,8 @@ namespace kcd2o::server
 		void reject(
 		    connection_id connection,
 		    protocol::RejectReason reason,
-		    std::string message);
+		    std::string message,
+		    const authentication_failure *failure = nullptr);
 		void remove_player(
 		    player_id id,
 		    std::string reason,
@@ -349,6 +372,17 @@ namespace kcd2o::server
 		void send_world_objects(connection_id connection);
 		void send_world_items(connection_id connection);
 		void broadcast_home_markers();
+		[[nodiscard]] protocol::PropertyAccessSnapshot property_access_for(
+		    const player_session &player) const;
+		[[nodiscard]] bool has_permission(
+		    const player_session &player,
+		    std::string_view permission) const;
+		void send_property_result(
+		    player_session &player,
+		    bool success,
+		    std::string message);
+		void send_property_access(player_session &player);
+		void broadcast_property_access();
 		void advance_environment_clock(time_point now);
 		void broadcast_environment(time_point now);
 		void broadcast_sleep_state(bool time_skipped = false);
@@ -404,6 +438,7 @@ namespace kcd2o::server
 		std::unique_ptr<scripting::server_resource_runtime> m_scripts;
 		token_generator m_generate_token;
 		account_authenticator m_authenticate_account;
+		moderation_executor m_moderate_account;
 		world_store m_store;
 		permission_store m_permissions;
 		npc_registry m_npcs;

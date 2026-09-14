@@ -174,7 +174,8 @@ namespace
 		voice->set_sequence(sequence);
 		voice->set_capture_time_ms(sequence * 20);
 		voice->set_range(range);
-		voice->set_opus("opus");
+		// Standard 20 ms Opus comfort-noise/DTX packet.
+		voice->set_opus("\xF8\xFF\xFE", 3);
 		voice->set_visemes(std::string(voice_viseme_count, '\0'));
 		return envelope;
 	}
@@ -365,6 +366,21 @@ int main()
 	temporary_world parsed_config_world;
 	{
 		const auto path = parsed_config_world.path / "server.toml";
+		const auto game_data = parsed_config_world.path / "game_data";
+		std::filesystem::create_directories(game_data);
+		constexpr std::string_view custom_soul =
+		    "11111111-2222-4333-8444-555555555555";
+		{
+			std::ofstream catalog(game_data / "npc_archetypes.json");
+			catalog
+			    << "{\"schema_version\":2,"
+			       "\"retail_build\":\"1308617_856\","
+			       "\"catalog_fingerprint\":\"22f4d6dc5438ecab\","
+			       "\"default_soul_id\":\""
+			    << npc::default_soul_id << "\","
+			       "\"soul_ids\":[\""
+			    << npc::default_soul_id << "\",\"" << custom_soul << "\"]}";
+		}
 		std::filesystem::copy_file(
 		    std::filesystem::path(KCD2Online_SOURCE_DIR) / "starter_profile.toml",
 		    parsed_config_world.path / "starter_profile.toml");
@@ -372,6 +388,8 @@ int main()
 		output
 		    << "[server]\n"
 		       "level_id = \"sandbox\"\n"
+		       "default_avatar_archetype = \"11111111-2222-4333-8444-555555555555\"\n"
+		       "allowed_avatar_archetypes = [\"11111111-2222-4333-8444-555555555555\"]\n"
 		       "max_players = 50000\n"
 		       "world_directory = \"world\"\n"
 		       "disable_non_player_entities = true\n"
@@ -406,6 +424,8 @@ int main()
 		output.close();
 		const auto parsed = load_server_config(path);
 		assert(parsed.disable_human_npcs);
+		assert(parsed.default_avatar_archetype == custom_soul);
+		assert(parsed.known_avatar_archetypes.contains(std::string(custom_soul)));
 		assert(parsed.max_players == 50'000);
 		assert(parsed.disable_animal_npcs);
 		assert(parsed.world_directory
@@ -475,6 +495,11 @@ int main()
 		assert(outbound.front().connection == 102);
 		assert(outbound.front().delivery == reliability::unreliable);
 		assert(outbound.front().envelope.server_voice_frame().sequence() == 2);
+
+		auto malformed_voice = voice_frame(20);
+		malformed_voice.mutable_client_voice_frame()->set_opus("\x03", 1);
+		core.on_message(101, malformed_voice, start + 262ms);
+		assert(core.take_outbound().empty());
 
 		core.on_message(102, client_transform(3, 30.0F), start + 265ms);
 		assert(core.take_outbound().empty());
@@ -558,6 +583,29 @@ int main()
 	temporary_world central_auth_world;
 	{
 		auto config = config_for(central_auth_world.path);
+		const auto game_data = central_auth_world.path / "game_data";
+		std::filesystem::create_directories(game_data);
+		protocol::PropertyCatalog property_catalog;
+		property_catalog.set_schema(property::catalog_schema);
+		property_catalog.set_level_id("sandbox");
+		property_catalog.set_content_fingerprint("central-auth-fixture");
+		auto *property_definition = property_catalog.add_properties();
+		property_definition->set_property_id("sandbox:central-auth-fixture");
+		property_definition->set_level_id("sandbox");
+		property_definition->set_anchor_guid("0000002a-0000-0000");
+		property_definition->set_inferred_name("Central auth fixture");
+		property_definition->set_source_path("fixture/central_auth_property");
+		property_definition->set_discovery_confidence(1.0F);
+		auto *property_door = property_definition->add_resources();
+		property_door->set_entity_guid(42);
+		property_door->set_kind(protocol::PROPERTY_RESOURCE_KIND_DOOR);
+		{
+			std::ofstream output(
+			    game_data / "property_catalog_sandbox.pb",
+			    std::ios::binary | std::ios::trunc);
+			assert(output && property_catalog.SerializeToOstream(&output));
+		}
+		config.property_game_data = game_data;
 		config.account_auth_enabled = true;
 		config.account_whitelist_enabled = true;
 		config.account_service_url = "https://api.kingdom-online.cc";
@@ -567,10 +615,11 @@ int main()
 		config.max_players = 1;
 		constexpr std::string_view account_id =
 		    "0c997ac1-8ae3-45b0-9b7f-bf3bd45ea21e";
+		std::vector<moderation_action> moderation_actions;
 		server_core core(
 		    config,
 		    {},
-		    [&](std::string_view token, std::string &error)
+		    [&](std::string_view token, authentication_failure &failure)
 		    {
 			    if (token == "valid-access-token")
 				    return std::optional{network_identity{
@@ -591,9 +640,25 @@ int main()
 				    return std::optional{network_identity{
 				        .account_id = "1652dbd5-ad09-4f45-92f5-b2e7da826fb5",
 				        .network_role = "user",
-				        .display_name = "Unlisted User"}};
-			    error = "invalid central token";
+			        .display_name = "Unlisted User"}};
+			    if (token == "banned-access-token")
+			    {
+				    failure.message = "Your account is banned";
+				    failure.error_code = "network_banned";
+				    failure.restriction_scope = "network";
+				    failure.restriction_kind = "network_ban";
+				    failure.restriction_reason = "Test restriction";
+				    failure.reference_id = "case-test";
+				    return std::optional<network_identity>{};
+			    }
+			    failure.message = "invalid central token";
+			    failure.error_code = "invalid_token";
 			    return std::optional<network_identity>{};
+		    },
+		    [&](const moderation_action &action, std::string &)
+		    {
+			    moderation_actions.push_back(action);
+			    return true;
 		    });
 		core.on_transport_connected(90, start);
 		core.on_message(90, hello(), start);
@@ -605,6 +670,16 @@ int main()
 		core.on_message(90, central_auth("invalid"), start + 1ms);
 		outbound = core.take_outbound();
 		assert(has_rejection(outbound, 90, protocol::REJECT_REASON_IDENTITY_REQUIRED));
+		core.on_transport_connected(94, start + 1ms);
+		core.on_message(94, hello(), start + 1ms);
+		(void)core.take_outbound();
+		core.on_message(94, central_auth("banned-access-token"), start + 2ms);
+		outbound = core.take_outbound();
+		assert(has_rejection(outbound, 94, protocol::REJECT_REASON_RESTRICTED));
+		const auto &restriction = outbound.front().envelope.server_rejected();
+		assert(restriction.error_code() == "network_banned");
+		assert(restriction.restriction_reason() == "Test restriction");
+		assert(restriction.support_url() == "https://support.kingdom-online.cc");
 
 		core.on_transport_connected(91, start + 2ms);
 		core.on_message(91, hello(), start + 2ms);
@@ -645,8 +720,59 @@ int main()
 			        && entry.envelope.server_accepted().network_role()
 			            == protocol::NETWORK_ROLE_OWNER;
 		    }));
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    if (entry.connection != 92
+			        || !entry.envelope.has_server_property_access_updated())
+				    return false;
+			    const auto &snapshot =
+			        entry.envelope.server_property_access_updated().snapshot();
+			    return snapshot.properties_size() == 1
+			        && snapshot.properties(0).can_manage()
+			        && !snapshot.properties(0).can_secure();
+		    }));
 		assert(core.permissions(2) == std::vector<std::string>{"*"});
-		core.on_message(92, chat_message("muted text"), start + 8ms);
+		protocol::Envelope foreign_lock_request;
+		foreign_lock_request.mutable_client_property_resource_lock()
+		    ->set_entity_guid(42);
+		foreign_lock_request.mutable_client_property_resource_lock()
+		    ->set_locked(true);
+		core.on_message(92, foreign_lock_request, start + 8ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::any_of(
+		    outbound,
+		    [](const outbound_message &entry)
+		    {
+			    return entry.connection == 92
+			        && entry.envelope.has_property_operation_result()
+			        && !entry.envelope.property_operation_result().success()
+			        && entry.envelope.property_operation_result().message()
+			               == "Property lock permission denied.";
+		    }));
+		core.on_message(92, chat_message("/warn 1 Test warning"), start + 8ms);
+		outbound = core.take_outbound();
+		assert(moderation_actions.size() == 1);
+		assert(moderation_actions.front().kind == "warning");
+		assert(moderation_actions.front().account_id == account_id);
+		assert(std::ranges::any_of(outbound, [](const outbound_message &entry)
+		{
+			return entry.connection == 91 && entry.envelope.has_chat_broadcast()
+			    && entry.envelope.chat_broadcast().text().contains("Test warning");
+		}));
+		core.on_message(92, chat_message("/mute chat 1 10 Repeated spam"), start + 9ms);
+		(void)core.take_outbound();
+		assert(moderation_actions.size() == 2);
+		assert(moderation_actions.back().kind == "chat_mute");
+		core.on_message(91, chat_message("muted locally"), start + 10ms);
+		outbound = core.take_outbound();
+		assert(std::ranges::none_of(outbound, [](const outbound_message &entry)
+		{
+			return entry.envelope.has_chat_broadcast()
+			    && entry.envelope.chat_broadcast().player_id() == 1;
+		}));
+		core.on_message(92, chat_message("muted text"), start + 11ms);
 		outbound = core.take_outbound();
 		assert(std::ranges::none_of(
 		    outbound,
@@ -655,14 +781,14 @@ int main()
 			    return entry.envelope.has_chat_broadcast()
 			        && entry.envelope.chat_broadcast().player_id() == 2;
 		    }));
-		core.on_message(92, voice_frame(1), start + 9ms);
+		core.on_message(92, voice_frame(1), start + 12ms);
 		outbound = core.take_outbound();
 		assert(std::ranges::none_of(
 		    outbound,
 		    [](const outbound_message &entry)
 		    { return entry.envelope.has_server_voice_frame(); }));
 
-		core.on_transport_connected(93, start + 10ms);
+		core.on_transport_connected(93, start + 13ms);
 		core.on_message(93, hello("Unlisted User"), start + 10ms);
 		(void)core.take_outbound();
 		core.on_message(

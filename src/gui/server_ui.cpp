@@ -1,5 +1,6 @@
 #include "gui/server_ui.hpp"
 
+#include "gui/gui.hpp"
 #include "gui/ingame_chat.hpp"
 #include "kcse/client_proxy.hpp"
 
@@ -261,6 +262,7 @@ namespace big::server_ui
 	void render(bool mod_gui_open)
 	{
 		std::scoped_lock lock(g_mutex);
+		const auto captured_before = g_capture.load(std::memory_order_acquire);
 		try
 		{
 			refresh();
@@ -304,6 +306,11 @@ namespace big::server_ui
 		{
 			g_capture.store(false, std::memory_order_release);
 			g_text_input.store(false, std::memory_order_release);
+		}
+		if (captured_before != g_capture.load(std::memory_order_acquire)
+		    && g_gui)
+		{
+			g_gui->sync_mouse_capture();
 		}
 	}
 

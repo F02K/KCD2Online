@@ -1,7 +1,6 @@
 #include "npc/catalog.hpp"
 
 #include <cassert>
-#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -42,17 +41,6 @@ int main(int argc, char **argv)
 	assert(entry->archetype_name == "NPC");
 	assert(entry->gender == "1");
 
-#ifdef KCD2Online_SOURCE_DIR
-	catalog generated;
-	assert(generated.load_json(
-	    std::filesystem::path(KCD2Online_SOURCE_DIR)
-	        / "data/npc_archetypes.json",
-	    error));
-	assert(generated.size() == supported_catalog_size);
-	assert(generated.fingerprint() == supported_catalog_fingerprint);
-	assert(*generated.find(default_soul_id)
-	    == *generated.find(generated.normalize("unknown")));
-#endif
 	if (argc == 2)
 	{
 		catalog retail;

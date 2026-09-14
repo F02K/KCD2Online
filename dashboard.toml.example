@@ -1,0 +1,20 @@
+[dashboard]
+# The packaged launcher copies this file to dashboard.toml. It is enabled but
+# listens only on this machine by default.
+enabled = true
+bind_address = "127.0.0.1"
+port = 8080
+
+# Remote binding is rejected unless both this switch and token authentication
+# are enabled. Prefer a VPN or an HTTPS reverse proxy; the embedded server does
+# not terminate TLS.
+allow_remote = false
+require_token = true
+
+# A cryptographically random token is created here on the first enabled start.
+# Keep it private. It is never returned by the dashboard API or written to logs.
+token_file = "dashboard-token.txt"
+
+# Conservative polling and request limits protect the game-server tick loop.
+refresh_interval_ms = 1000
+max_requests_per_minute = 240

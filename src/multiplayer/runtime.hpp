@@ -177,6 +177,26 @@ namespace kcd2o
 		{
 			return true;
 		}
+		virtual void set_property_access(
+		    const protocol::PropertyAccessSnapshot &)
+		{
+		}
+		struct property_interaction
+		{
+			enum class kind : std::uint8_t
+			{
+				manage,
+				lock,
+				unlock
+			};
+			kind action{kind::manage};
+			std::uint64_t entity_guid{};
+		};
+		[[nodiscard]] virtual std::optional<property_interaction>
+		poll_property_interaction()
+		{
+			return std::nullopt;
+		}
 		[[nodiscard]] virtual bool apply_authoritative_profile(
 		    const protocol::PlayerProfile &)
 		{
@@ -191,6 +211,9 @@ namespace kcd2o
 		{
 		}
 		virtual void set_voice_active(bool)
+		{
+		}
+		virtual void set_voice_server_config(const protocol::VoiceConfig &)
 		{
 		}
 		[[nodiscard]] virtual std::vector<protocol::ClientVoiceFrame>

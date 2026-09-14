@@ -84,6 +84,8 @@ namespace kcd2o
 			case payload_case::kServerResourceEvent:
 			case payload_case::kServerUiUpdate:
 			case payload_case::kServerInputBinding:
+			case payload_case::kServerPropertyAccessUpdated:
+			case payload_case::kPropertyOperationResult:
 				return true;
 			default:
 				return false;

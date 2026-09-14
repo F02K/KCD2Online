@@ -1,22 +1,23 @@
 #pragma once
 
-#include "multiplayer/runtime.hpp"
 #include "kcse/native_entity_backend.hpp"
 #include "kcse/native_profile_backend.hpp"
 #include "kcse/native_remote_avatar_backend.hpp"
 #include "kcse/native_voice.hpp"
-
-#include <KCSE/KCSEAPI.h>
+#include "multiplayer/runtime.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <mutex>
+#include <KCSE/KCSEAPI.h>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace wh::playermodule
 {
@@ -27,14 +28,13 @@ namespace wh::guimodule
 {
 	class C_UIMap;
 	struct S_EntityMapMark;
-}
+} // namespace wh::guimodule
 
 namespace kcd2o::kcse
 {
 	struct local_activity_start
 	{
-		protocol::PlayerActivityKind kind{
-		    protocol::PLAYER_ACTIVITY_KIND_NONE};
+		protocol::PlayerActivityKind kind{protocol::PLAYER_ACTIVITY_KIND_NONE};
 		std::uint64_t station_guid{};
 	};
 
@@ -46,8 +46,7 @@ namespace kcd2o::kcse
 		void on_lifecycle(std::uint32_t message_type) noexcept;
 		[[nodiscard]] bool on_frame();
 		void on_blacksmithing_started(std::uint32_t station_entity_id);
-		[[nodiscard]] std::optional<local_activity_start>
-		take_local_activity_start();
+		[[nodiscard]] std::optional<local_activity_start> take_local_activity_start();
 		[[nodiscard]] bool local_activity_end_pending() const noexcept;
 		void acknowledge_local_activity_end() noexcept;
 		void cancel_local_activity();
@@ -57,62 +56,48 @@ namespace kcd2o::kcse
 		[[nodiscard]] bool can_start_join() const override;
 		[[nodiscard]] bool prepare_multiplayer() override;
 		void cancel_multiplayer_preparation() override;
-		[[nodiscard]] sandbox_start_result begin_sandbox(
-		    const protocol::ServerBootstrap &bootstrap) override;
+		[[nodiscard]] sandbox_start_result begin_sandbox(const protocol::ServerBootstrap &bootstrap) override;
 		[[nodiscard]] sandbox_poll_result poll_sandbox() override;
 		[[nodiscard]] bool sandbox_active() const override;
 		void end_sandbox(std::string_view error = {}) override;
 		[[nodiscard]] std::string current_level_id() const override;
-		[[nodiscard]] std::optional<protocol::PlayerProfile>
-		local_profile() override;
-		[[nodiscard]] bool set_npc_entities_disabled(
-		    bool humans_disabled,
-		    bool animals_disabled) override;
-		[[nodiscard]] std::vector<protocol::WorldObjectState>
-		poll_world_object_updates() override;
-		[[nodiscard]] bool apply_world_object_state(
-		    const protocol::WorldObjectState &state) override;
-		[[nodiscard]] std::vector<protocol::WorldItemState>
-		poll_world_item_updates() override;
-		[[nodiscard]] bool apply_world_item_state(
-		    const protocol::WorldItemState &state) override;
-		[[nodiscard]] std::vector<protocol::NpcObservation>
-		poll_npc_observations() override;
-		[[nodiscard]] bool apply_npc_state(
-		    const protocol::NpcState &state,
-		    bool local_authority) override;
-		void remove_npc_state(
-		    std::uint64_t npc_id,
-		    std::uint32_t generation) override;
-		[[nodiscard]] bool apply_environment_state(
-		    const protocol::EnvironmentState &state,
-		    bool apply_weather) override;
-		[[nodiscard]] bool set_home_marker(
-		    const std::optional<protocol::PropertyHomeMarker> &marker) override;
-		[[nodiscard]] bool apply_authoritative_profile(
-		    const protocol::PlayerProfile &profile) override;
-		[[nodiscard]] bool respawn_local_player(
-		    const protocol::TransformState &spawn) override;
+		[[nodiscard]] std::optional<protocol::PlayerProfile> local_profile() override;
+		[[nodiscard]] bool set_npc_entities_disabled(bool humans_disabled, bool animals_disabled) override;
+		[[nodiscard]] std::vector<protocol::WorldObjectState> poll_world_object_updates() override;
+		[[nodiscard]] bool apply_world_object_state(const protocol::WorldObjectState &state) override;
+		[[nodiscard]] std::vector<protocol::WorldItemState> poll_world_item_updates() override;
+		[[nodiscard]] bool apply_world_item_state(const protocol::WorldItemState &state) override;
+		[[nodiscard]] std::vector<protocol::NpcObservation> poll_npc_observations() override;
+		[[nodiscard]] bool apply_npc_state(const protocol::NpcState &state, bool local_authority) override;
+		void remove_npc_state(std::uint64_t npc_id, std::uint32_t generation) override;
+		[[nodiscard]] bool apply_environment_state(const protocol::EnvironmentState &state, bool apply_weather) override;
+		[[nodiscard]] bool set_home_marker(const std::optional<protocol::PropertyHomeMarker> &marker) override;
+		void set_property_access(
+		    const protocol::PropertyAccessSnapshot &snapshot) override;
+		[[nodiscard]] std::optional<property_interaction>
+		poll_property_interaction() override;
+		[[nodiscard]] bool apply_authoritative_profile(const protocol::PlayerProfile &profile) override;
+		[[nodiscard]] bool respawn_local_player(const protocol::TransformState &spawn) override;
 		[[nodiscard]] bool local_player_dead() const;
 		[[nodiscard]] bool local_player_laying() const;
 		[[nodiscard]] bool play_emote(std::string_view fragment);
 		void show_multiplayer_notice(std::string_view message) override;
 		void set_voice_active(bool active) override;
-		[[nodiscard]] voice_capture_state voice_status() const noexcept;
-		[[nodiscard]] std::vector<protocol::ClientVoiceFrame>
-		poll_outbound_voice() override;
-		void receive_voice(
-		    const protocol::ServerVoiceFrame &frame) override;
+		void set_voice_server_config(const protocol::VoiceConfig &config) override;
+		[[nodiscard]] voice_capture_state voice_status() const;
+		[[nodiscard]] voice_settings voice_configuration() const;
+		[[nodiscard]] bool set_voice_configuration(const voice_settings &settings);
+		[[nodiscard]] std::vector<voice_input_device> voice_input_devices() const;
+		void refresh_voice_input_devices() noexcept;
+		[[nodiscard]] std::vector<protocol::ClientVoiceFrame> poll_outbound_voice() override;
+		void receive_voice(const protocol::ServerVoiceFrame &frame) override;
+		[[nodiscard]] bool set_player_voice_volume(player_id player, float volume) noexcept;
 		void reset_voice() override;
 
-		[[nodiscard]] std::optional<protocol::TransformState>
-		local_transform() const;
-		[[nodiscard]] std::optional<protocol::AvatarDescriptor>
-		local_avatar_visual() const;
-		[[nodiscard]] bool apply_local_correction(
-		    const protocol::TransformState &transform);
-		[[nodiscard]] remote_avatar_sync_result sync_remote_players(
-		    std::span<const remote_avatar_snapshot> players);
+		[[nodiscard]] std::optional<protocol::TransformState> local_transform() const;
+		[[nodiscard]] std::optional<protocol::AvatarDescriptor> local_avatar_visual() const;
+		[[nodiscard]] bool apply_local_correction(const protocol::TransformState &transform);
+		[[nodiscard]] remote_avatar_sync_result sync_remote_players(std::span<const remote_avatar_snapshot> players);
 		[[nodiscard]] std::uint64_t epoch() const noexcept;
 
 	private:
@@ -131,26 +116,23 @@ namespace kcd2o::kcse
 
 		void invalidate_epoch_on_game_thread();
 		void refresh_cached_state();
-		[[nodiscard]] sandbox_start_result activate_loaded_sandbox(
-		    const protocol::ServerBootstrap &bootstrap);
-		[[nodiscard]] sandbox_start_result begin_native_world_start(
-		    const protocol::ServerBootstrap &bootstrap);
+		[[nodiscard]] sandbox_start_result activate_loaded_sandbox(const protocol::ServerBootstrap &bootstrap);
+		[[nodiscard]] sandbox_start_result begin_native_world_start(const protocol::ServerBootstrap &bootstrap);
 		void advance_native_world_start();
-		void set_world_start_stage(
-		    world_start_stage stage,
-		    std::string diagnostic);
+		void set_world_start_stage(world_start_stage stage, std::string diagnostic);
 		void fail_native_world_start(std::string error);
 		void restore_save_load();
 		void begin_native_unload(std::string_view reason);
 		void queue_native_unload_if_safe();
 		void finish_native_unload_if_complete();
-		void open_main_menu_if_pending();
 		[[nodiscard]] bool native_world_unloaded() const;
 		void poll_local_activity();
 		void refresh_home_marker();
 		void remove_home_marker();
-		[[nodiscard]] wh::playermodule::I_Minigame *
-		find_local_minigame(protocol::PlayerActivityKind kind) const;
+		void refresh_property_ownership(bool access_changed);
+		void restore_property_ownership();
+		void refresh_property_interactions();
+		[[nodiscard]] wh::playermodule::I_Minigame *find_local_minigame(protocol::PlayerActivityKind kind) const;
 
 		const KCSE::IKCSEInterface &m_kcse;
 		std::string m_address_library;
@@ -177,8 +159,7 @@ namespace kcd2o::kcse
 		std::uint64_t m_animation_sequence{};
 		std::uint64_t m_animation_started_at_ms{};
 		std::string m_explicit_animation_fragment;
-		std::chrono::steady_clock::time_point
-		    m_explicit_animation_ends_at{};
+		std::chrono::steady_clock::time_point m_explicit_animation_ends_at{};
 		std::string m_diagnostic;
 		bool m_transition_safe{};
 		std::string m_transition_blocker;
@@ -187,10 +168,11 @@ namespace kcd2o::kcse
 		bool m_save_load_locked{};
 		bool m_unload_pending{};
 		bool m_unload_teardown_started{};
+		std::uint64_t m_unload_teardown_frame{};
 		bool m_unload_command_queued{};
 		bool m_unload_deferred_logged{};
-		bool m_main_menu_pending{};
 		bool m_level_load_complete{};
+		std::uint64_t m_frame_sequence{};
 		bool m_probe_transform_verified{};
 		bool m_probe_complete{};
 		std::uint64_t m_native_weather_revision{};
@@ -204,10 +186,21 @@ namespace kcd2o::kcse
 		std::string m_world_start_level_name;
 		bool m_world_start_requires_lifecycle{};
 		std::optional<local_activity_start> m_pending_activity_start;
-		protocol::PlayerActivityKind m_native_activity_kind{
-		    protocol::PLAYER_ACTIVITY_KIND_NONE};
+		protocol::PlayerActivityKind m_native_activity_kind{protocol::PLAYER_ACTIVITY_KIND_NONE};
 		bool m_activity_end_pending{};
 		std::optional<protocol::PropertyHomeMarker> m_home_marker;
+		protocol::PropertyAccessSnapshot m_property_access;
+		bool m_property_access_dirty{};
+		std::uint32_t m_property_refresh_frame{};
+		struct property_area_override
+		{
+			std::uintptr_t object_identity{};
+			std::uint64_t original_owner{};
+			std::uint64_t local_owner{};
+		};
+		std::unordered_map<std::uint64_t, property_area_override>
+		    m_property_area_overrides;
+		std::unordered_set<std::uint64_t> m_property_wrapped_resources;
 		std::chrono::steady_clock::time_point m_next_home_marker_attempt{};
 		std::shared_ptr<wh::guimodule::S_EntityMapMark> m_native_home_mark;
 		wh::guimodule::C_UIMap *m_native_home_map{};
@@ -218,4 +211,4 @@ namespace kcd2o::kcse
 		remote_avatar_manager m_remote_avatars;
 		native_voice m_voice;
 	};
-}
+} // namespace kcd2o::kcse

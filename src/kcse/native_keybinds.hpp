@@ -8,6 +8,9 @@ namespace kcd2o::kcse::native_keybinds
 	{
 		bool available{};
 		std::uint32_t chat_generation{};
+		std::uint32_t player_hub_generation{};
+		std::uint32_t social_generation{};
+		std::uint32_t staff_generation{};
 		bool emote_held{};
 	};
 
@@ -16,4 +19,4 @@ namespace kcd2o::kcse::native_keybinds
 	[[nodiscard]] bool voice_held() noexcept;
 	[[nodiscard]] input_state state() noexcept;
 	void reset_transient() noexcept;
-}
+} // namespace kcd2o::kcse::native_keybinds

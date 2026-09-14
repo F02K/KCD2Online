@@ -10,11 +10,17 @@
 
 #include <Windows.h>
 #include <audioclient.h>
+#include <propkeydef.h>
+#include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <mmdeviceapi.h>
+#include <propvarutil.h>
+#include <propsys.h>
 #include <wrl/client.h>
 
 #include <opus/opus.h>
+#include <speex/speex_preprocess.h>
+#include <speex/speex_resampler.h>
 
 #include <algorithm>
 #include <array>
@@ -49,7 +55,9 @@ namespace kcd2o::kcse
 		constexpr int opus_bitrate = 32'000;
 		constexpr std::size_t pcm_ring_samples = sample_rate * 2;
 		constexpr std::size_t receive_queue_limit = 512;
-		constexpr std::size_t outbound_queue_limit = 150;
+		constexpr std::size_t outbound_queue_limit = 20;
+		constexpr auto maximum_outbound_age = 300ms;
+		constexpr auto maximum_inbound_age = 500ms;
 		constexpr float voice_min_distance = 1.5F;
 		constexpr float head_height = 1.65F;
 		constexpr auto minimum_jitter_frames = 3U;
@@ -62,6 +70,38 @@ namespace kcd2o::kcse
 			return static_cast<std::uint64_t>(
 			    std::chrono::duration_cast<std::chrono::milliseconds>(
 			        clock::now().time_since_epoch()).count());
+		}
+
+		std::wstring widen(std::string_view value)
+		{
+			if (value.empty())
+				return {};
+			const auto count = MultiByteToWideChar(
+			    CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+			    static_cast<int>(value.size()), nullptr, 0);
+			if (count <= 0)
+				return {};
+			std::wstring result(static_cast<std::size_t>(count), L'\0');
+			(void)MultiByteToWideChar(
+			    CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+			    static_cast<int>(value.size()), result.data(), count);
+			return result;
+		}
+
+		std::string narrow(std::wstring_view value)
+		{
+			if (value.empty())
+				return {};
+			const auto count = WideCharToMultiByte(
+			    CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+			    static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+			if (count <= 0)
+				return {};
+			std::string result(static_cast<std::size_t>(count), '\0');
+			(void)WideCharToMultiByte(
+			    CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+			    static_cast<int>(value.size()), result.data(), count, nullptr, nullptr);
+			return result;
 		}
 
 		class pcm_ring
@@ -398,6 +438,18 @@ namespace kcd2o::kcse
 			bool end{};
 			clock::time_point received_at{clock::now()};
 		};
+
+		struct inbound_voice
+		{
+			protocol::ServerVoiceFrame frame;
+			clock::time_point received_at{clock::now()};
+		};
+
+		struct outbound_voice
+		{
+			protocol::ClientVoiceFrame frame;
+			clock::time_point queued_at{clock::now()};
+		};
 	}
 
 	class native_voice::implementation
@@ -426,19 +478,83 @@ namespace kcd2o::kcse
 			{
 				m_recording.store(false, std::memory_order_release);
 				m_speaking.store(false, std::memory_order_release);
+				m_testing.store(false, std::memory_order_release);
 				m_capture_level.store(0.0F, std::memory_order_release);
 			}
 		}
 
-		[[nodiscard]] voice_capture_state capture_state() const noexcept
+		[[nodiscard]] voice_capture_state capture_state() const
 		{
 			voice_capture_state result;
 			result.recording = m_recording.load(std::memory_order_acquire);
 			result.speaking = m_speaking.load(std::memory_order_acquire);
+			result.testing = m_testing.load(std::memory_order_acquire);
+			result.available = m_capture_available.load(std::memory_order_acquire);
 			result.level = m_capture_level.load(std::memory_order_acquire);
 			result.range = static_cast<protocol::VoiceRange>(
 				m_capture_range.load(std::memory_order_acquire));
+			{
+				std::scoped_lock lock(m_capture_state_mutex);
+				result.device_name = m_active_device_name;
+				result.diagnostic = m_capture_diagnostic;
+			}
 			return result;
+		}
+
+		[[nodiscard]] voice_settings settings() const
+		{
+			std::scoped_lock lock(m_settings_mutex);
+			return m_settings;
+		}
+
+		[[nodiscard]] bool set_settings(const voice_settings &settings)
+		{
+			if (!std::isfinite(settings.input_gain)
+			    || settings.input_gain < 0.0F || settings.input_gain > 3.0F
+			    || !std::isfinite(settings.output_volume)
+			    || settings.output_volume < 0.0F || settings.output_volume > 1.5F
+			    || settings.noise_suppression_db < -50
+			    || settings.noise_suppression_db > 0
+			    || settings.voice_gate_probability < 0
+			    || settings.voice_gate_probability > 100
+			    || settings.input_device_id.size() >= 256)
+				return false;
+			{
+				std::scoped_lock lock(m_settings_mutex);
+				m_settings = settings;
+			}
+			m_settings_generation.fetch_add(1, std::memory_order_release);
+			m_player_volume_generation.fetch_add(1, std::memory_order_release);
+			return true;
+		}
+
+		[[nodiscard]] std::vector<voice_input_device> input_devices() const
+		{
+			std::scoped_lock lock(m_capture_state_mutex);
+			return m_input_devices;
+		}
+
+		void refresh_input_devices() noexcept
+		{
+			m_refresh_devices.store(true, std::memory_order_release);
+		}
+
+		void set_server_config(const protocol::VoiceConfig &config) noexcept
+		{
+			const auto valid = std::isfinite(config.whisper_range_m())
+			    && std::isfinite(config.normal_range_m())
+			    && std::isfinite(config.shout_range_m())
+			    && config.whisper_range_m() > 0.0F
+			    && config.normal_range_m() >= config.whisper_range_m()
+			    && config.shout_range_m() >= config.normal_range_m();
+			m_server_voice_enabled.store(
+			    config.enabled() || !valid, std::memory_order_release);
+			if (valid)
+			{
+				m_whisper_distance.store(config.whisper_range_m(), std::memory_order_release);
+				m_normal_distance.store(config.normal_range_m(), std::memory_order_release);
+				m_shout_distance.store(config.shout_range_m(), std::memory_order_release);
+			}
 		}
 
 		std::vector<protocol::ClientVoiceFrame> poll_outbound()
@@ -446,9 +562,11 @@ namespace kcd2o::kcse
 			std::scoped_lock lock(m_outbound_mutex);
 			std::vector<protocol::ClientVoiceFrame> result;
 			result.reserve(m_outbound.size());
+			const auto now = clock::now();
 			while (!m_outbound.empty())
 			{
-				result.push_back(std::move(m_outbound.front()));
+				if (now - m_outbound.front().queued_at <= maximum_outbound_age)
+					result.push_back(std::move(m_outbound.front().frame));
 				m_outbound.pop_front();
 			}
 			return result;
@@ -459,7 +577,21 @@ namespace kcd2o::kcse
 			std::scoped_lock lock(m_inbound_mutex);
 			if (m_inbound.size() >= receive_queue_limit)
 				m_inbound.pop_front();
-			m_inbound.push_back(frame);
+			m_inbound.push_back({frame, clock::now()});
+		}
+
+		[[nodiscard]] bool set_player_volume(
+		    player_id player, float volume) noexcept
+		{
+			if (player == 0 || !std::isfinite(volume))
+				return false;
+
+			{
+				std::scoped_lock lock(m_player_volume_mutex);
+				m_player_volumes[player] = std::clamp(volume, 0.0F, 1.5F);
+			}
+			m_player_volume_generation.fetch_add(1, std::memory_order_release);
+			return true;
 		}
 
 		void update_players(std::span<const voice_player_pose> players)
@@ -483,10 +615,16 @@ namespace kcd2o::kcse
 				reset_game_thread();
 			drain_inbound();
 			(void)ensure_fmod();
+			const auto player_volume_generation =
+			    m_player_volume_generation.load(std::memory_order_acquire);
+			const auto player_volume_changed =
+			    player_volume_generation != m_applied_player_volume_generation;
 			const auto now = clock::now();
 			for (auto iterator = m_speakers.begin(); iterator != m_speakers.end();)
 			{
 				auto &speaker = *iterator->second;
+				if (player_volume_changed)
+					apply_range(speaker);
 				if (const auto pose = m_poses.find(speaker.id); pose != m_poses.end())
 				{
 					speaker.entity_id = pose->second.entity_id;
@@ -511,6 +649,7 @@ namespace kcd2o::kcse
 					++iterator;
 				}
 			}
+			m_applied_player_volume_generation = player_volume_generation;
 		}
 
 		void reset()
@@ -518,7 +657,13 @@ namespace kcd2o::kcse
 			m_active.store(false, std::memory_order_release);
 			m_recording.store(false, std::memory_order_release);
 			m_speaking.store(false, std::memory_order_release);
+			m_testing.store(false, std::memory_order_release);
 			m_capture_level.store(0.0F, std::memory_order_release);
+			{
+				std::scoped_lock lock(m_settings_mutex);
+				m_settings.microphone_test = false;
+			}
+			m_settings_generation.fetch_add(1, std::memory_order_release);
 			{
 				std::scoped_lock lock(m_outbound_mutex);
 				m_outbound.clear();
@@ -527,6 +672,11 @@ namespace kcd2o::kcse
 				std::scoped_lock lock(m_inbound_mutex);
 				m_inbound.clear();
 			}
+			{
+				std::scoped_lock lock(m_player_volume_mutex);
+				m_player_volumes.clear();
+			}
+			m_player_volume_generation.fetch_add(1, std::memory_order_release);
 			m_reset_requested.store(true, std::memory_order_release);
 			m_clear_requested.store(true, std::memory_order_release);
 		}
@@ -581,8 +731,85 @@ namespace kcd2o::kcse
 		[[nodiscard]] bool push_to_talk_pressed() const noexcept
 		{
 			return m_active.load(std::memory_order_acquire)
-			    && (native_keybinds::voice_held()
-			        || (GetAsyncKeyState('V') & 0x8000) != 0);
+			    && m_server_voice_enabled.load(std::memory_order_acquire)
+			    && (native_keybinds::available()
+			            ? native_keybinds::voice_held()
+			            : (GetAsyncKeyState('V') & 0x8000) != 0);
+		}
+
+		[[nodiscard]] static std::string device_id(IMMDevice &device)
+		{
+			LPWSTR allocated{};
+			if (FAILED(device.GetId(&allocated)) || !allocated)
+				return {};
+			const auto release = std::unique_ptr<wchar_t, void(*)(wchar_t *)>(
+			    allocated, [](wchar_t *value) { CoTaskMemFree(value); });
+			return narrow(allocated);
+		}
+
+		[[nodiscard]] static std::string device_name(IMMDevice &device)
+		{
+			ComPtr<IPropertyStore> properties;
+			if (FAILED(device.OpenPropertyStore(STGM_READ, &properties)))
+				return {};
+			PROPVARIANT value;
+			PropVariantInit(&value);
+			const auto clear = std::unique_ptr<PROPVARIANT, void(*)(PROPVARIANT *)>(
+			    &value, [](PROPVARIANT *entry) { PropVariantClear(entry); });
+			if (FAILED(properties->GetValue(PKEY_Device_FriendlyName, &value))
+			    || value.vt != VT_LPWSTR || !value.pwszVal)
+				return {};
+			return narrow(value.pwszVal);
+		}
+
+		void update_device_cache(IMMDeviceEnumerator &enumerator)
+		{
+			std::string default_id;
+			ComPtr<IMMDevice> default_device;
+			if (SUCCEEDED(enumerator.GetDefaultAudioEndpoint(
+			        eCapture, eCommunications, &default_device))
+			    && default_device)
+				default_id = device_id(*default_device.Get());
+
+			std::vector<voice_input_device> devices;
+			devices.push_back({{}, "System default (Communications)", true});
+			ComPtr<IMMDeviceCollection> collection;
+			UINT count{};
+			if (SUCCEEDED(enumerator.EnumAudioEndpoints(
+			        eCapture, DEVICE_STATE_ACTIVE, &collection))
+			    && collection && SUCCEEDED(collection->GetCount(&count)))
+			{
+				for (UINT index{}; index < count; ++index)
+				{
+					ComPtr<IMMDevice> device;
+					if (FAILED(collection->Item(index, &device)) || !device)
+						continue;
+					auto id = device_id(*device.Get());
+					auto name = device_name(*device.Get());
+					if (id.empty())
+						continue;
+					if (name.empty())
+						name = id;
+					const auto is_default = id == default_id;
+					devices.push_back({std::move(id), std::move(name), is_default});
+				}
+			}
+			m_capture_available.store(devices.size() > 1, std::memory_order_release);
+			{
+				std::scoped_lock lock(m_capture_state_mutex);
+				m_input_devices = std::move(devices);
+				if (m_input_devices.size() <= 1)
+					m_capture_diagnostic = "No active microphone was found.";
+			}
+		}
+
+		void set_capture_status(
+		    bool available, std::string device, std::string diagnostic)
+		{
+			m_capture_available.store(available, std::memory_order_release);
+			std::scoped_lock lock(m_capture_state_mutex);
+			m_active_device_name = std::move(device);
+			m_capture_diagnostic = std::move(diagnostic);
 		}
 
 		[[nodiscard]] static bool select_default_capture_device(
@@ -612,6 +839,30 @@ namespace kcd2o::kcse
 			return false;
 		}
 
+		[[nodiscard]] static bool select_capture_device(
+		    IMMDeviceEnumerator &enumerator,
+		    std::string_view requested_id,
+		    ComPtr<IMMDevice> &device,
+		    ERole &selected_role) noexcept
+		{
+			if (!requested_id.empty())
+			{
+				const auto id = widen(requested_id);
+				if (!id.empty()
+				    && SUCCEEDED(enumerator.GetDevice(id.c_str(), &device))
+				    && device)
+				{
+					DWORD state{};
+					if (SUCCEEDED(device->GetState(&state))
+					    && (state & DEVICE_STATE_ACTIVE) != 0)
+						return true;
+				}
+				device.Reset();
+			}
+			return select_default_capture_device(
+			    enumerator, device, selected_role);
+		}
+
 		void queue_talkspurt_end(
 		    std::uint32_t &sequence,
 		    protocol::VoiceRange range)
@@ -631,7 +882,10 @@ namespace kcd2o::kcse
 		{
 			const auto initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 			if (FAILED(initialized))
+			{
+				set_capture_status(false, {}, "Windows audio initialization failed.");
 				return;
+			}
 			const auto uninitialize = std::unique_ptr<void, void(*)(void *)>(
 			    reinterpret_cast<void *>(1), [](void *) { CoUninitialize(); });
 
@@ -639,7 +893,10 @@ namespace kcd2o::kcse
 			auto *encoder = opus_encoder_create(
 			    sample_rate, 1, OPUS_APPLICATION_VOIP, &opus_error);
 			if (!encoder || opus_error != OPUS_OK)
+			{
+				set_capture_status(false, {}, "Opus voice encoder initialization failed.");
 				return;
+			}
 			const auto destroy_encoder = std::unique_ptr<OpusEncoder, void(*)(OpusEncoder *)>(
 			    encoder, opus_encoder_destroy);
 			(void)opus_encoder_ctl(encoder, OPUS_SET_BITRATE(opus_bitrate));
@@ -653,34 +910,65 @@ namespace kcd2o::kcse
 			{
 				if (m_reset_requested.exchange(false, std::memory_order_acq_rel))
 					(void)opus_encoder_ctl(encoder, OPUS_RESET_STATE);
-				if (!push_to_talk_pressed())
+
+				ComPtr<IMMDeviceEnumerator> enumerator;
+				if (FAILED(CoCreateInstance(
+				        __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+				        IID_PPV_ARGS(&enumerator))))
+				{
+					set_capture_status(false, {}, "No Windows audio device service is available.");
+					std::this_thread::sleep_for(250ms);
+					continue;
+				}
+				if (m_refresh_devices.exchange(false, std::memory_order_acq_rel))
+					update_device_cache(*enumerator.Get());
+
+				const auto settings_generation =
+				    m_settings_generation.load(std::memory_order_acquire);
+				const auto current_settings = settings();
+				if ((!m_active.load(std::memory_order_acquire)
+				        || !m_server_voice_enabled.load(std::memory_order_acquire))
+				    && !current_settings.microphone_test)
 				{
 					m_recording.store(false, std::memory_order_release);
+					m_testing.store(false, std::memory_order_release);
 					std::this_thread::sleep_for(20ms);
 					continue;
 				}
 
-				ComPtr<IMMDeviceEnumerator> enumerator;
 				ComPtr<IMMDevice> device;
 				ComPtr<IAudioClient> client;
 				ComPtr<IAudioCaptureClient> capture;
 				ERole selected_role = eCommunications;
-				if (FAILED(CoCreateInstance(
-				        __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-				        IID_PPV_ARGS(&enumerator)))
-				    || !select_default_capture_device(
-				        *enumerator.Get(), device, selected_role)
+				if (!select_capture_device(
+				        *enumerator.Get(), current_settings.input_device_id,
+				        device, selected_role)
 				    || FAILED(device->Activate(
 				        __uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client)))
 				{
+					set_capture_status(false, {}, "The selected microphone is unavailable.");
 					std::this_thread::sleep_for(100ms);
 					continue;
+				}
+
+				ComPtr<IAudioClient2> client2;
+				if (SUCCEEDED(client.As(&client2)) && client2)
+				{
+					AudioClientProperties properties{};
+					properties.cbSize = sizeof(properties);
+					properties.eCategory = AudioCategory_Communications;
+					properties.bIsOffload = FALSE;
+#if NTDDI_VERSION >= NTDDI_WINBLUE
+					properties.Options = AUDCLNT_STREAMOPTIONS_NONE;
+#endif
+					(void)client2->SetClientProperties(&properties);
 				}
 
 				WAVEFORMATEX *allocated_format{};
 				if (FAILED(client->GetMixFormat(&allocated_format))
 				    || !allocated_format)
 				{
+					set_capture_status(false, {}, "The microphone format could not be read.");
 					std::this_thread::sleep_for(100ms);
 					continue;
 				}
@@ -693,13 +981,59 @@ namespace kcd2o::kcse
 				    || allocated_format->nChannels == 0
 				    || allocated_format->nSamplesPerSec == 0)
 				{
+					set_capture_status(false, {}, "The microphone uses an unsupported audio format.");
 					std::this_thread::sleep_for(100ms);
 					continue;
 				}
 
+				int resampler_error{};
+				auto *resampler = speex_resampler_init(
+				    1, allocated_format->nSamplesPerSec, sample_rate, 5,
+				    &resampler_error);
+				if (!resampler || resampler_error != RESAMPLER_ERR_SUCCESS)
+				{
+					if (resampler)
+						speex_resampler_destroy(resampler);
+					set_capture_status(false, {}, "Microphone resampling could not be initialized.");
+					std::this_thread::sleep_for(100ms);
+					continue;
+				}
+				const auto destroy_resampler =
+				    std::unique_ptr<SpeexResamplerState, void(*)(SpeexResamplerState *)>(
+				        resampler, speex_resampler_destroy);
+
+				auto *preprocessor = speex_preprocess_state_init(
+				    frame_samples, sample_rate);
+				if (!preprocessor)
+				{
+					set_capture_status(false, {}, "Voice noise filtering could not be initialized.");
+					std::this_thread::sleep_for(100ms);
+					continue;
+				}
+				const auto destroy_preprocessor =
+				    std::unique_ptr<SpeexPreprocessState, void(*)(SpeexPreprocessState *)>(
+				        preprocessor, speex_preprocess_state_destroy);
+				int enabled = current_settings.noise_suppression ? 1 : 0;
+				int disabled = 0;
+				int agc = current_settings.automatic_gain ? 1 : 0;
+				int agc_level = 12'000;
+				int vad = current_settings.voice_gate ? 1 : 0;
+				int probability = current_settings.voice_gate_probability;
+				int probability_continue = std::max(0, probability - 10);
+				int noise_suppression = current_settings.noise_suppression_db;
+				(void)speex_preprocess_ctl(preprocessor, SPEEX_PREPROCESS_SET_DENOISE, &enabled);
+				(void)speex_preprocess_ctl(preprocessor, SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &noise_suppression);
+				(void)speex_preprocess_ctl(preprocessor, SPEEX_PREPROCESS_SET_AGC, &agc);
+				(void)speex_preprocess_ctl(preprocessor, SPEEX_PREPROCESS_SET_AGC_LEVEL, &agc_level);
+				(void)speex_preprocess_ctl(preprocessor, SPEEX_PREPROCESS_SET_VAD, &vad);
+				(void)speex_preprocess_ctl(preprocessor, SPEEX_PREPROCESS_SET_PROB_START, &probability);
+				(void)speex_preprocess_ctl(preprocessor, SPEEX_PREPROCESS_SET_PROB_CONTINUE, &probability_continue);
+				(void)speex_preprocess_ctl(preprocessor, SPEEX_PREPROCESS_SET_DEREVERB, &disabled);
+
 				const auto event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 				if (!event)
 				{
+					set_capture_status(false, {}, "The microphone event could not be created.");
 					std::this_thread::sleep_for(100ms);
 					continue;
 				}
@@ -716,10 +1050,15 @@ namespace kcd2o::kcse
 				    || FAILED(client->GetService(IID_PPV_ARGS(&capture)))
 				    || FAILED(client->Start()))
 				{
+					set_capture_status(false, {}, "The microphone could not be started.");
 					std::this_thread::sleep_for(100ms);
 					continue;
 				}
 
+				auto active_name = device_name(*device.Get());
+				if (active_name.empty())
+					active_name = "Microphone";
+				set_capture_status(true, active_name, {});
 				KCD2Online_JOIN_TRACE(
 				    "voice.capture.endpoint-selected",
 				    std::format(
@@ -727,18 +1066,58 @@ namespace kcd2o::kcse
 				        static_cast<int>(selected_role),
 				        allocated_format->nChannels,
 				        allocated_format->nSamplesPerSec));
-				m_recording.store(true, std::memory_order_release);
 				std::vector<std::int16_t> pending;
 				pending.reserve(frame_samples * 3);
-				std::uint64_t resample_phase{};
+				std::uint64_t pending_capture_time_ms{};
 				bool talking{};
+				bool gate_open{};
+				int gate_hangover{};
 				bool capture_healthy{true};
 				protocol::VoiceRange talk_range =
 				    protocol::VOICE_RANGE_NORMAL;
+				float highpass_previous_input{};
+				float highpass_previous_output{};
+				struct processed_frame
+				{
+					std::array<std::int16_t, frame_samples> pcm{};
+					std::uint64_t capture_time_ms{};
+				};
+				std::deque<processed_frame> pre_roll;
 				(void)opus_encoder_ctl(encoder, OPUS_RESET_STATE);
 
-				while (!stop.stop_requested() && push_to_talk_pressed())
+				const auto encode_frame = [&](const processed_frame &source)
 				{
+					std::array<unsigned char, max_voice_opus_bytes> compressed{};
+					const auto encoded = opus_encode(
+					    encoder, source.pcm.data(), frame_samples,
+					    compressed.data(), static_cast<opus_int32>(compressed.size()));
+					if (encoded <= 0)
+						return false;
+					protocol::ClientVoiceFrame frame;
+					frame.set_sequence(sequence++);
+					if (sequence == 0)
+						sequence = 1;
+					frame.set_capture_time_ms(source.capture_time_ms);
+					frame.set_range(talk_range);
+					frame.set_opus(compressed.data(), encoded);
+					frame.set_visemes(visemes_for(source.pcm));
+					queue_outbound(std::move(frame));
+					return true;
+				};
+
+				while (!stop.stop_requested())
+				{
+					if (m_settings_generation.load(std::memory_order_acquire)
+					        != settings_generation)
+						break;
+					const bool transmitting = push_to_talk_pressed();
+					const bool testing = current_settings.microphone_test;
+					if ((!m_active.load(std::memory_order_acquire)
+					        || !m_server_voice_enabled.load(std::memory_order_acquire))
+					    && !testing)
+						break;
+					m_recording.store(transmitting, std::memory_order_release);
+					m_testing.store(testing && !transmitting, std::memory_order_release);
 					const auto wait_result = WaitForSingleObject(event, 50);
 					if (wait_result != WAIT_OBJECT_0
 					    && wait_result != WAIT_TIMEOUT)
@@ -748,8 +1127,6 @@ namespace kcd2o::kcse
 					}
 					if (m_reset_requested.exchange(
 					        false, std::memory_order_acq_rel))
-						break;
-					if (!push_to_talk_pressed())
 						break;
 
 					UINT32 packet_frames{};
@@ -778,9 +1155,10 @@ namespace kcd2o::kcse
 							capture_healthy = false;
 							break;
 						}
+						std::vector<float> mono(packet_frames);
 						for (UINT32 frame{}; frame < packet_frames; ++frame)
 						{
-							float mono{};
+							float sample{};
 							if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) == 0)
 							{
 								const auto *source =
@@ -791,24 +1169,41 @@ namespace kcd2o::kcse
 								     channel < allocated_format->nChannels;
 								     ++channel)
 								{
-									mono += read_input_sample(
+									sample += read_input_sample(
 									    source,
 									    channel,
 									    *allocated_format);
 								}
-								mono /= allocated_format->nChannels;
+								sample /= allocated_format->nChannels;
 							}
-							resample_phase += sample_rate;
-							while (resample_phase
-							    >= allocated_format->nSamplesPerSec)
-							{
-								resample_phase -=
-								    allocated_format->nSamplesPerSec;
-								pending.push_back(
-								    static_cast<std::int16_t>(
-								        std::clamp(mono, -1.0F, 1.0F)
-								        * 32767.0F));
-							}
+							mono[frame] = sample;
+						}
+						const auto output_capacity = static_cast<std::size_t>(
+						    std::ceil(static_cast<double>(packet_frames) * sample_rate
+						        / allocated_format->nSamplesPerSec)) + 32;
+						std::vector<float> resampled(output_capacity);
+						spx_uint32_t input_length = packet_frames;
+						spx_uint32_t output_length = static_cast<spx_uint32_t>(resampled.size());
+						if (speex_resampler_process_float(
+						        resampler, 0, mono.data(), &input_length,
+						        resampled.data(), &output_length) != RESAMPLER_ERR_SUCCESS)
+						{
+							capture_healthy = false;
+						}
+						if (pending.empty() && output_length != 0)
+							pending_capture_time_ms = qpc_position / 10'000ULL;
+						for (spx_uint32_t index{}; index < output_length; ++index)
+						{
+							const auto scaled = std::clamp(
+							    resampled[index] * current_settings.input_gain,
+							    -1.0F, 1.0F) * 32767.0F;
+							const auto filtered = 0.9896F * (
+							    highpass_previous_output + scaled
+							    - highpass_previous_input);
+							highpass_previous_input = scaled;
+							highpass_previous_output = filtered;
+							pending.push_back(static_cast<std::int16_t>(
+							    std::clamp(filtered, -32768.0F, 32767.0F)));
 						}
 						if (FAILED(capture->ReleaseBuffer(packet_frames)))
 						{
@@ -832,34 +1227,54 @@ namespace kcd2o::kcse
 
 					while (pending.size() >= frame_samples)
 					{
-						const auto pcm = std::span<const std::int16_t>{
-						    pending.data(), frame_samples};
-						const auto level = voice_level(pcm);
+						processed_frame processed;
+						std::copy_n(pending.begin(), frame_samples, processed.pcm.begin());
+						processed.capture_time_ms = pending_capture_time_ms;
+						pending_capture_time_ms += 20;
+						const auto speech = speex_preprocess_run(
+						    preprocessor, processed.pcm.data()) != 0;
+						const auto level = voice_level(processed.pcm);
 						m_capture_level.store(
 						    level, std::memory_order_release);
 						m_speaking.store(
-						    level >= 0.08F, std::memory_order_release);
-						std::array<unsigned char, max_voice_opus_bytes>
-						    compressed{};
-						const auto encoded = opus_encode(
-						    encoder,
-						    pending.data(),
-						    frame_samples,
-						    compressed.data(),
-						    static_cast<opus_int32>(compressed.size()));
-						if (encoded > 0)
+						    speech && level >= 0.02F, std::memory_order_release);
+
+						if (transmitting)
 						{
-							protocol::ClientVoiceFrame frame;
-							frame.set_sequence(sequence++);
-							if (sequence == 0)
-								sequence = 1;
-							frame.set_capture_time_ms(now_ms());
-							frame.set_range(talk_range);
-							frame.set_opus(
-							    compressed.data(), encoded);
-							frame.set_visemes(visemes_for(pcm));
-							queue_outbound(std::move(frame));
-							talking = true;
+							if (!current_settings.voice_gate)
+								talking = encode_frame(processed) || talking;
+							else if (speech)
+							{
+								if (!gate_open)
+								{
+									(void)opus_encoder_ctl(encoder, OPUS_RESET_STATE);
+									for (const auto &buffered : pre_roll)
+										talking = encode_frame(buffered) || talking;
+									pre_roll.clear();
+								}
+								gate_open = true;
+								gate_hangover = 10;
+								talking = encode_frame(processed) || talking;
+							}
+							else if (gate_open && gate_hangover-- > 0)
+								talking = encode_frame(processed) || talking;
+							else
+							{
+								if (gate_open && talking)
+									queue_talkspurt_end(sequence, talk_range);
+								gate_open = false;
+								talking = false;
+								pre_roll.push_back(processed);
+								while (pre_roll.size() > 3)
+									pre_roll.pop_front();
+							}
+						}
+						else if (talking)
+						{
+							queue_talkspurt_end(sequence, talk_range);
+							talking = false;
+							gate_open = false;
+							(void)opus_encoder_ctl(encoder, OPUS_RESET_STATE);
 						}
 						pending.erase(
 						    pending.begin(),
@@ -869,15 +1284,20 @@ namespace kcd2o::kcse
 
 				(void)client->Stop();
 				m_recording.store(false, std::memory_order_release);
+				m_testing.store(false, std::memory_order_release);
 				m_speaking.store(false, std::memory_order_release);
 				m_capture_level.store(0.0F, std::memory_order_release);
 				if (talking)
 					queue_talkspurt_end(sequence, talk_range);
 				(void)opus_encoder_ctl(encoder, OPUS_RESET_STATE);
 				if (!capture_healthy && push_to_talk_pressed())
+				{
+					set_capture_status(false, active_name, "Microphone capture was interrupted.");
 					std::this_thread::sleep_for(100ms);
+				}
 			}
 			m_recording.store(false, std::memory_order_release);
+			m_testing.store(false, std::memory_order_release);
 			m_speaking.store(false, std::memory_order_release);
 			m_capture_level.store(0.0F, std::memory_order_release);
 		}
@@ -887,18 +1307,22 @@ namespace kcd2o::kcse
 			std::scoped_lock lock(m_outbound_mutex);
 			while (m_outbound.size() >= outbound_queue_limit)
 				m_outbound.pop_front();
-			m_outbound.push_back(std::move(frame));
+			m_outbound.push_back({std::move(frame), clock::now()});
 		}
 
 		void drain_inbound()
 		{
-			std::deque<protocol::ServerVoiceFrame> inbound;
+			std::deque<inbound_voice> inbound;
 			{
 				std::scoped_lock lock(m_inbound_mutex);
 				inbound.swap(m_inbound);
 			}
-			for (auto &frame : inbound)
+			const auto now = clock::now();
+			for (auto &received : inbound)
 			{
+				if (now - received.received_at > maximum_inbound_age)
+					continue;
+				auto &frame = received.frame;
 				auto iterator = m_speakers.find(frame.player_id());
 				if (iterator == m_speakers.end())
 				{
@@ -913,7 +1337,7 @@ namespace kcd2o::kcse
 					    frame.player_id(), std::move(speaker)).first;
 				}
 				auto &speaker = *iterator->second;
-				const auto arrival = clock::now();
+				const auto arrival = received.received_at;
 				if (speaker.previous_arrival != clock::time_point{}
 				    && frame.capture_time_ms() > speaker.previous_capture_time_ms)
 				{
@@ -935,7 +1359,7 @@ namespace kcd2o::kcse
 				speaker.last_packet = arrival;
 				queued_voice queued{
 				    frame.sequence(), frame.opus(), frame.visemes(), frame.range(),
-				    frame.end_of_talkspurt(), clock::now()};
+				    frame.end_of_talkspurt(), received.received_at};
 				speaker.frames.try_emplace(queued.sequence, std::move(queued));
 				while (speaker.frames.size() > 24)
 					speaker.frames.erase(speaker.frames.begin());
@@ -1014,20 +1438,30 @@ namespace kcd2o::kcse
 		{
 			if (!speaker.channel)
 				return;
-			float maximum = 15.0F;
-			float volume = 1.0F;
+			float maximum = m_normal_distance.load(std::memory_order_acquire);
+			float volume{};
+			{
+				std::scoped_lock lock(m_settings_mutex);
+				volume = m_settings.output_volume;
+			}
 			if (speaker.range == protocol::VOICE_RANGE_WHISPER)
 			{
-				maximum = 3.0F;
+				maximum = m_whisper_distance.load(std::memory_order_acquire);
 				volume = 0.72F;
 			}
 			else if (speaker.range == protocol::VOICE_RANGE_SHOUT)
 			{
-				maximum = 40.0F;
+				maximum = m_shout_distance.load(std::memory_order_acquire);
 				volume = 1.12F;
 			}
 			(void)m_api.channel_set_3d_min_max_distance(
-			    speaker.channel, voice_min_distance, maximum);
+			    speaker.channel, std::min(voice_min_distance, maximum), maximum);
+			{
+				std::scoped_lock lock(m_player_volume_mutex);
+				if (const auto found = m_player_volumes.find(speaker.id);
+				    found != m_player_volumes.end())
+					volume *= found->second;
+			}
 			(void)m_api.channel_set_volume(speaker.channel, volume);
 		}
 
@@ -1298,16 +1732,34 @@ namespace kcd2o::kcse
 		std::atomic_bool m_active{};
 		std::atomic_bool m_recording{};
 		std::atomic_bool m_speaking{};
+		std::atomic_bool m_testing{};
+		std::atomic_bool m_capture_available{};
 		std::atomic<float> m_capture_level{};
 		std::atomic<std::uint32_t> m_capture_range{
 			protocol::VOICE_RANGE_NORMAL};
 		std::atomic_bool m_reset_requested{};
 		std::atomic_bool m_clear_requested{};
+		std::atomic_bool m_refresh_devices{true};
+		std::atomic_bool m_server_voice_enabled{true};
+		std::atomic<float> m_whisper_distance{3.0F};
+		std::atomic<float> m_normal_distance{15.0F};
+		std::atomic<float> m_shout_distance{40.0F};
+		mutable std::mutex m_settings_mutex;
+		voice_settings m_settings;
+		std::atomic<std::uint64_t> m_settings_generation{};
+		mutable std::mutex m_capture_state_mutex;
+		std::vector<voice_input_device> m_input_devices;
+		std::string m_active_device_name;
+		std::string m_capture_diagnostic;
 		std::jthread m_capture;
 		std::mutex m_outbound_mutex;
-		std::deque<protocol::ClientVoiceFrame> m_outbound;
+		std::deque<outbound_voice> m_outbound;
 		std::mutex m_inbound_mutex;
-		std::deque<protocol::ServerVoiceFrame> m_inbound;
+		std::deque<inbound_voice> m_inbound;
+		std::mutex m_player_volume_mutex;
+		std::unordered_map<player_id, float> m_player_volumes;
+		std::atomic<std::uint64_t> m_player_volume_generation{};
+		std::uint64_t m_applied_player_volume_generation{};
 		std::unordered_map<player_id, voice_player_pose> m_poses;
 		std::unordered_map<player_id, std::unique_ptr<speaker_state>> m_speakers;
 		fmod_api m_api;
@@ -1326,9 +1778,35 @@ namespace kcd2o::kcse
 		m_impl->set_active(active);
 	}
 
-	voice_capture_state native_voice::capture_state() const noexcept
+	voice_capture_state native_voice::capture_state() const
 	{
 		return m_impl->capture_state();
+	}
+
+	voice_settings native_voice::settings() const
+	{
+		return m_impl->settings();
+	}
+
+	bool native_voice::set_settings(const voice_settings &settings)
+	{
+		return m_impl->set_settings(settings);
+	}
+
+	std::vector<voice_input_device> native_voice::input_devices() const
+	{
+		return m_impl->input_devices();
+	}
+
+	void native_voice::refresh_input_devices() noexcept
+	{
+		m_impl->refresh_input_devices();
+	}
+
+	void native_voice::set_server_config(
+	    const protocol::VoiceConfig &config) noexcept
+	{
+		m_impl->set_server_config(config);
 	}
 
 	std::vector<protocol::ClientVoiceFrame> native_voice::poll_outbound()
@@ -1339,6 +1817,11 @@ namespace kcd2o::kcse
 	void native_voice::receive(const protocol::ServerVoiceFrame &frame)
 	{
 		m_impl->receive(frame);
+	}
+
+	bool native_voice::set_player_volume(player_id player, float volume) noexcept
+	{
+		return m_impl->set_player_volume(player, volume);
 	}
 
 	void native_voice::update_players(std::span<const voice_player_pose> players)

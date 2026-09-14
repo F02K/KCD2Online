@@ -3,9 +3,13 @@
 #include "server/server_config.hpp"
 #include "server/server_core.hpp"
 #include "server/backend_client.hpp"
+#include "server/dashboard_config.hpp"
+#include "server/dashboard_server.hpp"
+#include "server/dashboard_telemetry.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <charconv>
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
@@ -18,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -32,6 +37,7 @@ namespace
 	{
 		std::cout
 		    << "Commands: status, players, kick <player_id> [reason], "
+		       "moderate <warn|ban|unban|chat-mute|chat-unmute|voice-mute|voice-unmute> <player_id|account_id> [minutes|permanent] <reason>, "
 		       "say <text>, profile claim <player_id>, "
 		       "permission <list|grant|revoke> <player_id> [scope], "
 		       "dummy spawn [name], dummy remove <player_id>, "
@@ -90,6 +96,16 @@ int main(int argc, char **argv)
 		    ? std::filesystem::path(argv[1])
 		    : std::filesystem::path("server.toml");
 		auto config = kcd2o::server::load_server_config(config_path);
+		const auto dashboard_config_path = argc > 2
+		    ? std::filesystem::path(argv[2])
+		    : std::filesystem::absolute(config_path).parent_path()
+		        / "dashboard.toml";
+		kcd2o::server::dashboard_config dashboard_config;
+		if (std::filesystem::is_regular_file(dashboard_config_path))
+		{
+			dashboard_config = kcd2o::server::load_dashboard_config(
+			    dashboard_config_path);
+		}
 		kcd2o::net::runtime network_runtime;
 		std::unique_ptr<kcd2o::server::backend_client> backend;
 		if (config.account_auth_enabled)
@@ -132,10 +148,27 @@ int main(int argc, char **argv)
 		kcd2o::server::server_core core(
 		    config,
 		    {},
-		    [&](std::string_view token, std::string &error)
+		    [&](std::string_view token, kcd2o::server::authentication_failure &failure)
 		    {
-			    return backend ? backend->introspect(token, error) : std::nullopt;
+			    return backend ? backend->introspect(token, failure) : std::nullopt;
+		    },
+		    [&](const kcd2o::server::moderation_action &action, std::string &error)
+		    {
+			    if (!backend)
+			    {
+				    error = "backend connection is unavailable";
+				    return false;
+			    }
+			    return backend->moderate(action, error);
 		    });
+		std::unique_ptr<kcd2o::server::dashboard_telemetry> dashboard_telemetry;
+		if (dashboard_config.enabled)
+		{
+			dashboard_telemetry =
+			    std::make_unique<kcd2o::server::dashboard_telemetry>(
+			        config,
+			        dashboard_config);
+		}
 
 		auto console = std::make_shared<command_queue>();
 		std::thread(
@@ -159,10 +192,12 @@ int main(int argc, char **argv)
 			return kcd2o::server::clock::now();
 		};
 
+		std::unordered_set<kcd2o::connection_id> active_connections;
 		kcd2o::net::server_transport transport({
 		    .connected =
 		        [&](kcd2o::connection_id connection)
 		        {
+			        active_connections.insert(connection);
 			        std::cout << "connection " << connection << " accepted from "
 			                  << transport.connection_description(connection) << '\n';
 			        core.on_transport_connected(connection, now());
@@ -172,6 +207,7 @@ int main(int argc, char **argv)
 		            bool allow_reconnect,
 		            std::string reason)
 		        {
+			        active_connections.erase(connection);
 			        std::cout << "connection " << connection << " closed: "
 			                  << reason << '\n';
 			        core.on_transport_disconnected(
@@ -184,10 +220,14 @@ int main(int argc, char **argv)
 		        [&](kcd2o::connection_id connection,
 		            std::span<const std::byte> bytes)
 		        {
+			        if (dashboard_telemetry)
+				        dashboard_telemetry->record_received(bytes.size());
 			        std::string error;
 			        const auto envelope = kcd2o::decode(bytes, &error);
 			        if (!envelope)
 			        {
+				        if (dashboard_telemetry)
+					        dashboard_telemetry->record_malformed();
 				        std::cerr << "connection " << connection
 				                  << " sent malformed data: " << error << '\n';
 				        transport.close(
@@ -204,10 +244,24 @@ int main(int argc, char **argv)
 		std::cout << config.name << " (KCD2Online " << kcd2o::kcd2o_version
 		          << ", prototype) listening on " << config.bind_address << ':'
 		          << config.port << " for level " << config.level_id << '\n';
+		std::unique_ptr<kcd2o::server::dashboard_server> dashboard;
+		if (dashboard_telemetry)
+		{
+			dashboard = std::make_unique<kcd2o::server::dashboard_server>(
+			    dashboard_config,
+			    [&] { return dashboard_telemetry->snapshot(); });
+			dashboard->start();
+			std::cout << "read-only dashboard listening on "
+			          << dashboard->endpoint() << " (token file: "
+			          << dashboard_config.token_file.string() << ")\n";
+		}
 		print_help();
 		std::atomic<std::uint64_t> published_player_count{};
 		std::mutex published_accounts_mutex;
 		std::vector<std::string> published_account_ids;
+		std::mutex published_restrictions_mutex;
+		std::vector<kcd2o::server::account_restriction> published_restrictions;
+		bool published_restrictions_ready{};
 		std::jthread heartbeat_worker;
 		if (backend)
 		{
@@ -224,6 +278,7 @@ int main(int argc, char **argv)
 						    active_account_ids = published_account_ids;
 					    }
 					    std::string error;
+					    std::vector<kcd2o::server::account_restriction> restrictions;
 					    if (!backend->heartbeat(
 					            {config.name,
 					             config.public_address,
@@ -234,8 +289,15 @@ int main(int argc, char **argv)
 					             config.level_id,
 					             config.permission_owners,
 					             std::move(active_account_ids)},
+					            restrictions,
 					            error))
 						    std::cerr << "server browser heartbeat failed: " << error << '\n';
+					    else
+					    {
+						    std::scoped_lock lock(published_restrictions_mutex);
+						    published_restrictions = std::move(restrictions);
+						    published_restrictions_ready = true;
+					    }
 					    std::unique_lock lock(wait_mutex);
 					    (void)wait_condition.wait_for(lock, stop, 30s, [] { return false; });
 				    } while (!stop.stop_requested());
@@ -246,9 +308,23 @@ int main(int argc, char **argv)
 		const auto tick_duration =
 		    std::chrono::duration<double>(1.0 / config.tick_rate);
 		auto next_tick = kcd2o::server::clock::now();
+		auto next_dashboard_publish = next_tick;
 		while (running)
 		{
 			transport.poll();
+			{
+				std::vector<kcd2o::server::account_restriction> restrictions;
+				{
+					std::scoped_lock lock(published_restrictions_mutex);
+					if (published_restrictions_ready)
+					{
+						restrictions = std::move(published_restrictions);
+						published_restrictions_ready = false;
+					}
+				}
+				if (!restrictions.empty())
+					core.apply_account_restrictions(restrictions, now());
+			}
 
 			std::deque<std::string> commands;
 			{
@@ -433,6 +509,73 @@ int main(int argc, char **argv)
 					    id,
 					    reason.empty() ? "kicked by server" : reason,
 					    now());
+				}
+				else if (command == "moderate")
+				{
+					std::string action_name;
+					std::string target_token;
+					input >> action_name >> target_token;
+					std::string kind;
+					if (action_name == "warn") kind = "warning";
+					else if (action_name == "ban") kind = "server_ban";
+					else if (action_name == "unban") kind = "server_unban";
+					else if (action_name == "chat-mute") kind = "chat_mute";
+					else if (action_name == "chat-unmute") kind = "chat_unmute";
+					else if (action_name == "voice-mute") kind = "voice_mute";
+					else if (action_name == "voice-unmute") kind = "voice_unmute";
+
+					std::string account_id;
+					kcd2o::player_id target_id{};
+					const auto [target_end, target_error] = std::from_chars(
+					    target_token.data(), target_token.data() + target_token.size(), target_id);
+					if (target_error == std::errc{} && target_end == target_token.data() + target_token.size())
+					{
+						const auto players = core.players();
+						const auto found = std::ranges::find_if(players,
+						    [&](const auto &player) { return player.id == target_id && !player.dummy; });
+						if (found != players.end()) account_id = found->persistent_id;
+					}
+					else if (kcd2o::is_uuid(target_token))
+						account_id = target_token;
+
+					std::uint64_t expires{};
+					const bool needs_duration = kind == "server_ban" || kind == "chat_mute" || kind == "voice_mute";
+					bool duration_valid = true;
+					if (needs_duration)
+					{
+						std::string duration;
+						input >> duration;
+						if (duration != "permanent")
+						{
+							std::uint64_t minutes{};
+							const auto [end, error] = std::from_chars(
+							    duration.data(), duration.data() + duration.size(), minutes);
+							duration_valid = error == std::errc{} && end == duration.data() + duration.size()
+							    && minutes > 0 && minutes <= 5'256'000;
+							if (duration_valid)
+								expires = static_cast<std::uint64_t>(
+								    std::chrono::duration_cast<std::chrono::milliseconds>(
+								        std::chrono::system_clock::now().time_since_epoch()).count())
+								    + minutes * 60'000ULL;
+						}
+					}
+					std::string reason;
+					std::getline(input >> std::ws, reason);
+					if (!backend || kind.empty() || account_id.empty() || !duration_valid || reason.size() < 3)
+					{
+						std::cout << "usage: moderate <warn|ban|unban|chat-mute|chat-unmute|voice-mute|voice-unmute> <player_id|account_id> [minutes|permanent] <reason>\n";
+						continue;
+					}
+					kcd2o::server::moderation_action action{
+					    account_id, kind, reason, "server-console", expires};
+					std::string error;
+					if (!backend->moderate(action, error))
+						std::cout << "moderation failed: " << error << '\n';
+					else
+					{
+						core.apply_moderation_action(action, now());
+						std::cout << "moderation action stored and applied\n";
+					}
 				}
 				else if (command == "permission")
 				{
@@ -672,7 +815,14 @@ int main(int argc, char **argv)
 			}
 			if (tick_now >= next_tick)
 			{
+				const auto tick_started = kcd2o::server::clock::now();
 				core.tick(tick_now);
+				if (dashboard_telemetry)
+				{
+					dashboard_telemetry->record_tick(
+					    std::chrono::duration<double, std::milli>(
+					        kcd2o::server::clock::now() - tick_started));
+				}
 				next_tick = tick_now
 				    + std::chrono::duration_cast<kcd2o::server::clock::duration>(
 				        tick_duration);
@@ -729,6 +879,30 @@ int main(int argc, char **argv)
 					    "connection closed by server",
 					    true);
 				}
+				if (dashboard_telemetry)
+				{
+					dashboard_telemetry->record_sent(
+					    encoded ? encoded->bytes.size() : 0,
+					    kcd2o::lane_for(outbound.envelope),
+					    sent,
+					    congested,
+					    outbound.delivery);
+				}
+			}
+
+			if (dashboard_telemetry && tick_now >= next_dashboard_publish)
+			{
+				std::vector<kcd2o::net::connection_statistics> statistics;
+				statistics.reserve(active_connections.size());
+				for (const auto connection : active_connections)
+				{
+					if (const auto value = transport.statistics(connection))
+						statistics.push_back(*value);
+				}
+				dashboard_telemetry->publish(core, statistics, tick_now);
+				next_dashboard_publish = tick_now
+				    + std::chrono::milliseconds(
+				        dashboard_config.refresh_interval_ms);
 			}
 
 			std::this_thread::sleep_for(1ms);

@@ -2,8 +2,14 @@
 
 Experimental multiplayer for Kingdom Come: Deliverance II.
 
+KCD2Online is an independent, unofficial, non-commercial fan modification. It
+requires a legitimate copy of Kingdom Come: Deliverance II, works only with
+that game, and does not bypass DRM, platform authentication, or paid-content
+licensing. Warhorse Studios, PLAION, Deep Silver, and the platform operators do
+not endorse or operate this project.
+
 > [!WARNING]
-> KCD2Online **v0.1.4 is a prototype**, not a production-ready multiplayer mod.
+> KCD2Online **v0.1.7 is a prototype**, not a production-ready multiplayer mod.
 > Expect breaking changes, incomplete world simulation, compatibility limits,
 > and loss of multiplayer-world data while development continues. Use test
 > saves and keep backups of anything important.
@@ -12,7 +18,7 @@ Experimental multiplayer for Kingdom Come: Deliverance II.
 
 | | |
 | --- | --- |
-| Current version | **0.1.4** |
+| Current version | **0.1.7** |
 | Development stage | Prototype / technical preview |
 | Networking | Direct IP, dedicated authoritative server |
 | Platform | Windows x64 |
@@ -28,7 +34,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 > NPC synchronization is still unreliable. A known bug can cause the same NPC
 > to spawn multiple times, so NPC sync is not yet suitable for normal play.
 
-## What works in v0.1.4
+## What works in v0.1.7
 
 - Direct-IP client/server connection with authentication and reconnect support
 - Native main-menu onboarding for the anonymous KCD2Online account service,
@@ -114,17 +120,21 @@ Every successful build also creates a clean package tree under
 `out/package/<debug|release>/`:
 
 ```text
-client/   install-ready game tree and KCD2Online-Client-v0.1.4.zip
+client/   install-ready game tree and KCD2Online-Client-v0.1.7.zip
 server/   dedicated server, configuration, data, symbols, and audit tool
 tests/    test executables and their symbols only
 SHA256SUMS.txt
 ```
 
 When a local KCD2 installation is selected, the server package additionally
-contains `game_data/WHGame.dll`, a hashed content manifest, generated human
-Soul and authored human/animal NPC catalogs, and property catalogs for all
-production levels. The DLL is audited before it is copied and is not included
-in the client ZIP.
+contains a hashed content manifest, a minimal human-Soul ID allowlist, a minimal
+authored human/animal NPC allowlist, and property catalogs for all production
+levels. The installed `WHGame.dll` is audited and hashed in place but is never
+copied into `game_data` or any package.
+
+KCD2Online does not ship game executables, DLLs, PAKs, XML, audio, images, or
+other source assets. Locally generated `game_data` is private compatibility
+metadata for the server operator and must not be published.
 
 The client ZIP starts with `KingdomComeDeliverance2/` and mirrors the same
 relative paths used by `Build & Deploy`. It can therefore be extracted directly
@@ -156,6 +166,14 @@ The common retail world IDs are:
 
 The server listens on UDP port `27020` by default. Allow and forward that port
 only when hosting outside the LAN.
+
+The packaged launcher also starts a read-only operations dashboard at
+`http://127.0.0.1:8080`. Its independent `dashboard.toml` controls the listener,
+polling interval, and request limit. On first start the server creates
+`dashboard-token.txt`; enter that token in the browser. The dashboard reports
+tick performance, throughput, latency, packet loss, congestion, send queues,
+and traffic-lane pressure without exposing player account IDs, IP addresses, or
+server credentials. See [Dashboard security and configuration](docs/dashboard.md).
 
 On its first start the server registers itself and writes its generated stable
 ID and API key to `server-identity.json`. Keep that file with the server data.
@@ -204,6 +222,15 @@ player's head position.
 Dedicated-server operators can bootstrap GM access with `permission grant
 <player_id> admin.*`. Grants follow the player's persistent UUID and are stored
 under the configured world directory. `/adminhelp` lists the in-game GM tools.
+
+Property owners and stewards receive contextual actions on every catalogued
+Property resource. The management action opens a panel for owner/role and
+resource administration; doors and containers additionally expose a hold action
+for locking or unlocking to the Property owner or another Property role with the
+secure capability. `property.manage` grants server-wide management and owner
+editing, but deliberately does not grant lock control over foreign Properties.
+Every request is resolved from the resource GUID and checked again by the server,
+so a client cannot select a different Property in transit.
 
 The in-game UI follows KCD2's current `g_language` setting. Editable UTF-8
 translations are installed in `<game-root>\Mods\KCD2Online\Lang\`; English is the

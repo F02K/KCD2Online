@@ -30,6 +30,7 @@ namespace kcd2o::kcse
 		void advance_frame() noexcept;
 		void set_epoch(std::uint64_t epoch);
 		void clear();
+		void abandon_world() noexcept;
 		void reset_active_probe();
 		[[nodiscard]] std::uint32_t entity_id_for(player_id player) const noexcept;
 		[[nodiscard]] active_probe_result poll_active_probe(

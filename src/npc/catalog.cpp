@@ -3,15 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <fstream>
-#include <iterator>
 #include <map>
 #include <set>
 
 #include <pugixml.hpp>
 #include <zip.h>
-#include <nlohmann/json.hpp>
-
 #ifdef _WIN32
 #include <Windows.h>
 #endif
@@ -233,75 +229,6 @@ namespace kcd2o::npc
 		rebuild_index();
 		error.clear();
 		return true;
-	}
-
-	bool catalog::load_json(
-	    const std::filesystem::path &path,
-	    std::string &error)
-	{
-		std::ifstream input(path, std::ios::binary);
-		if (!input)
-		{
-			error = "could not open NPC catalog: " + path.string();
-			return false;
-		}
-		try
-		{
-			const auto document = nlohmann::json::parse(input);
-			if (document.value("schema_version", 0) != 1)
-			{
-				error = "NPC catalog schema version is incompatible";
-				return false;
-			}
-			if (document.value("default_soul_id", std::string{})
-			    != default_soul_id)
-			{
-				error = "NPC catalog default Soul ID is incompatible";
-				return false;
-			}
-			std::vector<archetype> parsed;
-			std::unordered_set<std::string> ids;
-			for (const auto &entry : document.at("archetypes"))
-			{
-				archetype value{
-				    entry.at("soul_id").get<std::string>(),
-				    entry.at("soul_name").get<std::string>(),
-				    entry.value("character_id", std::string{}),
-				    entry.at("archetype_name").get<std::string>(),
-				    entry.value("gender", std::string{}),
-				    entry.at("source").get<std::string>()};
-				if (value.soul_id.empty() || value.soul_name.empty()
-				    || !ids.insert(value.soul_id).second)
-				{
-					error = "NPC catalog contains an invalid or duplicate Soul";
-					return false;
-				}
-				parsed.push_back(std::move(value));
-			}
-			if (!ids.contains(std::string(default_soul_id)))
-			{
-				error = "NPC catalog does not contain the built-in default Soul";
-				return false;
-			}
-			m_entries = std::move(parsed);
-			rebuild_index();
-			if (fingerprint() != supported_catalog_fingerprint
-			    || size() != supported_catalog_size)
-			{
-				error = "NPC catalog does not match supported retail build 1308617_856";
-				m_entries.clear();
-				m_index.clear();
-				return false;
-			}
-			error.clear();
-			return true;
-		}
-		catch (const std::exception &exception)
-		{
-			error = "could not parse NPC catalog: "
-			    + std::string(exception.what());
-			return false;
-		}
 	}
 
 	const archetype *catalog::find(std::string_view soul_id) const

@@ -1,5 +1,7 @@
 #include "gui/ingame_chat.hpp"
 
+#include "gui/ingame_social_preferences.hpp"
+
 #include "gui/renderer.hpp"
 #ifdef KCD2Online_NATIVE_MULTIPLAYER_MENU
 	#include "gui/native_ui_localization.hpp"
@@ -490,7 +492,16 @@ namespace big::ingame_chat
 			close_chat(state, true);
 		}
 
-		const auto history = client.chat_history();
+		ingame_social_preferences::set_session(status.session_id);
+		auto history = client.chat_history();
+		std::erase_if(
+		    history,
+		    [&](const auto &entry)
+		    {
+			    return entry.sender != 0
+			        && entry.sender != status.local_player_id
+			        && ingame_social_preferences::chat_hidden(entry.sender);
+		    });
 		const auto now     = ImGui::GetTime();
 		if (status.native_keybinds)
 		{

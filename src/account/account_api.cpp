@@ -192,6 +192,35 @@ namespace kcd2o::account
 		    required_string(completion, "recoveryCode", 128)};
 	}
 
+	registration_result account_api::recover_account(
+	    std::string_view recovery_code,
+	    std::string_view public_key_spki,
+	    std::string_view device_evidence,
+	    std::span<const std::byte> private_key_blob) const
+	{
+		if (recovery_code.empty() || recovery_code.size() > 128)
+			throw std::invalid_argument("Recovery code is invalid");
+		const nlohmann::json challenge_request{
+		    {"recoveryCode", recovery_code},
+		    {"credentialPublicKey", public_key_spki},
+		    {"deviceEvidence", device_evidence},
+		    {"credentialLabel", "windows-client-recovery"}};
+		const auto challenge_response = nlohmann::json::parse(post_json(
+		    "/v1/auth/recovery/by-code/challenge", challenge_request.dump()));
+		const auto request_id = required_string(challenge_response, "requestId", 64);
+		const auto signing_payload =
+		    required_string(challenge_response, "signingPayload");
+		const nlohmann::json completion_request{
+		    {"requestId", request_id},
+		    {"signature", sign_payload(private_key_blob, signing_payload)}};
+		const auto completion = nlohmann::json::parse(post_json(
+		    "/v1/auth/recovery/by-code/complete", completion_request.dump()));
+		return {
+		    required_string(completion, "accountId", 64),
+		    required_string(completion, "credentialId", 64),
+		    required_string(completion, "recoveryCode", 128)};
+	}
+
 	login_result account_api::login(
 	    const account_record &account,
 	    std::string_view audience) const
@@ -238,6 +267,35 @@ namespace kcd2o::account
 		    "/v1/account/profile",
 		    request.dump(),
 		    authenticated.access_token)));
+	}
+
+	std::string account_api::export_data(const account_record &account) const
+	{
+		const auto authenticated = login(account, "account");
+		auto response = request_json(
+		    L"GET", "/v1/account/data-export", {}, authenticated.access_token);
+		const auto parsed = nlohmann::json::parse(response);
+		if (!parsed.is_object() || parsed.value("formatVersion", 0) != 1
+		    || required_string(parsed.at("account"), "accountId", 64)
+		        != account.account_id)
+			throw std::runtime_error("KCD2Online returned an invalid account data export");
+		return response;
+	}
+
+	void account_api::delete_account(
+	    const account_record &account,
+	    std::string_view confirmation_account_id) const
+	{
+		if (confirmation_account_id != account.account_id)
+			throw std::invalid_argument("The account deletion confirmation does not match");
+		const auto authenticated = login(account, "account");
+		const auto response = nlohmann::json::parse(request_json(
+		    L"POST",
+		    "/v1/account/delete",
+		    nlohmann::json{{"accountId", confirmation_account_id}}.dump(),
+		    authenticated.access_token));
+		if (required_string(response, "status", 32) != "deleted")
+			throw std::runtime_error("KCD2Online did not confirm account deletion");
 	}
 
 	std::vector<public_server> account_api::list_servers() const
@@ -344,7 +402,7 @@ namespace kcd2o::account
 				throw std::runtime_error("Could not read KCD2Online response");
 			if (available == 0)
 				break;
-			if (response.size() + available > 512 * 1024)
+			if (response.size() + available > 8 * 1024 * 1024)
 				throw std::runtime_error("KCD2Online response is too large");
 			const auto offset = response.size();
 			response.resize(offset + available);

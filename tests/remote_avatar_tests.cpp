@@ -269,6 +269,13 @@ int main()
 	assert(manager.clear() == 1);
 	assert(manager.size() == 0);
 
+	result = manager.sync(players);
+	assert(result.success);
+	const auto removals_before_abandon = backend.removed;
+	assert(manager.abandon_world() == 1);
+	assert(manager.size() == 0);
+	assert(backend.removed == removals_before_abandon);
+
 	backend.enabled = false;
 	result = manager.sync(players);
 	assert(!result.success);

@@ -1,5 +1,7 @@
 #include "server/server_core.hpp"
 
+#include <opus/opus.h>
+
 #include "property/catalog.hpp"
 
 #include <nlohmann/json.hpp>
@@ -77,7 +79,8 @@ namespace kcd2o::server
 	server_core::server_core(
 	    server_config config,
 	    token_generator generate_token,
-	    account_authenticator authenticate_account) :
+	    account_authenticator authenticate_account,
+	    moderation_executor moderate_account) :
 	    m_config(validated_config(std::move(config))),
 	    m_resources(m_config.resources_enabled
 	        ? resources::load_resource_set(m_config.resource_directory)
@@ -85,6 +88,7 @@ namespace kcd2o::server
 	    m_generate_token(generate_token ? std::move(generate_token) : []
 	        { return random_hex(32); }),
 	    m_authenticate_account(std::move(authenticate_account)),
+	    m_moderate_account(std::move(moderate_account)),
 	    m_store(m_config),
 	    m_permissions(m_config.world_directory, m_config.permission_owners),
 	    m_npcs(m_store.manifest().level_id, m_config.npc_world_catalog_path),
@@ -108,8 +112,13 @@ namespace kcd2o::server
 			    return definition.has_marker_position()
 			        && definition.marker_entity_guid() != 0;
 		    });
+		const auto catalog_needs_ownership_areas = std::ranges::any_of(
+		    m_store.property_catalog().properties(),
+		    [](const protocol::PropertyDefinition &definition)
+		    { return definition.ownership_area_guids().empty(); });
 		if ((m_store.property_catalog().properties().empty()
-		        || catalog_needs_markers)
+		        || catalog_needs_markers
+		        || catalog_needs_ownership_areas)
 		    && !m_config.property_game_data.empty())
 		{
 			protocol::PropertyCatalog catalog;
@@ -270,6 +279,22 @@ namespace kcd2o::server
 				handle_world_object_update(
 				    *player,
 				    envelope.client_world_object_update());
+				break;
+			case protocol::Envelope::kClientPropertyRoleGrant:
+				handle_property_role_grant(
+				    *player, envelope.client_property_role_grant());
+				break;
+			case protocol::Envelope::kClientPropertyRoleRevoke:
+				handle_property_role_revoke(
+				    *player, envelope.client_property_role_revoke());
+				break;
+			case protocol::Envelope::kClientPropertyOwnerSet:
+				handle_property_owner_set(
+				    *player, envelope.client_property_owner_set());
+				break;
+			case protocol::Envelope::kClientPropertyResourceLock:
+				handle_property_resource_lock(
+				    *player, envelope.client_property_resource_lock());
 				break;
 			case protocol::Envelope::kClientWorldItemUpdate:
 				handle_world_item_update(
@@ -964,6 +989,8 @@ namespace kcd2o::server
 		m_permissions.audit(
 		    "console", "permission.grant", found->second.profile.persistent_id(),
 		    accepted ? "allowed" : "failed", scope);
+		if (accepted)
+			broadcast_property_access();
 		return accepted;
 	}
 
@@ -984,6 +1011,8 @@ namespace kcd2o::server
 		m_permissions.audit(
 		    "console", "permission.revoke", found->second.profile.persistent_id(),
 		    accepted ? "allowed" : "failed", permission);
+		if (accepted)
+			broadcast_property_access();
 		return accepted;
 	}
 
@@ -1122,6 +1151,7 @@ namespace kcd2o::server
 			return false;
 		m_store.save_property_ledger(m_properties.ledger());
 		broadcast_home_markers();
+		broadcast_property_access();
 		return true;
 	}
 
@@ -1152,6 +1182,7 @@ namespace kcd2o::server
 			return false;
 		m_store.save_property_ledger(m_properties.ledger());
 		broadcast_home_markers();
+		broadcast_property_access();
 		return true;
 	}
 
@@ -1174,6 +1205,7 @@ namespace kcd2o::server
 			return false;
 		m_store.save_property_ledger(m_properties.ledger());
 		broadcast_home_markers();
+		broadcast_property_access();
 		return true;
 	}
 
@@ -1185,6 +1217,7 @@ namespace kcd2o::server
 			return false;
 		m_store.save_property_ledger(m_properties.ledger());
 		broadcast_home_markers();
+		broadcast_property_access();
 		return true;
 	}
 
@@ -1434,16 +1467,19 @@ namespace kcd2o::server
 		bool enrolled_profile = false;
 		if (m_config.account_auth_enabled)
 		{
-			std::string auth_error;
+			authentication_failure auth_failure;
 			const auto identity = m_authenticate_account
-			    ? m_authenticate_account(message.access_token(), auth_error)
+			    ? m_authenticate_account(message.access_token(), auth_failure)
 			    : std::nullopt;
 			if (!identity)
 			{
 				reject(
 				    connection,
-				    protocol::REJECT_REASON_IDENTITY_REQUIRED,
-				    auth_error.empty() ? "KCD2Online authentication failed" : auth_error);
+				    auth_failure.restriction_kind.empty()
+				        ? protocol::REJECT_REASON_IDENTITY_REQUIRED
+				        : protocol::REJECT_REASON_RESTRICTED,
+				    auth_failure.message.empty() ? "KCD2Online authentication failed" : auth_failure.message,
+				    &auth_failure);
 				return;
 			}
 			if (!pending.password_accepted && !identity->join_bypass)
@@ -2131,6 +2167,31 @@ namespace kcd2o::server
 		}
 
 		const auto guid = message.state().entity_guid();
+		const auto current_object = m_world_objects.find(guid);
+		const bool lock_changed = current_object == m_world_objects.end()
+		    ? message.state().locked()
+		    : message.state().locked() != current_object->second.locked();
+		if (lock_changed && m_properties.property_for(guid)
+		    && !m_properties.authorize(
+		        player.profile.persistent_id(),
+		        guid,
+		        property::capability::secure,
+		        unix_milliseconds()))
+		{
+			protocol::WorldObjectState authoritative = message.state();
+			if (current_object != m_world_objects.end())
+				authoritative = current_object->second;
+			else
+			{
+				authoritative.set_revision(1);
+				authoritative.set_opened(false);
+				authoritative.set_locked(false);
+				authoritative.set_has_inventory(false);
+				authoritative.clear_inventory();
+			}
+			reject_state(authoritative, "property lock permission denied");
+			return;
+		}
 		const auto requested = message.state().kind()
 		        == protocol::WORLD_OBJECT_KIND_CONTAINER
 		    ? property::capability::use_container
@@ -2406,6 +2467,140 @@ namespace kcd2o::server
 		    std::move(updated),
 		    reliability::reliable,
 		    player.connection);
+	}
+
+	void server_core::handle_property_role_grant(
+	    player_session &player,
+	    const protocol::ClientPropertyRoleGrant &message)
+	{
+		const auto now = unix_milliseconds();
+		const bool global = has_permission(player, "property.manage");
+		std::string error;
+		const bool accepted = global
+		    ? m_properties.system_grant_role(
+		          message.property_id(), message.target_player_id(), message.role(),
+		          random_uuid_v4(), now, message.expires_at_ms(), error)
+		    : m_properties.grant_role(
+		          player.profile.persistent_id(), message.property_id(),
+		          message.target_player_id(), message.role(), random_uuid_v4(), now,
+		          message.expires_at_ms(), error);
+		if (!accepted)
+		{
+			send_property_result(player, false, error);
+			return;
+		}
+		m_store.save_property_ledger(m_properties.ledger());
+		broadcast_home_markers();
+		broadcast_property_access();
+		send_property_result(player, true, "Property role updated.");
+	}
+
+	void server_core::handle_property_role_revoke(
+	    player_session &player,
+	    const protocol::ClientPropertyRoleRevoke &message)
+	{
+		std::string error;
+		const bool accepted = has_permission(player, "property.manage")
+		    ? m_properties.system_revoke_role(message.assignment_id(), error)
+		    : m_properties.revoke_role(
+		          player.profile.persistent_id(), message.assignment_id(),
+		          unix_milliseconds(), error);
+		if (!accepted)
+		{
+			send_property_result(player, false, error);
+			return;
+		}
+		m_store.save_property_ledger(m_properties.ledger());
+		broadcast_home_markers();
+		broadcast_property_access();
+		send_property_result(player, true, "Property role revoked.");
+	}
+
+	void server_core::handle_property_owner_set(
+	    player_session &player,
+	    const protocol::ClientPropertyOwnerSet &message)
+	{
+		if (!has_permission(player, "property.manage"))
+		{
+			send_property_result(player, false, "Property owner editing requires property.manage.");
+			return;
+		}
+		std::string error;
+		if (!m_properties.system_set_owner(
+		        message.property_id(), message.target_player_id(), random_uuid_v4(),
+		        unix_milliseconds(), error))
+		{
+			send_property_result(player, false, error);
+			return;
+		}
+		m_store.save_property_ledger(m_properties.ledger());
+		broadcast_home_markers();
+		broadcast_property_access();
+		send_property_result(player, true, "Property owner updated.");
+	}
+
+	void server_core::handle_property_resource_lock(
+	    player_session &player,
+	    const protocol::ClientPropertyResourceLock &message)
+	{
+		const auto *definition = m_properties.property_for(message.entity_guid());
+		if (!definition)
+		{
+			send_property_result(player, false, "Resource is not assigned to a Property.");
+			return;
+		}
+		const auto resource = std::ranges::find_if(
+		    definition->resources(),
+		    [&](const protocol::PropertyResource &candidate)
+		    { return candidate.entity_guid() == message.entity_guid(); });
+		if (resource == definition->resources().end()
+		    || (resource->kind() != protocol::PROPERTY_RESOURCE_KIND_DOOR
+		        && resource->kind() != protocol::PROPERTY_RESOURCE_KIND_CONTAINER))
+		{
+			send_property_result(player, false, "Only Property doors and containers can be locked.");
+			return;
+		}
+		if (!m_properties.authorize_property(
+		        player.profile.persistent_id(), definition->property_id(),
+		        property::capability::secure, unix_milliseconds()))
+		{
+			send_property_result(player, false, "Property lock permission denied.");
+			return;
+		}
+
+		auto found = m_world_objects.find(message.entity_guid());
+		protocol::WorldObjectState state;
+		if (found != m_world_objects.end())
+			state = found->second;
+		else
+		{
+			state.set_entity_guid(message.entity_guid());
+			state.set_kind(resource->kind() == protocol::PROPERTY_RESOURCE_KIND_DOOR
+			        ? protocol::WORLD_OBJECT_KIND_DOOR
+			        : protocol::WORLD_OBJECT_KIND_CONTAINER);
+			state.set_revision(0);
+		}
+		if (found != m_world_objects.end()
+		    && state.locked() == message.locked())
+		{
+			send_property_result(
+			    player, true,
+			    message.locked() ? "Resource is already locked."
+			                     : "Resource is already unlocked.");
+			return;
+		}
+		state.set_locked(message.locked());
+		if (message.locked())
+			state.set_opened(false);
+		state.set_revision(state.revision() + 1);
+		m_world_objects.insert_or_assign(message.entity_guid(), state);
+		persist_world_objects();
+		protocol::Envelope updated;
+		*updated.mutable_world_object_updated()->mutable_state() = state;
+		broadcast(std::move(updated), reliability::reliable);
+		send_property_result(
+		    player, true,
+		    message.locked() ? "Resource locked." : "Resource unlocked.");
 	}
 
 	void server_core::handle_world_item_update(
@@ -2851,7 +3046,8 @@ namespace kcd2o::server
 	    const protocol::ChatSend &message,
 	    time_point now)
 	{
-		if (player.network_chat_muted)
+		if (player.network_chat_muted
+		    && (message.text().empty() || message.text().front() != '/'))
 		{
 			send_system_message(player, "Dein Netzwerk-Chat ist stummgeschaltet.", now);
 			return;
@@ -2970,6 +3166,17 @@ namespace kcd2o::server
 	{
 		if (player.network_voice_muted || !m_config.voice_enabled || !player.connection
 		    || !player.has_transform)
+			return;
+		if (!message.end_of_talkspurt())
+		{
+			if (message.opus().empty()
+			    || opus_packet_get_nb_samples(
+			           reinterpret_cast<const unsigned char *>(message.opus().data()),
+			           static_cast<opus_int32>(message.opus().size()), 48'000)
+			        != 960)
+				return;
+		}
+		else if (!message.opus().empty())
 			return;
 
 		const auto cutoff = now - std::chrono::seconds(1);
@@ -3206,12 +3413,62 @@ namespace kcd2o::server
 			const auto found = m_players.find(id);
 			return found == m_players.end() ? nullptr : &found->second;
 		};
+		auto resolve_account = [&](std::string_view token) -> std::pair<std::string, player_session *>
+		{
+			player_id id{};
+			const auto [end, error] = std::from_chars(token.data(), token.data() + token.size(), id);
+			if (error == std::errc{} && end == token.data() + token.size())
+			{
+				auto *target = parse_target(id);
+				return {target && !target->dummy ? target->profile.persistent_id() : std::string{}, target};
+			}
+			return is_uuid(token)
+			    ? std::pair{std::string(token), static_cast<player_session *>(nullptr)}
+			    : std::pair{std::string{}, static_cast<player_session *>(nullptr)};
+		};
+		auto expiry_from = [&](std::string_view value) -> std::optional<std::uint64_t>
+		{
+			if (lower_ascii(value) == "permanent")
+				return 0;
+			std::uint64_t minutes{};
+			const auto [end, error] = std::from_chars(
+			    value.data(), value.data() + value.size(), minutes);
+			if (error != std::errc{} || end != value.data() + value.size()
+			    || minutes == 0 || minutes > 5'256'000)
+				return std::nullopt;
+			return unix_milliseconds() + minutes * 60'000ULL;
+		};
+		auto execute_moderation = [&](moderation_action action)
+		{
+			if (!m_moderate_account)
+			{
+				send_system_message(player,
+				    "Servermoderation ist nicht mit dem KCD2Online-Backend verbunden.",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+				return false;
+			}
+			std::string error;
+			if (!m_moderate_account(action, error))
+			{
+				m_permissions.audit(actor, "moderation." + action.kind,
+				    action.account_id, "failed", error);
+				send_system_message(player, "Moderation fehlgeschlagen: " + error,
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+				return false;
+			}
+			m_permissions.audit(actor, "moderation." + action.kind,
+			    action.account_id, "allowed", action.reason);
+			apply_moderation_action(action, now);
+			const auto confirmation = action.kind + " gespeichert fuer " + action.account_id;
+			send_system_message(player, confirmation, now, protocol::CHAT_CHANNEL_ADMIN);
+			return true;
+		};
 
 		if (command == "/adminhelp")
 		{
 			send_system_message(
 			    player,
-			    "GM: /players, /announce, /kick, /goto, /bring, /freeze, /unfreeze, /perm",
+			    "GM: /players, /announce, /kick, /warn, /ban, /unban, /mute, /unmute, /goto, /bring, /freeze, /unfreeze, /perm",
 			    now, protocol::CHAT_CHANNEL_ADMIN);
 			return true;
 		}
@@ -3220,7 +3477,10 @@ namespace kcd2o::server
 			if (!require("admin.players", "players.list"))
 				return true;
 			for (const auto &entry : players())
-				send_system_message(player, std::to_string(entry.id) + " - " + entry.display_name + (entry.connected ? " [online]" : " [reconnecting]"), now, protocol::CHAT_CHANNEL_ADMIN);
+				send_system_message(player, std::to_string(entry.id) + " - " + entry.display_name
+				    + " [" + entry.persistent_id + "]"
+				    + (entry.connected ? " [online]" : " [reconnecting]"),
+				    now, protocol::CHAT_CHANNEL_ADMIN);
 			m_permissions.audit(actor, "players.list", "", "allowed");
 			return true;
 		}
@@ -3265,6 +3525,79 @@ namespace kcd2o::server
 			}
 			m_permissions.audit(actor, "player.kick", target->profile.persistent_id(), "allowed", reason);
 			kick(target_id, reason.empty() ? "Von der Spielleitung entfernt" : reason, now);
+			return true;
+		}
+		if (command == "/warn")
+		{
+			if (!require("admin.warn", "moderation.warning"))
+				return true;
+			std::string target_token;
+			std::string reason;
+			input >> target_token;
+			std::getline(input >> std::ws, reason);
+			auto [account_id, target] = resolve_account(target_token);
+			if (account_id.empty() || !target || reason.size() < 3)
+			{
+				send_system_message(player, "Verwendung: /warn <Spieler-ID> <Grund>", now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			(void)execute_moderation({account_id, "warning", reason, actor});
+			return true;
+		}
+		if (command == "/ban" || command == "/unban")
+		{
+			if (!require("admin.ban", command == "/ban" ? "moderation.server_ban" : "moderation.server_unban"))
+				return true;
+			std::string target_token;
+			std::string duration;
+			std::string reason;
+			input >> target_token;
+			if (command == "/ban")
+				input >> duration;
+			std::getline(input >> std::ws, reason);
+			auto [account_id, target] = resolve_account(target_token);
+			const auto expiry = command == "/ban" ? expiry_from(duration) : std::optional<std::uint64_t>{0};
+			if (account_id.empty() || !expiry || reason.size() < 3)
+			{
+				send_system_message(player,
+				    command == "/ban"
+				        ? "Verwendung: /ban <Spieler-ID|Account-ID> <Minuten|permanent> <Grund>"
+				        : "Verwendung: /unban <Spieler-ID|Account-ID> <Grund>",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			(void)execute_moderation({account_id,
+			    command == "/ban" ? "server_ban" : "server_unban",
+			    reason, actor, *expiry});
+			return true;
+		}
+		if (command == "/mute" || command == "/unmute")
+		{
+			if (!require("admin.mute", command == "/mute" ? "moderation.mute" : "moderation.unmute"))
+				return true;
+			std::string channel;
+			std::string target_token;
+			std::string duration;
+			std::string reason;
+			input >> channel >> target_token;
+			channel = lower_ascii(channel);
+			if (command == "/mute")
+				input >> duration;
+			std::getline(input >> std::ws, reason);
+			auto [account_id, target] = resolve_account(target_token);
+			const auto expiry = command == "/mute" ? expiry_from(duration) : std::optional<std::uint64_t>{0};
+			if ((channel != "chat" && channel != "voice") || account_id.empty()
+			    || !expiry || reason.size() < 3)
+			{
+				send_system_message(player,
+				    command == "/mute"
+				        ? "Verwendung: /mute <chat|voice> <Spieler-ID|Account-ID> <Minuten|permanent> <Grund>"
+				        : "Verwendung: /unmute <chat|voice> <Spieler-ID|Account-ID> <Grund>",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+				return true;
+			}
+			const auto kind = channel + (command == "/mute" ? "_mute" : "_unmute");
+			(void)execute_moderation({account_id, kind, reason, actor, *expiry});
 			return true;
 		}
 		if (command == "/goto" || command == "/bring")
@@ -3339,6 +3672,8 @@ namespace kcd2o::server
 			if (action != "grant" && action != "revoke")
 				error = "unbekannte Aktion";
 			m_permissions.audit(actor, "permission." + action, target_persistent, accepted ? "allowed" : "failed", scope);
+			if (accepted)
+				broadcast_property_access();
 			send_system_message(player, accepted ? "Berechtigungen aktualisiert." : "Fehler: " + error, now, protocol::CHAT_CHANNEL_ADMIN);
 			return true;
 		}
@@ -3582,7 +3917,8 @@ namespace kcd2o::server
 	void server_core::reject(
 	    connection_id connection,
 	    protocol::RejectReason reason,
-	    std::string message)
+	    std::string message,
+	    const authentication_failure *failure)
 	{
 		release_initializer(connection);
 		m_pending.erase(connection);
@@ -3590,6 +3926,16 @@ namespace kcd2o::server
 		auto *rejected = envelope.mutable_server_rejected();
 		rejected->set_reason(reason);
 		rejected->set_message(std::move(message));
+		if (failure)
+		{
+			rejected->set_error_code(failure->error_code);
+			rejected->set_restriction_scope(failure->restriction_scope);
+			rejected->set_restriction_kind(failure->restriction_kind);
+			rejected->set_restriction_reason(failure->restriction_reason);
+			rejected->set_expires_at_unix_ms(failure->expires_at_unix_ms);
+			rejected->set_reference_id(failure->reference_id);
+			rejected->set_support_url(failure->support_url);
+		}
 		queue(
 		    connection,
 		    std::move(envelope),
@@ -3659,8 +4005,19 @@ namespace kcd2o::server
 		accepted->set_server_name(m_config.name);
 		accepted->set_level_id(m_store.manifest().level_id);
 		accepted->set_network_role(network_role(player.network_role));
+		for (const auto &permission : m_permissions.list(player.profile.persistent_id()))
+			accepted->add_effective_permissions(permission);
+		if (player.network_full_permissions
+		    && std::ranges::find(accepted->effective_permissions(), "*")
+		        == accepted->effective_permissions().end())
+			accepted->add_effective_permissions("*");
 		accepted->set_profile_snapshot_interval_seconds(
 		    m_config.profile_snapshot_interval_seconds);
+		auto *voice = accepted->mutable_voice_config();
+		voice->set_enabled(m_config.voice_enabled);
+		voice->set_whisper_range_m(m_config.voice_whisper_range_m);
+		voice->set_normal_range_m(m_config.voice_normal_range_m);
+		voice->set_shout_range_m(m_config.voice_shout_range_m);
 		*accepted->mutable_avatar_policy() = avatar_policy();
 		if (const auto marker = m_properties.home_marker_for(
 		        player.profile.persistent_id(), unix_milliseconds()))
@@ -3671,6 +4028,7 @@ namespace kcd2o::server
 			*accepted->add_players() = snapshot_of(session, true);
 		}
 		queue(*player.connection, std::move(envelope), reliability::reliable);
+		send_property_access(player);
 		send_entity_control(*player.connection);
 		protocol::Envelope sleep;
 		auto *sleep_state = sleep.mutable_server_sleep_state();
@@ -3679,6 +4037,92 @@ namespace kcd2o::server
 		    m_sleeping_players.size()));
 		sleep_state->set_required_players(effective_sleep_requirement());
 		queue(*player.connection, std::move(sleep), reliability::reliable);
+	}
+
+	void server_core::apply_account_restrictions(
+	    const std::vector<account_restriction> &restrictions,
+	    time_point now)
+	{
+		for (const auto &restriction : restrictions)
+		{
+			const auto found = std::ranges::find_if(m_players, [&](const auto &entry)
+			{
+				return !entry.second.dummy
+				    && entry.second.profile.persistent_id() == restriction.account_id;
+			});
+			if (found == m_players.end())
+				continue;
+			auto &player = found->second;
+			if (restriction.network_blocked || restriction.server_banned)
+			{
+				const auto reason = restriction.network_blocked
+				    ? (restriction.network_reason.empty()
+				        ? "Network access restricted" : restriction.network_reason)
+				    : (restriction.ban_reason.empty()
+				        ? "Banned from this server" : restriction.ban_reason);
+				kick(player.id, reason + " - support.kingdom-online.cc", now);
+				continue;
+			}
+			const auto chat_changed = player.network_chat_muted != restriction.chat_muted;
+			const auto voice_changed = player.network_voice_muted != restriction.voice_muted;
+			player.network_chat_muted = restriction.chat_muted;
+			player.network_voice_muted = restriction.voice_muted;
+			if (chat_changed)
+				send_system_message(player,
+				    restriction.chat_muted
+				        ? "Dein Chat wurde stummgeschaltet: " + restriction.chat_mute_reason
+				        : "Deine Chat-Stummschaltung wurde aufgehoben.",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+			if (voice_changed)
+				send_system_message(player,
+				    restriction.voice_muted
+				        ? "Dein Sprachchat wurde stummgeschaltet: " + restriction.voice_mute_reason
+				        : "Deine Sprachchat-Stummschaltung wurde aufgehoben.",
+				    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+	}
+
+	void server_core::apply_moderation_action(
+	    const moderation_action &action,
+	    time_point now)
+	{
+		const auto found = std::ranges::find_if(m_players, [&](const auto &entry)
+		{
+			return !entry.second.dummy
+			    && entry.second.profile.persistent_id() == action.account_id;
+		});
+		if (found == m_players.end())
+			return;
+		auto &target = found->second;
+		if (action.kind == "warning")
+			send_system_message(target, "Verwarnung: " + action.reason,
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		else if (action.kind == "chat_mute")
+		{
+			target.network_chat_muted = true;
+			send_system_message(target, "Dein Chat wurde stummgeschaltet: " + action.reason,
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+		else if (action.kind == "chat_unmute")
+		{
+			target.network_chat_muted = false;
+			send_system_message(target, "Deine Chat-Stummschaltung wurde aufgehoben.",
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+		else if (action.kind == "voice_mute")
+		{
+			target.network_voice_muted = true;
+			send_system_message(target, "Dein Sprachchat wurde stummgeschaltet: " + action.reason,
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+		else if (action.kind == "voice_unmute")
+		{
+			target.network_voice_muted = false;
+			send_system_message(target, "Deine Sprachchat-Stummschaltung wurde aufgehoben.",
+			    now, protocol::CHAT_CHANNEL_ADMIN);
+		}
+		else if (action.kind == "server_ban")
+			kick(target.id, action.reason + " - support.kingdom-online.cc", now);
 	}
 
 	void server_core::broadcast_home_markers()
@@ -3702,6 +4146,106 @@ namespace kcd2o::server
 			    *player.connection,
 			    std::move(envelope),
 			    reliability::reliable);
+		}
+	}
+
+	bool server_core::has_permission(
+	    const player_session &player,
+	    std::string_view permission) const
+	{
+		return player.network_full_permissions
+		    || m_permissions.has(player.profile.persistent_id(), permission);
+	}
+
+	protocol::PropertyAccessSnapshot server_core::property_access_for(
+	    const player_session &player) const
+	{
+		protocol::PropertyAccessSnapshot snapshot;
+		snapshot.set_ledger_revision(m_properties.ledger().revision());
+		const auto now = unix_milliseconds();
+		const bool global_manage = has_permission(player, "property.manage");
+		for (const auto &definition : m_properties.catalog().properties())
+		{
+			const auto role = m_properties.effective_role(
+			    player.profile.persistent_id(), definition.property_id(), now);
+			const bool can_manage = global_manage
+			    || m_properties.authorize_property(
+			        player.profile.persistent_id(), definition.property_id(),
+			        property::capability::manage_roles, now);
+			const bool can_secure = m_properties.authorize_property(
+			    player.profile.persistent_id(), definition.property_id(),
+			    property::capability::secure, now);
+			if (!can_manage && !can_secure
+			    && role == protocol::PROPERTY_ROLE_UNSPECIFIED)
+				continue;
+			auto *access = snapshot.add_properties();
+			*access->mutable_property() = definition;
+			access->set_effective_role(role);
+			access->set_can_manage(can_manage);
+			access->set_can_secure(can_secure);
+			access->set_can_edit_owner(global_manage);
+			if (!can_manage)
+				continue;
+			for (const auto &assignment : m_properties.ledger().assignments())
+			{
+				if (assignment.property_id() == definition.property_id()
+				    && (assignment.expires_at_ms() == 0
+				        || now < assignment.expires_at_ms()))
+					*access->add_assignments() = assignment;
+			}
+		}
+		return snapshot;
+	}
+
+	void server_core::send_property_result(
+	    player_session &player,
+	    bool success,
+	    std::string message)
+	{
+		if (!player.connection)
+			return;
+		protocol::Envelope envelope;
+		auto *result = envelope.mutable_property_operation_result();
+		result->set_success(success);
+		result->set_message(std::move(message));
+		queue(*player.connection, std::move(envelope), reliability::reliable);
+	}
+
+	void server_core::broadcast_property_access()
+	{
+		for (auto &[id, player] : m_players)
+		{
+			(void)id;
+			send_property_access(player);
+		}
+	}
+
+	void server_core::send_property_access(player_session &player)
+	{
+		if (!player.connection)
+			return;
+		const auto access = property_access_for(player);
+		if (access.properties().empty())
+		{
+			protocol::Envelope envelope;
+			auto *updated = envelope.mutable_server_property_access_updated();
+			updated->set_reset(true);
+			updated->set_complete(true);
+			updated->mutable_snapshot()->set_ledger_revision(
+			    access.ledger_revision());
+			queue(*player.connection, std::move(envelope), reliability::reliable);
+			return;
+		}
+		for (int index = 0; index < access.properties_size(); ++index)
+		{
+			protocol::Envelope envelope;
+			auto *updated = envelope.mutable_server_property_access_updated();
+			updated->set_reset(index == 0);
+			updated->set_complete(index + 1 == access.properties_size());
+			auto *snapshot = updated->mutable_snapshot();
+			snapshot->set_ledger_revision(access.ledger_revision());
+			*snapshot->add_properties() = access.properties(index);
+			queue(*player.connection, std::move(envelope), reliability::reliable);
 		}
 	}
 

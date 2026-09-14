@@ -8,6 +8,115 @@ changes. Client and server versions must match exactly.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-08-28
+
+### Added
+
+- Added an embedded, read-only dedicated-server operations dashboard with
+  token authentication, loopback-only defaults, request limiting, and live
+  tick, network, traffic-lane, CPU, and memory telemetry.
+- Added server-authoritative Property management with contextual in-game
+  actions for role and owner administration, permission-filtered access
+  snapshots, and persistent locking of Property doors and containers.
+- Added a Voice tab to the player hub with microphone selection, persistent
+  input gain and playback volume, noise suppression, automatic gain, an
+  optional voice gate, device diagnostics, and a meter-only microphone test.
+- Added Property ownership-area discovery so native area, trespass, private-area,
+  and crime reactions can follow the authoritative Property assignment.
+
+### Changed
+
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.7`.
+- Applied the server's proximity-voice enablement and distance ranges to the
+  client, and added SpeexDSP preprocessing and resampling before Opus encoding.
+- Bounded queued voice traffic by age and count so stale realtime audio is
+  discarded instead of increasing latency under network pressure.
+- Included the standalone dashboard configuration in server packages and made
+  the packaged launcher create it on first start.
+
+### Fixed
+
+- Rejected malformed Opus frames and impossible locked-and-open world-object
+  states before they can enter the authoritative simulation.
+- Enforced Property lock permissions for both explicit lock requests and direct
+  world-object updates, and closed doors or containers before locking them.
+- Coordinated input capture between the new Property panel and the existing
+  player, social, and staff panels.
+
+## [0.1.6] - 2026-08-14
+
+### Added
+
+- Added a rebindable `F2` player hub with server and session overview, roster,
+  world state, connection and voice diagnostics, support actions, and a compact
+  multiplayer controls reference.
+- Added a rebindable `F3` social panel with roster search, verified role badges,
+  local chat hiding, per-player proximity-voice mute and volume controls, stable
+  RP identity copying, and support-ready report references.
+- Added a permission-aware `F7` staff panel for player moderation,
+  announcements, teleport and freeze actions, permission management, confirmed
+  destructive actions, and an in-panel GM log.
+- Added server-authoritative network roles, effective permission scopes,
+  persistent account restrictions, and append-only moderation auditing.
+
+### Changed
+
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.6`.
+- Reduced distributed game-derived data. Packages now generate the minimum NPC
+  and compatibility metadata locally and no longer include `WHGame.dll`,
+  console/CVar dumps, or the former full NPC archetype catalog.
+- Updated the pinned libKCD2 runtime dependency.
+
+### Fixed
+
+- Excluded locally owned transient weapon and combat state from transactional
+  profile verification, preventing false reconciliation mismatches after a
+  profile apply.
+- Kept input capture and native keybind handling coordinated when switching
+  between the player hub, social panel, and staff panel.
+
+## [0.1.5] - 2026-08-12
+
+### Added
+
+- Added self-service account recovery with a one-time recovery code. A
+  successful recovery rotates both the device-bound credential and recovery
+  code before storing the replacement credential with Windows DPAPI.
+- Added account overview, profile, security, and privacy sections to the native
+  menu, including locale editing, credential details, secure recovery-code
+  copying, machine-readable JSON data export, and confirmed account deletion.
+- Added scrollable Terms of Service and Privacy Policy pages behind a compact
+  Legal & Privacy submenu, with English and German navigation and account
+  feedback text.
+- Added server-browser search across server name, ID, level, and version, plus
+  keyboard and mouse-wheel selection for matching servers.
+
+### Changed
+
+- Bumped the shared client, server, protocol, resource, and package version to
+  `0.1.5`.
+- The main menu now exposes account management as a separate entry, and the
+  account view displays the central network role returned by the profile.
+- Raised the account-service response limit to support data exports and ignored
+  generated .NET bootstrap `bin` and `obj` directories.
+
+### Fixed
+
+- Updated ABI, protocol, packaging, and rebranding checks for `0.1.5`, and
+  avoided a deleted `parameter_info_range` copy that broke MSVC test builds.
+- Replaced the manual multiplayer world unload and native menu VTable call on
+  disconnect with CryEngine's deferred canonical `disconnect` transition.
+  Full world teardown now leaves remote Actors and their inventories intact for
+  CryEngine to destroy, waits one clean engine frame before disconnecting, and
+  avoids a final native profile capture that could race shutdown.
+- Added durable critical lifecycle markers around the deferred disconnect path
+  so crashes that occur after control returns to CryEngine remain diagnosable.
+- Disconnect an active multiplayer session before disabling the central account
+  service, preventing an authenticated session from outliving its local account
+  state.
+
 ## [0.1.4] - 2026-08-09
 
 ### Added

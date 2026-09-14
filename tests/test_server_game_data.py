@@ -78,34 +78,37 @@ def _game_root(root: Path) -> Path:
 
 
 class ServerGameDataTests(unittest.TestCase):
-    def test_generates_manifest_world_catalog_and_whgame_copy(self) -> None:
+    def test_generates_minimal_server_metadata_without_game_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             game = _game_root(root)
             output = root / "server_game_data"
 
+            output.mkdir()
+            (output / "WHGame.dll").write_bytes(b"stale-game-code")
             generate_server_game_data(game, output)
 
-            self.assertEqual(
-                (output / "WHGame.dll").read_bytes(),
-                (game / GAME_BIN_RELATIVE / "WHGame.dll").read_bytes(),
-            )
+            self.assertFalse((output / "WHGame.dll").exists())
             archetypes = json.loads(
                 (output / "npc_archetypes.json").read_text(encoding="utf-8")
             )
+            self.assertEqual(archetypes["schema_version"], 2)
             self.assertEqual(archetypes["default_soul_id"], DEFAULT_SOUL_ID)
+            self.assertEqual(archetypes["soul_ids"], [DEFAULT_SOUL_ID])
+            self.assertNotIn("archetypes", archetypes)
 
             world = json.loads(
                 (output / "npc_world_catalog.json").read_text(encoding="utf-8")
             )
             self.assertEqual([level["level_id"] for level in world["levels"]], ["2", "3", "4"])
             for level in world["levels"]:
-                self.assertEqual(level["human_count"], 1)
-                self.assertEqual(level["animal_count"], 1)
-                self.assertEqual(level["animal_spawner_count"], 1)
                 self.assertEqual(
                     {npc["kind"] for npc in level["npcs"]}, {"human", "animal"}
                 )
+                self.assertTrue(
+                    all(set(npc) == {"entity_guid", "kind"} for npc in level["npcs"])
+                )
+                self.assertNotIn("animal_spawners", level)
 
             manifest = json.loads(
                 (output / "content_manifest.json").read_text(encoding="utf-8")
@@ -114,6 +117,10 @@ class ServerGameDataTests(unittest.TestCase):
             self.assertEqual(manifest["whgame"]["image_size"], 0x05600000)
             self.assertEqual(len(manifest["content_fingerprint"]), 64)
             self.assertEqual(len(manifest["sources"]), 5)
+            self.assertNotIn(
+                "WHGame.dll",
+                {entry["path"] for entry in manifest["generated_files"]},
+            )
 
     def test_rejects_a_non_pe_whgame(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

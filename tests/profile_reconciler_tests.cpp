@@ -18,11 +18,25 @@ namespace
 		std::unordered_set<std::string> definitions;
 		std::string fail_operation;
 		bool failed_once{};
+		bool observe_owner_avatar_state{};
 
 		std::optional<protocol::PlayerProfile> capture(
 		    std::string &) override
 		{
-			return profile;
+			auto captured = profile;
+			if (observe_owner_avatar_state)
+			{
+				auto *avatar = captured.mutable_avatar();
+				avatar->set_stance(protocol::AVATAR_STANCE_READY);
+				avatar->set_weapon_class(
+				    protocol::AVATAR_WEAPON_CLASS_ONE_HANDED);
+				avatar->set_weapon_drawn(true);
+				avatar->set_active_weapon_set(
+				    protocol::AVATAR_WEAPON_SET_PRIMARY);
+				avatar->set_combat_mode(true);
+				avatar->set_active_in_combat(true);
+			}
+			return captured;
 		}
 		bool validate_item(
 		    const protocol::InventoryItem &item,
@@ -217,6 +231,17 @@ int main()
 	acknowledged.mutable_inventory(0)->set_count(
 	    acknowledged.inventory(0).count() + 1);
 	assert(!same_native_profile_state(target, acknowledged));
+
+	// Native capture overlays the local Human's transient combat state. That
+	// owner-authoritative observation must not make an otherwise successful
+	// profile transaction fail verification and trigger a world unload.
+	fake_backend owner_avatar;
+	owner_avatar.profile = baseline;
+	owner_avatar.definitions = success.definitions;
+	owner_avatar.observe_owner_avatar_state = true;
+	const auto owner_avatar_applied = reconcile_profile(owner_avatar, target);
+	assert(owner_avatar_applied.success);
+	assert(!owner_avatar_applied.rollback_attempted);
 
 	auto equipped_target = target;
 	auto *equipped_item = equipped_target.add_inventory();

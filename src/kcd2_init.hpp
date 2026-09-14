@@ -30,12 +30,6 @@ namespace big
 		std::vector<std::string> m_loaded_paks;
 	};
 
-	struct cvar_data
-	{
-		std::string m_help_text;
-		std::string m_default_value;
-	};
-
 	struct cry_cvar
 	{
 		virtual ~cry_cvar() = default;
@@ -57,9 +51,7 @@ namespace big
 		virtual const char *GetHelpText() const = 0;
 	};
 
-	inline std::map<std::string, cvar_data> g_cvar_name_to_cvar_data;
 	inline std::map<std::string, cry_cvar *> g_cvars;
-	inline std::map<std::string, std::string> g_console_command_name_to_help_text;
 
 	[[nodiscard]] bool engine_console_available();
 	[[nodiscard]] bool engine_console_has_command(std::string_view name);

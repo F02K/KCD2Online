@@ -15,6 +15,7 @@ namespace kcd2o::account
 		undecided,
 		declined,
 		registering,
+		recovering,
 		ready,
 		error,
 	};
@@ -23,11 +24,16 @@ namespace kcd2o::account
 	{
 		account_state state{account_state::undecided};
 		std::string account_id;
+		std::string credential_id;
+		std::string recovery_code;
 		std::string error_key;
 		std::string error_detail;
 		std::string username;
 		std::string display_name;
 		std::string locale{"en"};
+		std::string network_role{"user"};
+		std::string notice_key;
+		std::string notice_detail;
 		bool busy{};
 		std::uint64_t revision{};
 
@@ -47,6 +53,7 @@ namespace kcd2o::account
 
 		[[nodiscard]] account_status status() const;
 		void accept(std::string service_url);
+		void recover(std::string service_url, std::string recovery_code);
 		void decline();
 		void ensure_profile(std::string service_url);
 		void refresh_profile(std::string service_url);
@@ -55,6 +62,10 @@ namespace kcd2o::account
 		    std::string username,
 		    std::string display_name,
 		    std::string locale);
+		void export_data(std::string service_url);
+		void delete_account(
+		    std::string service_url,
+		    std::string confirmation_account_id);
 
 	private:
 		void set_error(std::string key, std::string detail);
@@ -64,11 +75,16 @@ namespace kcd2o::account
 		std::unique_ptr<account_store> m_store;
 		account_state m_state{account_state::undecided};
 		std::string m_account_id;
+		std::string m_credential_id;
+		std::string m_recovery_code;
 		std::string m_error_key;
 		std::string m_error_detail;
 		std::string m_username;
 		std::string m_display_name;
 		std::string m_locale{"en"};
+		std::string m_network_role{"user"};
+		std::string m_notice_key;
+		std::string m_notice_detail;
 		bool m_busy{};
 		bool m_profile_refresh_attempted{};
 		std::uint64_t m_revision{1};

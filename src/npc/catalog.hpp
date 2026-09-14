@@ -44,10 +44,6 @@ namespace kcd2o::npc
 		[[nodiscard]] bool load_documents(
 		    std::span<const catalog_document> documents,
 		    std::string &error);
-		[[nodiscard]] bool load_json(
-		    const std::filesystem::path &path,
-		    std::string &error);
-
 		[[nodiscard]] const archetype *find(std::string_view soul_id) const;
 		[[nodiscard]] bool contains(std::string_view soul_id) const;
 		[[nodiscard]] std::string normalize(std::string_view soul_id) const;
