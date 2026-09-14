@@ -85,7 +85,10 @@ namespace kcd2o::server
 	    m_moderate_account(std::move(moderate_account)),
 	    m_store(m_config),
 	    m_permissions(m_config.world_directory, m_config.permission_owners),
-	    m_npcs(m_store.manifest().level_id, m_config.npc_world_catalog_path),
+	    m_npcs(
+	        m_store.manifest().level_id,
+	        m_config.npc_world_catalog_path,
+	        m_config.simulation == simulation_mode::standalone),
 	    m_human_npcs_disabled(m_config.disable_human_npcs),
 	    m_animal_npcs_disabled(m_config.disable_animal_npcs),
 	    m_environment_anchor_world_seconds(
@@ -1550,6 +1553,14 @@ namespace kcd2o::server
 		// pending session, so an authenticated client may wait for the engine's
 		// actual level-complete signal without a wall-clock deadline.
 		pending.deadline = time_point::max();
+		if (m_config.simulation == simulation_mode::native_game
+		    && (!m_native_simulation_ready
+		        || !m_store.manifest().spawn_valid))
+		{
+			pending.stage = pending_stage::waiting_for_initializer;
+			send_bootstrap(connection, protocol::BOOTSTRAP_MODE_WAIT);
+			return;
+		}
 		if (m_store.manifest().spawn_valid)
 		{
 			pending.stage = pending_stage::loading_world;
@@ -1936,6 +1947,8 @@ namespace kcd2o::server
 	    player_session &player,
 	    const protocol::ClientWorldObjectUpdate &message)
 	{
+		if (m_config.simulation == simulation_mode::native_game)
+			return;
 		const auto reject_state = [&](
 		    const protocol::WorldObjectState &state,
 		    std::string_view reason = "world object revision conflict")
@@ -2400,6 +2413,8 @@ namespace kcd2o::server
 	    player_session &player,
 	    const protocol::ClientWorldItemUpdate &message)
 	{
+		if (m_config.simulation == simulation_mode::native_game)
+			return;
 		const auto reject_state = [&] (
 		    const protocol::WorldItemState &state,
 		    std::string_view reason = "world item revision conflict")
@@ -2652,6 +2667,11 @@ namespace kcd2o::server
 	    const protocol::ClientNpcDiscovery &message,
 	    time_point now)
 	{
+		// Native-game servers accept discovery only from their private simulation
+		// host. Until that channel is ready, fail closed instead of allowing an
+		// ordinary player to become the de-facto world simulator.
+		if (m_config.simulation == simulation_mode::native_game)
+			return;
 		m_npcs.observe(
 		    player.id,
 		    message,
@@ -2668,6 +2688,8 @@ namespace kcd2o::server
 	    const protocol::ClientNpcUpdate &message,
 	    time_point now)
 	{
+		if (m_config.simulation == simulation_mode::native_game)
+			return;
 		// Stale/revoked leases are expected during handoff and packet reordering;
 		// ignore them instead of disconnecting an otherwise valid client.
 		(void)m_npcs.update(player.id, message, now);
@@ -4075,6 +4097,7 @@ namespace kcd2o::server
 		    ? m_config.account_server_id
 		    : m_store.manifest().server_id);
 		challenge->set_central_auth_required(m_config.account_auth_enabled);
+		challenge->set_simulation_mode(to_protocol(m_config.simulation));
 		challenge->set_required_runtime_features(
 		    required_client_runtime_capabilities);
 		challenge->set_negotiated_runtime_features(
@@ -4095,6 +4118,7 @@ namespace kcd2o::server
 		bootstrap->set_level_id(m_store.manifest().level_id);
 		bootstrap->set_world_seed(m_store.manifest().world_seed);
 		bootstrap->set_mode(mode);
+		bootstrap->set_simulation_mode(to_protocol(m_config.simulation));
 		bootstrap->set_spawn_valid(m_store.manifest().spawn_valid);
 		bootstrap->set_timeout_seconds(m_config.bootstrap_timeout_seconds);
 		bootstrap->set_issued_identity_token(
@@ -4121,6 +4145,15 @@ namespace kcd2o::server
 
 	void server_core::wake_bootstrap_waiters()
 	{
+		if (m_config.simulation == simulation_mode::native_game
+		    && !m_native_simulation_ready)
+			return;
+		// The native host, never a player client, establishes the first-world
+		// spawn. Its control-channel bootstrap will persist that transform before
+		// marking the simulation ready.
+		if (m_config.simulation == simulation_mode::native_game
+		    && !m_store.manifest().spawn_valid)
+			return;
 		if (m_store.manifest().spawn_valid)
 		{
 			for (auto &[connection, pending] : m_pending)
@@ -4153,6 +4186,22 @@ namespace kcd2o::server
 			    waiter->first,
 			    protocol::BOOTSTRAP_MODE_INITIALIZE);
 		}
+	}
+
+	bool server_core::native_simulation_ready() const noexcept
+	{
+		return m_config.simulation == simulation_mode::standalone
+		    || m_native_simulation_ready;
+	}
+
+	void server_core::set_native_simulation_ready(bool ready)
+	{
+		if (m_config.simulation != simulation_mode::native_game
+		    || m_native_simulation_ready == ready)
+			return;
+		m_native_simulation_ready = ready;
+		if (ready)
+			wake_bootstrap_waiters();
 	}
 
 	void server_core::persist_player(player_session &player, time_point now)

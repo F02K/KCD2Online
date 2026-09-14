@@ -8,7 +8,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
 
-project(KCD2Online VERSION 0.1.7 LANGUAGES CXX C ASM ASM_MASM)
+project(KCD2Online VERSION 0.1.8 LANGUAGES CXX C ASM ASM_MASM)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/multiplayer/version.hpp.in"
@@ -366,6 +366,8 @@ set_property(TARGET KCD2OnlineProperty PROPERTY COMPILE_WARNING_AS_ERROR ON)
 add_library(KCD2OnlineServerCore STATIC
 	"${SRC_DIR}/server/dashboard_config.cpp"
 	"${SRC_DIR}/server/dashboard_config.hpp"
+	"${SRC_DIR}/server/game_install.cpp"
+	"${SRC_DIR}/server/game_install.hpp"
 	"${SRC_DIR}/server/item_ledger.cpp"
 	"${SRC_DIR}/server/item_ledger.hpp"
 	"${SRC_DIR}/server/npc_registry.cpp"
@@ -390,6 +392,9 @@ target_link_libraries(KCD2OnlineServerCore PUBLIC
     bcrypt
 	 nlohmann_json::nlohmann_json
 )
+if(WIN32)
+    target_link_libraries(KCD2OnlineServerCore PRIVATE advapi32)
+endif()
 target_compile_definitions(KCD2OnlineServerCore PRIVATE
     "_CRT_SECURE_NO_WARNINGS"
     "NOMINMAX"
@@ -406,6 +411,8 @@ target_sources(KCD2OnlineServer PRIVATE
 	"${SRC_DIR}/server/dashboard_server.hpp"
 	"${SRC_DIR}/server/dashboard_telemetry.cpp"
 	"${SRC_DIR}/server/dashboard_telemetry.hpp"
+	"${SRC_DIR}/server/native_game_process.cpp"
+	"${SRC_DIR}/server/native_game_process.hpp"
 )
 target_link_libraries(KCD2OnlineServerCore PRIVATE Opus::opus)
 set_property(TARGET KCD2OnlineServer PROPERTY CXX_STANDARD 23)
@@ -415,6 +422,7 @@ target_link_libraries(KCD2OnlineServer PRIVATE
     KCD2OnlineNetworking
     nlohmann_json::nlohmann_json
 	ws2_32
+	user32
     winhttp
 )
 target_compile_definitions(KCD2OnlineServer PRIVATE

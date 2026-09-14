@@ -6,6 +6,8 @@
 #include "server/dashboard_config.hpp"
 #include "server/dashboard_server.hpp"
 #include "server/dashboard_telemetry.hpp"
+#include "server/game_install.hpp"
+#include "server/native_game_process.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -96,6 +98,32 @@ int main(int argc, char **argv)
 		    ? std::filesystem::path(argv[1])
 		    : std::filesystem::path("server.toml");
 		auto config = kcd2o::server::load_server_config(config_path);
+		std::optional<kcd2o::server::game_installation>
+		    native_game_installation;
+		if (config.simulation == kcd2o::server::simulation_mode::native_game)
+		{
+			if (!config.game_root.empty())
+				native_game_installation = kcd2o::server::inspect_game_root(
+				    config.game_root, "server.toml");
+			if (!native_game_installation && config.auto_find_game)
+			{
+				const auto steam_roots =
+				    kcd2o::server::default_steam_roots();
+				native_game_installation =
+				    kcd2o::server::discover_steam_game_installation(
+				    steam_roots);
+			}
+			if (!native_game_installation)
+			{
+				throw std::runtime_error(
+				    "native_game simulation could not find a valid KCD2 installation; "
+				    "set [simulation].game_root or install Steam app 1771300");
+			}
+			config.game_root = native_game_installation->root;
+			std::cout << "native-game simulation selected; KCD2 found via "
+			          << native_game_installation->source << " at "
+			          << native_game_installation->root.string() << '\n';
+		}
 		const auto dashboard_config_path = argc > 2
 		    ? std::filesystem::path(argv[2])
 		    : std::filesystem::absolute(config_path).parent_path()
@@ -241,6 +269,30 @@ int main(int argc, char **argv)
 		        }});
 
 		transport.listen(config.bind_address, config.port);
+		std::unique_ptr<kcd2o::server::native_game_process> native_game;
+		std::optional<kcd2o::server::time_point> native_game_deadline;
+		if (native_game_installation)
+		{
+			native_game =
+			    std::make_unique<kcd2o::server::native_game_process>();
+			const auto endpoint_host = config.bind_address == "0.0.0.0"
+			        || config.bind_address == "::"
+			    ? std::string("127.0.0.1")
+			    : config.bind_address;
+			native_game->start({
+			    .installation = *native_game_installation,
+			    .server_config_path = config_path,
+			    .server_endpoint = endpoint_host + ':'
+			        + std::to_string(config.port),
+			    .level_id = config.level_id,
+			    .hide_window = config.hide_game_window});
+			native_game_deadline = now()
+			    + std::chrono::seconds(config.game_startup_timeout_seconds);
+			std::cout << "native-game process started (pid="
+			          << native_game->process_id() << ", window="
+			          << (config.hide_game_window ? "hidden" : "visible")
+			          << "); waiting for simulation-host readiness\n";
+		}
 		std::cout << config.name << " (KCD2Online " << kcd2o::kcd2o_version
 		          << ", prototype) listening on " << config.bind_address << ':'
 		          << config.port << " for level " << config.level_id << '\n';
@@ -311,6 +363,26 @@ int main(int argc, char **argv)
 		auto next_dashboard_publish = next_tick;
 		while (running)
 		{
+			if (native_game)
+			{
+				native_game->maintain_hidden_window();
+				if (!native_game->running())
+				{
+					const auto code = native_game->exit_code();
+					throw std::runtime_error(
+					    "native-game process exited before server shutdown"
+					    + (code ? " (code " + std::to_string(*code) + ')'
+					            : std::string{}));
+				}
+				if (!core.native_simulation_ready()
+				    && native_game_deadline
+				    && now() >= *native_game_deadline)
+				{
+					throw std::runtime_error(
+					    "native-game simulation host did not become ready before "
+					    "[simulation].startup_timeout_seconds elapsed");
+				}
+			}
 			transport.poll();
 			{
 				std::vector<kcd2o::server::account_restriction> restrictions;
@@ -342,7 +414,22 @@ int main(int argc, char **argv)
 					          << '/' << config.max_players
 					          << " pending=" << core.pending_connection_count()
 					          << " tick=" << core.server_tick()
-					          << " human_npcs="
+					          << " simulation="
+					          << (config.simulation
+					                      == kcd2o::server::simulation_mode::native_game
+					                  ? "native_game"
+					                  : "standalone")
+						  << " simulation_ready="
+						  << (core.native_simulation_ready() ? "yes" : "no")
+						  << " native_pid="
+						  << (native_game
+						          ? std::to_string(native_game->process_id())
+						          : "-")
+						  << " native_process="
+						  << (native_game
+						          ? (native_game->running() ? "running" : "exited")
+						          : "disabled")
+						  << " human_npcs="
 					          << (core.human_npcs_disabled()
 					                  ? "disabled"
 					                  : "enabled")

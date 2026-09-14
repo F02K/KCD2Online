@@ -895,7 +895,14 @@ namespace kcd2o
 		std::vector<protocol::WorldObjectState> world_objects;
 		std::vector<protocol::WorldItemState> world_items;
 		std::vector<protocol::NpcObservation> npc_observations;
-		if (connected)
+		protocol::ServerSimulationMode simulation_mode;
+		{
+			std::scoped_lock lock(m_state_mutex);
+			simulation_mode = m_status.simulation_mode;
+		}
+		if (connected
+		    && simulation_mode
+		        == protocol::SERVER_SIMULATION_MODE_STANDALONE)
 		{
 			world_objects = m_runtime.poll_world_object_updates();
 			world_items   = m_runtime.poll_world_item_updates();
@@ -918,8 +925,12 @@ namespace kcd2o
 		{
 			for (auto &voice : m_runtime.poll_outbound_voice())
 				queue_network(voice_command{std::move(voice)});
-			queue_world_object_updates(std::move(world_objects));
-			queue_world_item_updates(std::move(world_items));
+			if (simulation_mode
+			    == protocol::SERVER_SIMULATION_MODE_STANDALONE)
+			{
+				queue_world_object_updates(std::move(world_objects));
+				queue_world_item_updates(std::move(world_items));
+			}
 			queue_npc_observations(std::move(npc_observations), now);
 			if (item_transaction_pending)
 				m_last_profile_sent = now;
@@ -1371,6 +1382,19 @@ namespace kcd2o
 								            "invalid runtime capability negotiation");
 							        return;
 						        }
+						        if (challenge.simulation_mode()
+						                != protocol::SERVER_SIMULATION_MODE_STANDALONE
+						            && challenge.simulation_mode()
+						                != protocol::SERVER_SIMULATION_MODE_NATIVE_GAME)
+						        {
+							        set_state(
+							            client_state::disconnected,
+							            "server selected an unknown simulation mode");
+							        if (transport)
+								        transport->abort_connection(
+								            "invalid simulation mode");
+							        return;
+						        }
 						        KCD2Online_JOIN_TRACE(
 						            "join.handshake.server-challenge",
 						            std::format(
@@ -1382,6 +1406,7 @@ namespace kcd2o
 							        std::scoped_lock lock(m_state_mutex);
 							        m_server_id = server_id;
 							        m_status.server_id = server_id;
+							        m_status.simulation_mode = challenge.simulation_mode();
 							        if (!transition_state_locked(
 							                client_state::authenticating))
 							        {
@@ -1451,10 +1476,29 @@ namespace kcd2o
 							            "failed to send ClientAuthenticate");
 						        }
 					        }
-					        else if (envelope->has_server_bootstrap())
-					        {
-						        const auto &bootstrap =
-						            envelope->server_bootstrap();
+						        else if (envelope->has_server_bootstrap())
+						        {
+							        const auto &bootstrap =
+							            envelope->server_bootstrap();
+							        protocol::ServerSimulationMode expected_mode;
+							        {
+								        std::scoped_lock lock(m_state_mutex);
+								        expected_mode = m_status.simulation_mode;
+							        }
+							        if ((bootstrap.simulation_mode()
+							                 != protocol::SERVER_SIMULATION_MODE_STANDALONE
+							             && bootstrap.simulation_mode()
+							                 != protocol::SERVER_SIMULATION_MODE_NATIVE_GAME)
+							            || bootstrap.simulation_mode() != expected_mode)
+							        {
+								        set_state(
+								            client_state::disconnected,
+								            "server changed or supplied an unknown simulation mode");
+								        if (transport)
+									        transport->abort_connection(
+									            "invalid simulation mode");
+								        return;
+							        }
 						        KCD2Online_JOIN_TRACE(
 						            "join.handshake.server-bootstrap",
 						            std::format(
@@ -1487,6 +1531,7 @@ namespace kcd2o
 							        m_status.server_id = bootstrap.server_id();
 							        m_status.session_id = bootstrap.session_id();
 							        m_status.level_id = bootstrap.level_id();
+							        m_status.simulation_mode = bootstrap.simulation_mode();
 							        const auto next_state = bootstrap.mode()
 							                == protocol::BOOTSTRAP_MODE_WAIT
 							            ? client_state::waiting_for_bootstrap
@@ -2217,6 +2262,9 @@ namespace kcd2o
 			std::scoped_lock lock(m_state_mutex);
 			if (m_status.state != client_state::connected)
 				return;
+			const bool client_authority_enabled =
+			    m_status.simulation_mode
+			    == protocol::SERVER_SIMULATION_MODE_STANDALONE;
 			discovery_due =
 			    m_last_npc_discovery_sent
 			            == std::chrono::steady_clock::time_point{}
@@ -2237,12 +2285,12 @@ namespace kcd2o
 				    : mapped == m_npc_by_guid.end() ? 0 : mapped->second;
 				if (known_id == 0)
 				{
-					if (discovery_due)
+					if (client_authority_enabled && discovery_due)
 						*discovery.add_observations() = std::move(observation);
 					continue;
 				}
 				const auto state = m_npcs.find(known_id);
-				if (state == m_npcs.end()
+				if (!client_authority_enabled || state == m_npcs.end()
 				    || state->second.authority_player_id()
 				        != m_status.local_player_id
 				    || state->second.lease_id() == 0)
@@ -3100,7 +3148,9 @@ namespace kcd2o
 			m_npc_motion_revisions.insert_or_assign(
 			    state.npc_id(), state.revision());
 			const bool authority =
-			    state.authority_player_id() == m_status.local_player_id;
+			    m_status.simulation_mode
+			        == protocol::SERVER_SIMULATION_MODE_STANDALONE
+			    && state.authority_player_id() == m_status.local_player_id;
 			lock.unlock();
 			const bool applied = m_runtime.apply_npc_state(state, authority);
 			lock.lock();
@@ -3134,7 +3184,9 @@ namespace kcd2o
 			current->second.set_lease_id(message.lease_id());
 			const auto state = current->second;
 			const bool authority =
-			    state.authority_player_id() == m_status.local_player_id;
+			    m_status.simulation_mode
+			        == protocol::SERVER_SIMULATION_MODE_STANDALONE
+			    && state.authority_player_id() == m_status.local_player_id;
 			lock.unlock();
 			(void)m_runtime.apply_npc_state(state, authority);
 			lock.lock();
@@ -3162,7 +3214,9 @@ namespace kcd2o
 				m_npc_by_guid.insert_or_assign(
 				    merged.authored_guid(), merged.npc_id());
 				const bool authority =
-				    merged.authority_player_id() == m_status.local_player_id;
+				    m_status.simulation_mode
+				        == protocol::SERVER_SIMULATION_MODE_STANDALONE
+				    && merged.authority_player_id() == m_status.local_player_id;
 				lock.unlock();
 				(void)m_runtime.apply_npc_state(merged, authority);
 				lock.lock();
@@ -3186,7 +3240,9 @@ namespace kcd2o
 				motion_revision = motion.revision();
 				const auto state = current->second;
 				const bool authority =
-				    state.authority_player_id() == m_status.local_player_id;
+				    m_status.simulation_mode
+				        == protocol::SERVER_SIMULATION_MODE_STANDALONE
+				    && state.authority_player_id() == m_status.local_player_id;
 				lock.unlock();
 				(void)m_runtime.apply_npc_state(state, authority);
 				lock.lock();
@@ -3214,7 +3270,9 @@ namespace kcd2o
 			    current->second.revision(), message.state_revision()));
 			const auto state = current->second;
 			const bool authority =
-			    state.authority_player_id() == m_status.local_player_id;
+			    m_status.simulation_mode
+			        == protocol::SERVER_SIMULATION_MODE_STANDALONE
+			    && state.authority_player_id() == m_status.local_player_id;
 			lock.unlock();
 			(void)m_runtime.apply_npc_state(state, authority);
 			lock.lock();

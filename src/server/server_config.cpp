@@ -79,6 +79,24 @@ namespace kcd2o::server
 		}
 
 		server_config config;
+		if (const auto *simulation = document["simulation"].as_table())
+		{
+			const auto mode = (*simulation)["mode"].value_or(std::string{"standalone"});
+			if (mode == "standalone")
+				config.simulation = simulation_mode::standalone;
+			else if (mode == "native_game")
+				config.simulation = simulation_mode::native_game;
+			else
+				throw std::runtime_error(
+				    "[simulation].mode must be 'standalone' or 'native_game'");
+			config.game_root = (*simulation)["game_root"].value_or(std::string{});
+			config.auto_find_game = (*simulation)["auto_find_game"].value_or(true);
+			config.hide_game_window = (*simulation)["hide_game_window"].value_or(true);
+			config.game_startup_timeout_seconds = checked_integer(
+			    *simulation,
+			    "startup_timeout_seconds",
+			    config.game_startup_timeout_seconds);
+		}
 		config.bind_address = (*server)["bind_address"].value_or(config.bind_address);
 		config.port = checked_integer(*server, "port", config.port);
 		config.name = (*server)["name"].value_or(config.name);
@@ -112,6 +130,9 @@ namespace kcd2o::server
 			config.account_identity_file =
 			    std::filesystem::absolute(path).parent_path()
 			    / config.account_identity_file;
+		if (!config.game_root.empty() && config.game_root.is_relative())
+			config.game_root = std::filesystem::absolute(path).parent_path()
+			    / config.game_root;
 		config.level_id = (*server)["level_id"].value_or(std::string{});
 		config.required_content_hash =
 		    (*server)["required_content_hash"].value_or(std::string{});
@@ -338,6 +359,18 @@ namespace kcd2o::server
 
 	void validate_server_config(const server_config &config)
 	{
+		if (config.simulation == simulation_mode::native_game
+		    && config.game_root.empty() && !config.auto_find_game)
+		{
+			throw std::runtime_error(
+			    "native_game simulation requires [simulation].game_root or auto_find_game=true");
+		}
+		if (config.game_startup_timeout_seconds < 30
+		    || config.game_startup_timeout_seconds > 600)
+		{
+			throw std::runtime_error(
+			    "[simulation].startup_timeout_seconds must be between 30 and 600");
+		}
 		if (config.bind_address.empty())
 		{
 			throw std::runtime_error("bind_address must not be empty");

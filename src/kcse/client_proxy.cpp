@@ -204,6 +204,12 @@ namespace kcd2o::kcse
 		result.server_id                 = value.server_id;
 		result.session_id                = value.session_id;
 		result.level_id                  = value.level_id;
+		if (protocol::ServerSimulationMode_IsValid(
+		        static_cast<int>(value.simulation_mode)))
+		{
+			result.simulation_mode =
+			    static_cast<protocol::ServerSimulationMode>(value.simulation_mode);
+		}
 		result.error                     = value.error;
 		result.avatar_archetype_id       = value.avatar_archetype_id;
 		result.sleeping                  = value.sleeping != 0;

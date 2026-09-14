@@ -41,7 +41,8 @@ namespace kcd2o::server
 		npc_registry() = default;
 		npc_registry(
 		    std::string level_id,
-		    const std::filesystem::path &catalog_path);
+		    const std::filesystem::path &catalog_path,
+		    bool allow_player_authority = true);
 
 		void observe(
 		    player_id reporter,
@@ -88,5 +89,6 @@ namespace kcd2o::server
 		std::unordered_map<std::uint64_t, protocol::NpcKind> m_catalog;
 		std::uint64_t m_next_lease_id{};
 		bool m_catalog_required{};
+		bool m_allow_player_authority{true};
 	};
 }

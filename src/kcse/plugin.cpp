@@ -655,6 +655,7 @@ namespace
 			result->property_operation_generation = status.property_operation_generation;
 			result->property_operation_success = status.property_operation_success ? 1U : 0U;
 			copy_text(result->property_operation_message, status.property_operation_message);
+			result->simulation_mode = static_cast<std::uint32_t>(status.simulation_mode);
 			result->network_role                 = static_cast<std::uint32_t>(status.network_role);
 			std::string permissions;
 			for (const auto &permission : status.effective_permissions)

@@ -107,7 +107,9 @@ namespace kcd2o::server
 
 	npc_registry::npc_registry(
 	    std::string level_id,
-	    const std::filesystem::path &catalog_path)
+	    const std::filesystem::path &catalog_path,
+	    bool allow_player_authority) :
+	    m_allow_player_authority(allow_player_authority)
 	{
 		if (catalog_path.empty() || !std::filesystem::is_regular_file(catalog_path))
 			return;
@@ -479,7 +481,7 @@ namespace kcd2o::server
 		for (auto &[npc_id, entry] : m_entries)
 		{
 			const auto current = entry.state.authority_player_id();
-			const bool valid_current = current != 0
+			const bool valid_current = m_allow_player_authority && current != 0
 			    && now < entry.lease_expires
 			    && m_interest.contains(current)
 			    && m_interest.at(current).contains(npc_id);
@@ -490,6 +492,8 @@ namespace kcd2o::server
 			float best = std::numeric_limits<float>::max();
 			for (const auto &player : players)
 			{
+				if (!m_allow_player_authority)
+					break;
 				if (!player.connected || !player.transform)
 					continue;
 				const auto interest = m_interest.find(player.id);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "multiplayer/protocol.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -12,6 +14,20 @@
 
 namespace kcd2o::server
 {
+	enum class simulation_mode
+	{
+		standalone,
+		native_game
+	};
+
+	[[nodiscard]] constexpr protocol::ServerSimulationMode to_protocol(
+	    simulation_mode mode) noexcept
+	{
+		return mode == simulation_mode::native_game
+		    ? protocol::SERVER_SIMULATION_MODE_NATIVE_GAME
+		    : protocol::SERVER_SIMULATION_MODE_STANDALONE;
+	}
+
 	struct initial_spawn_config
 	{
 		float x{};
@@ -25,6 +41,11 @@ namespace kcd2o::server
 
 	struct server_config
 	{
+		simulation_mode simulation{simulation_mode::standalone};
+		std::filesystem::path game_root;
+		bool auto_find_game{true};
+		bool hide_game_window{true};
+		std::uint32_t game_startup_timeout_seconds{180};
 		std::string bind_address{"0.0.0.0"};
 		std::uint16_t port{27020};
 		std::string name{"KCD2Online Server"};

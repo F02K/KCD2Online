@@ -9,7 +9,7 @@ licensing. Warhorse Studios, PLAION, Deep Silver, and the platform operators do
 not endorse or operate this project.
 
 > [!WARNING]
-> KCD2Online **v0.1.7 is a prototype**, not a production-ready multiplayer mod.
+> KCD2Online **v0.1.8 is a prototype**, not a production-ready multiplayer mod.
 > Expect breaking changes, incomplete world simulation, compatibility limits,
 > and loss of multiplayer-world data while development continues. Use test
 > saves and keep backups of anything important.
@@ -18,7 +18,7 @@ not endorse or operate this project.
 
 | | |
 | --- | --- |
-| Current version | **0.1.7** |
+| Current version | **0.1.8** |
 | Development stage | Prototype / technical preview |
 | Networking | Direct IP, dedicated authoritative server |
 | Platform | Windows x64 |
@@ -34,7 +34,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 > NPC synchronization is still unreliable. A known bug can cause the same NPC
 > to spawn multiple times, so NPC sync is not yet suitable for normal play.
 
-## What works in v0.1.7
+## What works in v0.1.8
 
 - Direct-IP client/server connection with authentication and reconnect support
 - Native main-menu onboarding for the anonymous KCD2Online account service,
@@ -120,7 +120,7 @@ Every successful build also creates a clean package tree under
 `out/package/<debug|release>/`:
 
 ```text
-client/   install-ready game tree and KCD2Online-Client-v0.1.7.zip
+client/   install-ready game tree and KCD2Online-Client-v0.1.8.zip
 server/   dedicated server, configuration, data, symbols, and audit tool
 tests/    test executables and their symbols only
 SHA256SUMS.txt
@@ -282,6 +282,7 @@ and full NPC/quest simulation remain manual or future work.
 ## Additional documentation
 
 - [Multiplayer architecture and status](docs/multiplayer.md)
+- [Native-game server mode and reversing baseline](docs/native-game-server.md)
 - [Version history](CHANGELOG.md)
 - [libKCD2/KCSE migration audit](docs/libkcd2-kcse-migration.md)
 - [Vendor integration](docs/libkcd2-vendor.md)

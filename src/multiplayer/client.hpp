@@ -67,6 +67,8 @@ namespace kcd2o
 		std::string server_id;
 		std::string session_id;
 		std::string level_id;
+		protocol::ServerSimulationMode simulation_mode{
+		    protocol::SERVER_SIMULATION_MODE_STANDALONE};
 		std::string error;
 		int ping_ms{-1};
 		float packet_loss_percent{};

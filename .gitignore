@@ -6,6 +6,7 @@
 
 # output directory
 build/
+/build-*/
 out/
 /game_data/
 __pycache__/

@@ -1,8 +1,10 @@
 #include "property/catalog.hpp"
 #include "server/server_core.hpp"
+#include "server/game_install.hpp"
 
 #include <Windows.h>
 
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -299,11 +301,15 @@ namespace
 		auto outbound = core.take_outbound();
 		assert(outbound.size() == 1);
 		assert(outbound.front().envelope.has_server_challenge());
+		assert(outbound.front().envelope.server_challenge().simulation_mode()
+		    == protocol::SERVER_SIMULATION_MODE_STANDALONE);
 
 		core.on_message(connection, enroll(), now + 1ms);
 		outbound = core.take_outbound();
 		const auto bootstrap = find_bootstrap(outbound, connection);
 		assert(bootstrap.mode() == protocol::BOOTSTRAP_MODE_LOAD);
+		assert(bootstrap.simulation_mode()
+		    == protocol::SERVER_SIMULATION_MODE_STANDALONE);
 		assert(bootstrap.has_environment());
 		assert(is_valid_environment_state(bootstrap.environment()));
 		assert(!bootstrap.issued_identity_token().empty());
@@ -386,7 +392,13 @@ int main()
 		    parsed_config_world.path / "starter_profile.toml");
 		std::ofstream output(path);
 		output
-		    << "[server]\n"
+		    << "[simulation]\n"
+		       "mode = \"native_game\"\n"
+		       "game_root = \"retail-game\"\n"
+		       "auto_find_game = false\n"
+		       "hide_game_window = true\n"
+		       "startup_timeout_seconds = 240\n"
+		       "[server]\n"
 		       "level_id = \"sandbox\"\n"
 		       "default_avatar_archetype = \"11111111-2222-4333-8444-555555555555\"\n"
 		       "allowed_avatar_archetypes = [\"11111111-2222-4333-8444-555555555555\"]\n"
@@ -423,6 +435,12 @@ int main()
 		       "owners = [\"11111111-2222-4333-8444-555555555555\"]\n";
 		output.close();
 		const auto parsed = load_server_config(path);
+		assert(parsed.simulation == simulation_mode::native_game);
+		assert(parsed.game_root
+		    == parsed_config_world.path / "retail-game");
+		assert(!parsed.auto_find_game);
+		assert(parsed.hide_game_window);
+		assert(parsed.game_startup_timeout_seconds == 240);
 		assert(parsed.disable_human_npcs);
 		assert(parsed.default_avatar_archetype == custom_soul);
 		assert(parsed.known_avatar_archetypes.contains(std::string(custom_soul)));
@@ -454,6 +472,70 @@ int main()
 		assert(parsed.account_server_key.empty());
 		assert(parsed.account_identity_file
 		    == parsed_config_world.path / "server-identity.json");
+	}
+
+	{
+		temporary_world discovery_world;
+		const auto steam = discovery_world.path / "Steam";
+		const auto library = discovery_world.path / "Games";
+		std::filesystem::create_directories(steam / "steamapps");
+		std::filesystem::create_directories(library / "steamapps" / "common");
+		{
+			std::ofstream libraries(steam / "steamapps" / "libraryfolders.vdf");
+			auto escaped = library.string();
+			std::string vdf_path;
+			for (const auto character : escaped)
+				vdf_path += character == '\\' ? "\\\\" : std::string(1, character);
+			libraries << "\"libraryfolders\" { \"1\" { \"path\" \""
+			          << vdf_path << "\" } }\n";
+		}
+		{
+			std::ofstream manifest(
+			    library / "steamapps" / "appmanifest_1771300.acf");
+			manifest << "\"AppState\" { \"appid\" \"1771300\" "
+			            "\"installdir\" \"KingdomComeDeliverance2\" }\n";
+		}
+		const auto root = library / "steamapps" / "common"
+		    / "KingdomComeDeliverance2";
+		const auto binary = root / kcd2_binary_directory;
+		std::filesystem::create_directories(binary);
+		std::ofstream(binary / "KingdomCome.exe").put('\0');
+		std::ofstream(binary / "WHGame.dll").put('\0');
+
+		const std::array roots{steam};
+		const auto discovered = discover_steam_game_installation(roots);
+		assert(discovered);
+		assert(discovered->root == std::filesystem::weakly_canonical(root));
+		assert(discovered->source.contains("1771300"));
+		const auto explicit_binary = inspect_game_root(binary, "test");
+		assert(explicit_binary && explicit_binary->root == discovered->root);
+	}
+
+	{
+		temporary_world native_wire_world;
+		auto config = config_for(native_wire_world.path);
+		config.simulation = simulation_mode::native_game;
+		config.initial_spawn = initial_spawn_config{
+		    1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+		server_core core(config);
+		core.on_transport_connected(99, start);
+		core.on_message(99, hello(), start);
+		auto outbound = core.take_outbound();
+		assert(outbound.size() == 1);
+		assert(outbound.front().envelope.server_challenge().simulation_mode()
+		    == protocol::SERVER_SIMULATION_MODE_NATIVE_GAME);
+		core.on_message(99, enroll(), start + 1ms);
+		outbound = core.take_outbound();
+		const auto waiting = find_bootstrap(outbound, 99);
+		assert(waiting.mode() == protocol::BOOTSTRAP_MODE_WAIT);
+		assert(waiting.simulation_mode()
+		    == protocol::SERVER_SIMULATION_MODE_NATIVE_GAME);
+		assert(!core.native_simulation_ready());
+		core.set_native_simulation_ready(true);
+		outbound = core.take_outbound();
+		const auto loading = find_bootstrap(outbound, 99);
+		assert(loading.mode() == protocol::BOOTSTRAP_MODE_LOAD);
+		assert(core.native_simulation_ready());
 	}
 
 	temporary_world roleplay_world;

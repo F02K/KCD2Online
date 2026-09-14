@@ -20,8 +20,10 @@ class RebrandingTests(unittest.TestCase):
             ".pytest_cache",
             ".venv-build",
             "__pycache__",
+            "bin",
             "build",
             "libKCD2",
+            "obj",
             "out",
             "vendor",
         }
@@ -47,7 +49,11 @@ class RebrandingTests(unittest.TestCase):
         }
 
         for directory, names, files in os.walk(PROJECT_ROOT):
-            names[:] = [name for name in names if name not in ignored_directories]
+            names[:] = [
+                name
+                for name in names
+                if name not in ignored_directories and not name.startswith("build-")
+            ]
             for entry_name in (*names, *files):
                 if FORMER_PROJECT_NAME.casefold() in entry_name.casefold():
                     matches.append(Path(directory, entry_name).relative_to(PROJECT_ROOT))
@@ -70,7 +76,7 @@ class RebrandingTests(unittest.TestCase):
         match = re.search(r"project\(KCD2Online VERSION ([0-9]+\.[0-9]+\.[0-9]+)", cmake)
         self.assertIsNotNone(match)
         version = match.group(1)
-        self.assertEqual(version, "0.1.7")
+        self.assertEqual(version, "0.1.8")
 
         manifest = json.loads((PROJECT_ROOT / "vcpkg.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["version-string"], version)
@@ -91,7 +97,15 @@ class RebrandingTests(unittest.TestCase):
 
     def test_old_name_only_remains_in_readme_attribution(self) -> None:
         matches = []
-        ignored_directories = {".git", "build", "out", ".venv-build", "__pycache__"}
+        ignored_directories = {
+            ".git",
+            "bin",
+            "build",
+            "obj",
+            "out",
+            ".venv-build",
+            "__pycache__",
+        }
         text_suffixes = {
             ".bat",
             ".cmake",
@@ -112,7 +126,11 @@ class RebrandingTests(unittest.TestCase):
             ".yaml",
         }
         for directory, names, files in os.walk(PROJECT_ROOT):
-            names[:] = [name for name in names if name not in ignored_directories]
+            names[:] = [
+                name
+                for name in names
+                if name not in ignored_directories and not name.startswith("build-")
+            ]
             for file_name in files:
                 path = Path(directory) / file_name
                 if path.suffix.lower() not in text_suffixes and path.name != "CMakeLists.txt":
@@ -135,7 +153,7 @@ class RebrandingTests(unittest.TestCase):
         )
 
         self.assertIn("project(KCD2Online", cmake)
-        self.assertIn("project(KCD2Online VERSION 0.1.7", cmake)
+        self.assertIn("project(KCD2Online VERSION 0.1.8", cmake)
         self.assertIn("generated/kcd2o_version.hpp", cmake)
         self.assertIn("GENERATED_RESOURCE_FILE", cmake)
         self.assertIn("add_library(KCD2Online", cmake)

@@ -139,6 +139,8 @@ namespace kcd2o::server
 		[[nodiscard]] std::size_t pending_connection_count() const;
 		[[nodiscard]] std::uint64_t server_tick() const;
 		[[nodiscard]] const server_config &config() const;
+		[[nodiscard]] bool native_simulation_ready() const noexcept;
+		void set_native_simulation_ready(bool ready);
 		void apply_account_restrictions(
 		    const std::vector<account_restriction> &restrictions,
 		    time_point now);
@@ -426,6 +428,7 @@ namespace kcd2o::server
 		std::uint64_t m_next_dummy_index{1};
 		bool m_human_npcs_disabled{};
 		bool m_animal_npcs_disabled{};
+		bool m_native_simulation_ready{};
 		std::uint64_t m_environment_revision{1};
 		std::uint64_t m_weather_revision{1};
 		double m_environment_anchor_world_seconds{};

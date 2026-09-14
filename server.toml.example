@@ -1,3 +1,15 @@
+[simulation]
+# standalone = lightweight dedicated server with temporary client NPC leases.
+# native_game = one server-owned KCD2 process simulates the world. Player
+# clients never receive NPC simulation authority in this mode.
+mode = "standalone"
+# Leave empty to discover the Steam installation automatically. An explicit
+# path must point at the KingdomComeDeliverance2 directory.
+game_root = ""
+auto_find_game = true
+hide_game_window = true
+startup_timeout_seconds = 180
+
 [server]
 bind_address = "0.0.0.0"
 port = 27020

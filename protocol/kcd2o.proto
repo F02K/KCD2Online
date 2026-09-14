@@ -57,6 +57,14 @@ enum BootstrapMode {
   BOOTSTRAP_MODE_LOAD = 2;
 }
 
+// Selects which process advances native world simulation. Standalone keeps the
+// existing dedicated-server/client-lease model. Native game reserves authority
+// for the server-owned KCD2 process and never falls back to a player client.
+enum ServerSimulationMode {
+  SERVER_SIMULATION_MODE_STANDALONE = 0;
+  SERVER_SIMULATION_MODE_NATIVE_GAME = 1;
+}
+
 message Vec3 {
   float x = 1;
   float y = 2;
@@ -201,6 +209,7 @@ message ServerChallenge {
   uint64 required_runtime_features = 2;
   uint64 negotiated_runtime_features = 3;
   bool central_auth_required = 4;
+  ServerSimulationMode simulation_mode = 5;
 }
 
 message ClientAuthenticate {
@@ -288,6 +297,7 @@ message ServerBootstrap {
   repeated WorldObjectState world_objects = 12;
   EnvironmentState environment = 13;
   repeated WorldItemState world_items = 14;
+  ServerSimulationMode simulation_mode = 15;
 }
 
 message ClientWorldReady {

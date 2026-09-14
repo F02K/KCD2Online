@@ -8,6 +8,23 @@ changes. Client and server versions must match exactly.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-08-28
+
+### Added
+
+- Added a configurable native-game server simulation mode with automatic
+  Kingdom Come: Deliverance II Steam-install discovery.
+- Advertised the selected simulation mode during connection bootstrap so
+  clients can select the matching authority behavior.
+- Documented the first streaming-camera and player-scheduler proxy reversing
+  results for a single-process, multi-anchor native simulation host.
+
+### Changed
+
+- Native-game servers no longer grant NPC authority leases to players and
+  keep joining clients in the bootstrap wait state until the native simulation
+  reports ready.
+
 ## [0.1.7] - 2026-08-28
 
 ### Added

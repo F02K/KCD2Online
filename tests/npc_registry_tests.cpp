@@ -142,6 +142,20 @@ int main()
 	    { return event.kind == npc_registry::event_kind::leave; }));
 	assert(registry.states_for(1).empty());
 
+	// Native-game servers fail closed: ordinary players can establish interest
+	// but can never receive a simulation lease.
+	first_position = transform(0.0F);
+	players[0].connected = true;
+	players[1].connected = false;
+	npc_registry native_registry({}, {}, false);
+	native_registry.observe(1, discovery, &first_position, true, true, start);
+	const auto native_events = native_registry.reconcile(players, start);
+	(void)native_events;
+	const auto native_states = native_registry.states_for(1);
+	assert(native_states.size() == 1);
+	assert(native_states.front().authority_player_id() == 0);
+	assert(native_states.front().lease_id() == 0);
+
 	protocol::ClientNpcDiscovery animal_discovery;
 	auto *animal = animal_discovery.add_observations();
 	animal->set_authored_guid(0x5678);
