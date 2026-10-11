@@ -152,7 +152,7 @@ int main()
 	static_assert(sizeof(fixed_string) == 64);
 	static_assert(sizeof(connect_request) == 836);
 	static_assert(sizeof(runtime_status) == 424);
-	static_assert(sizeof(client_status_view) == 2064);
+	static_assert(sizeof(client_status_view) == 2072);
 	static_assert(sizeof(remote_player_view) == 152);
 	static_assert(sizeof(chat_entry_view) == 344);
 	static_assert(sizeof(resource_ui_event_request) == 33028);

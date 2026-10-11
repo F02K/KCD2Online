@@ -1,5 +1,7 @@
 #pragma once
 
+#include "resources/resource_features.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -85,6 +87,8 @@ namespace kcd2o::resources
 		    std::string_view hash) const noexcept;
 		[[nodiscard]] const resource_definition *definition(
 		    std::string_view id) const noexcept;
+		[[nodiscard]] bool has_server_capability(
+		    std::string_view capability) const noexcept;
 	};
 
 	[[nodiscard]] bool valid_resource_id(std::string_view value) noexcept;

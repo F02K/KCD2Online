@@ -7,6 +7,7 @@
 #include "multiplayer/remote_transform_sequence.hpp"
 #include "multiplayer/runtime.hpp"
 #include "multiplayer/client_resources.hpp"
+#include "resources/resource_features.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -94,6 +95,7 @@ namespace kcd2o
 		std::uint32_t property_operation_generation{};
 		bool property_operation_success{};
 		std::string property_operation_message;
+		std::uint64_t resource_features{};
 		bool environment_available{};
 		double time_of_day_hours{};
 		float time_scale{};
@@ -107,6 +109,12 @@ namespace kcd2o
 		std::uint64_t restriction_expires_at_unix_ms{};
 		std::string restriction_reference_id;
 		std::string support_url;
+
+		[[nodiscard]] bool has_resource_feature(
+		    resources::builtin_feature feature) const noexcept
+		{
+			return (resource_features & resources::feature_bit(feature)) != 0;
+		}
 	};
 
 	struct client_update_rates

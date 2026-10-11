@@ -1,0 +1,13 @@
+[resource]
+id = "default_voice_chat"
+version = "1.0.0"
+api_version = 1
+dependencies = []
+
+[server]
+entry = "server/main.lua"
+capabilities = ["feature.voice_chat"]
+
+[client]
+entry = "client/main.lua"
+capabilities = ["feature.voice_chat", "input", "voice", "ui"]

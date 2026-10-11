@@ -377,6 +377,8 @@ namespace kcd2o::server
 		[[nodiscard]] bool has_permission(
 		    const player_session &player,
 		    std::string_view permission) const;
+		[[nodiscard]] bool resource_feature_enabled(
+		    resources::builtin_feature feature) const noexcept;
 		void send_property_result(
 		    player_session &player,
 		    bool success,
@@ -407,6 +409,7 @@ namespace kcd2o::server
 		void persist_world_items();
 		void remove_owned_items_from_world();
 		void rebuild_avatar_equipment(player_session &player);
+		void start_resources();
 		void tick_dummies(time_point now);
 		void begin_dummy_input(player_session &player, time_point now);
 		[[nodiscard]] static std::uint64_t next_dummy_random(

@@ -30,9 +30,6 @@ namespace big::ingame_player_hub
 
 		std::atomic_bool g_open{};
 		std::atomic_bool g_can_open{};
-		std::atomic_bool g_f2_down{};
-		std::atomic_bool g_native_bindings_active{};
-		std::atomic<std::uint64_t> g_suppress_native_until_ms{};
 
 		void set_open(bool open) noexcept
 		{
@@ -703,32 +700,23 @@ namespace big::ingame_player_hub
 	{
 		auto &client      = kcd2o::kcse::ui_client();
 		const auto status = client.status();
-		static std::uint32_t player_hub_action_generation{};
+		const auto feature_enabled = status.has_resource_feature(
+		    kcd2o::resources::builtin_feature::player_hub);
+		const auto voice_enabled = status.has_resource_feature(
+		    kcd2o::resources::builtin_feature::voice_chat);
 		static bool disconnect_confirmation{};
 		static double feedback_until{};
 		static bool voice_settings_applied{};
-		if (!voice_settings_applied && client.available())
+		if (voice_enabled && !voice_settings_applied && client.available())
 		{
 			voice_settings_applied = apply_voice_settings(client, false);
 			client.refresh_voice_devices();
 		}
-		const auto available = (status.state == kcd2o::client_state::connected || status.state == kcd2o::client_state::reconnecting) && !another_panel_open;
+		const auto available = feature_enabled
+		    && (status.state == kcd2o::client_state::connected
+		        || status.state == kcd2o::client_state::reconnecting)
+		    && !another_panel_open;
 		g_can_open.store(available, std::memory_order_release);
-		g_native_bindings_active.store(status.native_keybinds, std::memory_order_release);
-		if (status.player_hub_action_generation != player_hub_action_generation)
-		{
-			player_hub_action_generation = status.player_hub_action_generation;
-			const auto suppress_until    = g_suppress_native_until_ms.exchange(0, std::memory_order_acq_rel);
-			if (suppress_until != 0 && GetTickCount64() <= suppress_until)
-			{
-				// F2 already closed the input-capturing panel through the window
-				// message path. Consume the matching native action generation.
-			}
-			else if (available)
-			{
-				set_open(!g_open.load(std::memory_order_acquire));
-			}
-		}
 		if (!available)
 		{
 			set_open(false);
@@ -810,7 +798,8 @@ namespace big::ingame_player_hub
 					draw_controls();
 					ImGui::EndTabItem();
 				}
-				if (ImGui::BeginTabItem(text("hub.tab.voice").c_str()))
+				if (voice_enabled
+				    && ImGui::BeginTabItem(text("hub.tab.voice").c_str()))
 				{
 					draw_voice(status, client, scale);
 					ImGui::EndTabItem();
@@ -832,42 +821,19 @@ namespace big::ingame_player_hub
 	{
 		if (message == WM_KILLFOCUS)
 		{
-			g_f2_down.store(false, std::memory_order_release);
 			set_open(false);
-			return;
-		}
-		if (wparam == VK_F2)
-		{
-			if (message == WM_KEYUP)
-			{
-				g_f2_down.store(false, std::memory_order_release);
-				return;
-			}
-			if (message == WM_KEYDOWN && !g_f2_down.exchange(true, std::memory_order_acq_rel))
-			{
-				if (g_open.load(std::memory_order_acquire))
-				{
-					set_open(false);
-					if (g_native_bindings_active.load(std::memory_order_acquire))
-					{
-						g_suppress_native_until_ms.store(GetTickCount64() + 500, std::memory_order_release);
-					}
-				}
-				else if (g_native_bindings_active.load(std::memory_order_acquire))
-				{
-					return;
-				}
-				else if (g_can_open.load(std::memory_order_acquire))
-				{
-					set_open(true);
-				}
-			}
 			return;
 		}
 		if (message == WM_KEYDOWN && wparam == VK_ESCAPE && g_open.load(std::memory_order_acquire))
 		{
 			set_open(false);
 		}
+	}
+
+	void toggle_from_resource() noexcept
+	{
+		if (g_open.load(std::memory_order_acquire)) set_open(false);
+		else if (g_can_open.load(std::memory_order_acquire)) set_open(true);
 	}
 
 	bool blocks_game_input() noexcept

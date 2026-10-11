@@ -23,6 +23,7 @@ This API is separate from the local mod-loader API documented under `docs/lua/`.
 | Register player-configurable actions | Server logic, built-in client input runtime | No | [Keybinds](api/keybinds.md) |
 | Exchange custom JSON messages | Server and client | Yes | [Custom events](api/custom-events.md) |
 | Run local Lua behavior | Client | Yes | [Client API](api/client-api.md) |
+| Enable or replace bundled product features | Server and client | Depends on feature | [Built-in feature providers](api/builtin-features.md) |
 | Understand downloads and caching | Server and client runtime | Only for downloadable resources | [Delivery and cache](operations/delivery-and-cache.md) |
 
 ## Resource model
@@ -87,6 +88,7 @@ end)
 - [Declarative UI](api/ui.md)
 - [Keybinds](api/keybinds.md)
 - [Client API](api/client-api.md)
+- [Built-in feature providers](api/builtin-features.md)
 
 ### Operations
 
@@ -100,4 +102,6 @@ end)
 - [Client/server event round trip](examples/client-server-events.md)
 - [Modular announcements with timers](examples/modular-announcements.md)
 
-The server ZIP contains this entire documentation tree and the runnable `welcome_ui` and `event_example` resources. Server operators do not need a source checkout, KCSE installation, SDK, or separate Lua runtime.
+The server ZIP contains this entire documentation tree, the runnable examples,
+and the individually removable `default_*` feature providers. Server operators
+do not need a source checkout, KCSE installation, SDK, or separate Lua runtime.

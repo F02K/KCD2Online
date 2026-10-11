@@ -31,6 +31,9 @@ namespace kcd2o
 		resources::unpacked_package package;
 		std::unique_ptr<scripting::lua_sandbox> lua;
 		std::unordered_map<std::string, std::vector<int>> events;
+		std::unordered_map<std::string, std::vector<int>> inputs;
+		std::vector<int> ui_callbacks;
+		std::uint64_t enabled_features{};
 		std::uint32_t errors{};
 		bool disabled{};
 	};
@@ -43,6 +46,23 @@ namespace kcd2o
 			return sandbox
 			    ? static_cast<client_resources::instance *>(sandbox->owner())
 			    : nullptr;
+		}
+
+		bool has_client_capability(
+		    const client_resources::instance &resource,
+		    std::string_view capability)
+		{
+			return std::ranges::find(
+			    resource.package.definition.client_capabilities, capability)
+			    != resource.package.definition.client_capabilities.end();
+		}
+
+		void need_client_capability(lua_State *state, std::string_view capability)
+		{
+			auto *resource = self(state);
+			if (!resource || !has_client_capability(*resource, capability))
+				luaL_error(state, "client capability '%s' is not declared",
+				    std::string(capability).c_str());
 		}
 
 		const resources::event_definition *find_event(
@@ -89,7 +109,131 @@ namespace kcd2o
 			return 0;
 		}
 
-		void install_events(lua_State *state)
+		int api_features_enable(lua_State *state)
+		{
+			auto *resource = self(state);
+			const auto *name = luaL_checkstring(state, 1);
+			const auto feature = resources::builtin_feature_from_name(name ? name : "");
+			if (!resource || !feature)
+				return luaL_error(state, "unknown built-in feature");
+			const auto capability = resources::builtin_feature_capability(*feature);
+			if (std::ranges::find(resource->package.definition.client_capabilities,
+			        capability)
+			    == resource->package.definition.client_capabilities.end())
+				return luaL_error(state, "client feature capability is not declared");
+			resource->enabled_features |= resources::feature_bit(*feature);
+			return 0;
+		}
+
+		int api_input_on(lua_State *state)
+		{
+			need_client_capability(state, "input");
+			auto *resource = self(state);
+			const auto *action = luaL_checkstring(state, 1);
+			luaL_checktype(state, 2, LUA_TFUNCTION);
+			if (!resources::valid_resource_event_name(action))
+				return luaL_error(state, "invalid local input action id");
+			resource->inputs[action].push_back(
+			    resource->lua->reference_function(2));
+			return 0;
+		}
+
+		int api_input_bind(lua_State *state)
+		{
+			need_client_capability(state, "input");
+			auto *resource = self(state);
+			const auto *action = luaL_checkstring(state, 1);
+			size_t label_size{};
+			const auto *label = luaL_checklstring(state, 2, &label_size);
+			const auto key = static_cast<std::uint32_t>(luaL_checkinteger(state, 3));
+			const bool emit_release = lua_toboolean(state, 4) != 0;
+			if (!resources::valid_resource_event_name(action) || label_size == 0
+			    || label_size > 384 || key == 0 || key > 255 || key == 0x77)
+				return luaL_error(state, "invalid local input binding");
+			if (!resource->runtime->register_local_binding(
+			        resource->package.definition.id, action,
+			        std::string_view(label, label_size), key, emit_release))
+				return luaL_error(state, "local input binding limit exceeded");
+			return 0;
+		}
+
+		protocol::VoiceRange checked_voice_range(lua_State *state, int index)
+		{
+			if (lua_isnoneornil(state, index))
+				return protocol::VOICE_RANGE_NORMAL;
+			const auto value = std::string_view(luaL_checkstring(state, index));
+			if (value == "whisper") return protocol::VOICE_RANGE_WHISPER;
+			if (value == "normal") return protocol::VOICE_RANGE_NORMAL;
+			if (value == "shout") return protocol::VOICE_RANGE_SHOUT;
+			luaL_error(state, "voice range must be whisper, normal, or shout");
+			return protocol::VOICE_RANGE_NORMAL;
+		}
+
+		int api_voice_set_transmitting(lua_State *state)
+		{
+			need_client_capability(state, "voice");
+			auto *resource = self(state);
+			if ((resource->enabled_features
+			        & resources::feature_bit(resources::builtin_feature::voice_chat)) == 0)
+				return luaL_error(state, "voice_chat feature is not enabled");
+			resource->runtime->set_voice_transmitting(
+			    lua_toboolean(state, 1) != 0, checked_voice_range(state, 2));
+			return 0;
+		}
+
+		int local_ui_update(lua_State *state, std::string_view operation)
+		{
+			need_client_capability(state, "ui");
+			auto *resource = self(state);
+			const auto *document = luaL_checkstring(state, 1);
+			if (!resources::valid_resource_event_name(document))
+				return luaL_error(state, "invalid local UI document id");
+			nlohmann::json payload = nlohmann::json::object();
+			try
+			{
+				if (operation != "close")
+					payload = scripting::lua_sandbox::to_json(state, 2);
+			}
+			catch (const std::exception &exception)
+			{
+				return luaL_error(state, "%s", exception.what());
+			}
+			if (!resource->runtime->update_local_ui(
+			        resource->package.definition.id, document, operation, payload))
+				return luaL_error(state, "local UI update is invalid or too large");
+			return 0;
+		}
+
+		int api_ui_show(lua_State *state) { return local_ui_update(state, "show"); }
+		int api_ui_patch(lua_State *state) { return local_ui_update(state, "patch"); }
+		int api_ui_close(lua_State *state) { return local_ui_update(state, "close"); }
+		int api_ui_toast(lua_State *state) { return local_ui_update(state, "toast"); }
+
+		int api_ui_on(lua_State *state)
+		{
+			need_client_capability(state, "ui");
+			auto *resource = self(state);
+			luaL_checktype(state, 1, LUA_TFUNCTION);
+			resource->ui_callbacks.push_back(
+			    resource->lua->reference_function(1));
+			return 0;
+		}
+
+		int api_ui_toggle_panel(lua_State *state)
+		{
+			need_client_capability(state, "ui");
+			auto *resource = self(state);
+			const auto target = std::string_view(luaL_checkstring(state, 1));
+			if (target != "player_hub" && target != "social_menu"
+			    && target != "staff_menu")
+				return luaL_error(state, "unknown native panel primitive");
+			if (!resource->runtime->queue_local_ui_command(
+			        resource->package.definition.id, "toggle_panel", target))
+				return luaL_error(state, "local UI command limit exceeded");
+			return 0;
+		}
+
+		void install_api(lua_State *state)
 		{
 			lua_newtable(state);
 			lua_pushcfunction(state, api_events_on);
@@ -97,13 +241,46 @@ namespace kcd2o
 			lua_pushcfunction(state, api_events_emit);
 			lua_setfield(state, -2, "emit_server");
 			lua_setglobal(state, "events");
+
+			lua_newtable(state);
+			lua_pushcfunction(state, api_features_enable);
+			lua_setfield(state, -2, "enable");
+			lua_setglobal(state, "features");
+
+			lua_newtable(state);
+			lua_pushcfunction(state, api_input_on);
+			lua_setfield(state, -2, "on");
+			lua_pushcfunction(state, api_input_bind);
+			lua_setfield(state, -2, "bind");
+			lua_setglobal(state, "input");
+
+			lua_newtable(state);
+			lua_pushcfunction(state, api_voice_set_transmitting);
+			lua_setfield(state, -2, "set_transmitting");
+			lua_setglobal(state, "voice");
+
+			lua_newtable(state);
+			lua_pushcfunction(state, api_ui_show);
+			lua_setfield(state, -2, "show");
+			lua_pushcfunction(state, api_ui_patch);
+			lua_setfield(state, -2, "patch");
+			lua_pushcfunction(state, api_ui_close);
+			lua_setfield(state, -2, "close");
+			lua_pushcfunction(state, api_ui_toast);
+			lua_setfield(state, -2, "toast");
+			lua_pushcfunction(state, api_ui_on);
+			lua_setfield(state, -2, "on");
+			lua_pushcfunction(state, api_ui_toggle_panel);
+			lua_setfield(state, -2, "toggle_panel");
+			lua_setglobal(state, "ui");
 		}
 
 		nlohmann::json base_ui(std::uint64_t revision)
 		{
-			return {{"revision", revision}, {"documents", nlohmann::json::array()},
+		return {{"revision", revision}, {"documents", nlohmann::json::array()},
 			    {"toasts", nlohmann::json::array()},
-			    {"bindings", nlohmann::json::array()}};
+			    {"bindings", nlohmann::json::array()},
+			    {"commands", nlohmann::json::array()}};
 		}
 
 		constexpr std::size_t maximum_ui_documents = 64;
@@ -112,8 +289,10 @@ namespace kcd2o
 		constexpr std::size_t maximum_queued_script_events = 256;
 	}
 
-	client_resources::client_resources(std::filesystem::path cache_root) :
-	    m_cache(std::move(cache_root))
+	client_resources::client_resources(std::filesystem::path cache_root,
+	    client_resource_callbacks callbacks) :
+	    m_cache(std::move(cache_root)),
+	    m_callbacks(std::move(callbacks))
 	{
 	}
 	client_resources::~client_resources() { reset(); }
@@ -231,6 +410,7 @@ namespace kcd2o
 	bool client_resources::activate(std::string &error)
 	{
 		std::vector<std::string> hashes;
+		m_feature_mask.store(0, std::memory_order_release);
 		try
 		{
 			for (const auto &metadata : m_packages)
@@ -256,7 +436,7 @@ namespace kcd2o
 					    return found == raw->package.files.end()
 					        ? std::nullopt : std::optional{found->second};
 				    }, raw);
-				install_events(instance->lua->state());
+				install_api(instance->lua->state());
 				const auto entry = *instance->package.definition.client_entry;
 				const auto found = instance->package.files.find(entry);
 				if (found == instance->package.files.end())
@@ -266,6 +446,8 @@ namespace kcd2o
 				    reinterpret_cast<const char *>(found->second.data()), found->second.size());
 				if (!instance->lua->execute(source, "@" + entry, script_error))
 					throw std::runtime_error(raw->package.definition.id + ": " + script_error);
+				m_feature_mask.fetch_or(
+				    instance->enabled_features, std::memory_order_acq_rel);
 				m_instances.push_back(std::move(instance));
 				hashes.push_back(metadata.hash);
 			}
@@ -276,6 +458,7 @@ namespace kcd2o
 		{
 			error = exception.what();
 			m_instances.clear();
+			m_feature_mask.store(0, std::memory_order_release);
 			return false;
 		}
 	}
@@ -308,6 +491,8 @@ namespace kcd2o
 			    && ++(*found)->errors >= 3)
 			{
 				(*found)->disabled = true;
+				m_feature_mask.fetch_and(
+				    ~(*found)->enabled_features, std::memory_order_acq_rel);
 				break;
 			}
 		}
@@ -407,6 +592,7 @@ namespace kcd2o
 
 	void client_resources::reset()
 	{
+		set_voice_transmitting(false, protocol::VOICE_RANGE_NORMAL);
 		m_instances.clear();
 		m_packages.clear();
 		m_outgoing.clear();
@@ -417,8 +603,14 @@ namespace kcd2o
 		m_generation = 0;
 		m_root_hash.clear();
 		m_server_id.clear();
+		m_feature_mask.store(0, std::memory_order_release);
 		std::scoped_lock lock(m_ui_mutex);
 		m_ui_json = base_ui(++m_ui_revision).dump();
+	}
+
+	std::uint64_t client_resources::feature_mask() const noexcept
+	{
+		return m_feature_mask.load(std::memory_order_acquire);
 	}
 
 	void client_resources::queue(protocol::Envelope envelope, reliability delivery)
@@ -474,5 +666,173 @@ namespace kcd2o
 			m_deferred_events.push_back({std::move(envelope),
 			    reliable ? reliability::reliable : reliability::unreliable});
 		return true;
+	}
+
+	bool client_resources::dispatch_local_ui_event(
+	    std::string_view resource_id, std::string_view document,
+	    std::string_view control, std::string_view event,
+	    std::string_view payload_json)
+	{
+		const auto found = std::ranges::find_if(m_instances,
+		    [&](const auto &item)
+		    {
+			    return item->package.definition.id == resource_id;
+		    });
+		if (found == m_instances.end() || (*found)->disabled)
+			return false;
+
+		nlohmann::json payload;
+		try
+		{
+			payload = scripting::lua_sandbox::parse_json(payload_json);
+		}
+		catch (...) { return false; }
+
+		std::vector<int> callbacks;
+		if (event == "key" && document.empty())
+		{
+			const auto action = (*found)->inputs.find(std::string(control));
+			if (action == (*found)->inputs.end()) return false;
+			callbacks = action->second;
+		}
+		else
+		{
+			if ((*found)->ui_callbacks.empty()) return false;
+			callbacks = (*found)->ui_callbacks;
+		}
+
+		for (const auto callback : callbacks)
+		{
+			std::string error;
+			const auto called = (*found)->lua->call(callback,
+			    [&](lua_State *state)
+			    {
+				    if (event == "key" && document.empty())
+				    {
+					    scripting::lua_sandbox::push_json(state, payload);
+					    return 1;
+				    }
+				    lua_pushlstring(state, document.data(), document.size());
+				    lua_pushlstring(state, control.data(), control.size());
+				    lua_pushlstring(state, event.data(), event.size());
+				    scripting::lua_sandbox::push_json(state, payload);
+				    return 4;
+			    }, 0, error);
+			if (!called && ++(*found)->errors >= 3)
+			{
+				(*found)->disabled = true;
+				m_feature_mask.fetch_and(
+				    ~(*found)->enabled_features, std::memory_order_acq_rel);
+				if (((*found)->enabled_features
+				        & resources::feature_bit(
+				            resources::builtin_feature::voice_chat)) != 0)
+					set_voice_transmitting(false, protocol::VOICE_RANGE_NORMAL);
+				break;
+			}
+		}
+		return true;
+	}
+
+	bool client_resources::register_local_binding(std::string_view resource,
+	    std::string_view action, std::string_view label,
+	    std::uint32_t virtual_key, bool emit_release)
+	{
+		std::scoped_lock lock(m_ui_mutex);
+		auto state = nlohmann::json::parse(m_ui_json);
+		auto &bindings = state["bindings"];
+		const auto found = std::ranges::find_if(bindings, [&](const auto &item)
+		{
+			return item.value("resource_id", "") == resource
+			    && item.value("action_id", "") == action;
+		});
+		nlohmann::json value{{"resource_id", resource}, {"action_id", action},
+		    {"label", label}, {"virtual_key", virtual_key}, {"local", true},
+		    {"emit_release", emit_release}};
+		if (found == bindings.end())
+		{
+			if (bindings.size() >= maximum_ui_bindings) return false;
+			bindings.push_back(std::move(value));
+		}
+		else
+			*found = std::move(value);
+		state["revision"] = m_ui_revision + 1;
+		auto serialized = state.dump();
+		if (serialized.size() > maximum_ui_state_bytes) return false;
+		++m_ui_revision;
+		m_ui_json = std::move(serialized);
+		return true;
+	}
+
+	bool client_resources::update_local_ui(std::string_view resource,
+	    std::string_view document, std::string_view operation,
+	    const nlohmann::json &payload)
+	{
+		std::scoped_lock lock(m_ui_mutex);
+		auto state = nlohmann::json::parse(m_ui_json);
+		auto &documents = state["documents"];
+		const auto found = std::ranges::find_if(documents, [&](const auto &item)
+		{
+			return item.value("resource_id", "") == resource
+			    && item.value("document_id", "") == document;
+		});
+		if (operation == "close")
+		{
+			if (found != documents.end()) documents.erase(found);
+		}
+		else if (operation == "toast")
+		{
+			state["toasts"].push_back({{"resource_id", resource},
+			    {"payload", payload}, {"revision", m_ui_revision + 1}});
+			while (state["toasts"].size() > 8)
+				state["toasts"].erase(state["toasts"].begin());
+		}
+		else if (!payload.is_object())
+			return false;
+		else if (operation == "patch" && found != documents.end())
+			(*found)["spec"].merge_patch(payload);
+		else if (operation == "show")
+		{
+			if (found == documents.end())
+			{
+				if (documents.size() >= maximum_ui_documents) return false;
+				documents.push_back({{"resource_id", resource},
+				    {"document_id", document}, {"spec", payload}});
+			}
+			else
+				(*found)["spec"] = payload;
+		}
+		else
+			return false;
+
+		state["revision"] = m_ui_revision + 1;
+		auto serialized = state.dump();
+		if (serialized.size() > maximum_ui_state_bytes) return false;
+		++m_ui_revision;
+		m_ui_json = std::move(serialized);
+		return true;
+	}
+
+	bool client_resources::queue_local_ui_command(std::string_view resource,
+	    std::string_view command, std::string_view target)
+	{
+		std::scoped_lock lock(m_ui_mutex);
+		auto state = nlohmann::json::parse(m_ui_json);
+		auto &commands = state["commands"];
+		commands.push_back({{"resource_id", resource}, {"command", command},
+		    {"target", target}, {"sequence", ++m_ui_sequence}});
+		while (commands.size() > 32) commands.erase(commands.begin());
+		state["revision"] = m_ui_revision + 1;
+		auto serialized = state.dump();
+		if (serialized.size() > maximum_ui_state_bytes) return false;
+		++m_ui_revision;
+		m_ui_json = std::move(serialized);
+		return true;
+	}
+
+	void client_resources::set_voice_transmitting(
+	    bool transmitting, protocol::VoiceRange range) const
+	{
+		if (m_callbacks.set_voice_transmitting)
+			m_callbacks.set_voice_transmitting(transmitting, range);
 	}
 }

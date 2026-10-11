@@ -1,0 +1,13 @@
+[resource]
+id = "default_text_chat"
+version = "1.0.0"
+api_version = 1
+dependencies = []
+
+[server]
+entry = "server/main.lua"
+capabilities = ["chat", "feature.text_chat"]
+
+[client]
+entry = "client/main.lua"
+capabilities = ["feature.text_chat"]

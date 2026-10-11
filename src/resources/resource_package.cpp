@@ -345,6 +345,17 @@ namespace kcd2o::resources
 		return found == definitions.end() ? nullptr : &*found;
 	}
 
+	bool resource_set::has_server_capability(
+	    std::string_view capability) const noexcept
+	{
+		return std::ranges::any_of(definitions, [&](const auto &definition)
+		{
+			return std::ranges::find(
+			    definition.server_capabilities, capability)
+			    != definition.server_capabilities.end();
+		});
+	}
+
 	bool valid_resource_id(std::string_view value) noexcept
 	{
 		return !value.empty() && value.size() <= 64
@@ -410,15 +421,22 @@ namespace kcd2o::resources
 			result.shared_client_paths = string_array(*shared, "client_paths");
 
 		const std::unordered_set<std::string> known_server_capabilities{
-		    "chat", "ui", "input", "players.kick"};
+		    "chat", "ui", "input", "players.kick",
+		    "feature.text_chat", "feature.voice_chat", "feature.properties"};
 		std::unordered_set<std::string> unique_capabilities;
 		for (const auto &capability : result.server_capabilities)
 			if (!known_server_capabilities.contains(capability)
 			    || !unique_capabilities.insert(capability).second)
 				invalid(result.id + " has an invalid or duplicate server capability: "
 				    + capability);
-		if (!result.client_capabilities.empty())
-			invalid(result.id + " requests unsupported client capabilities");
+		std::unordered_set<std::string> unique_client_capabilities;
+		for (const auto &capability : result.client_capabilities)
+			if (!(builtin_feature_from_capability(capability)
+			        || capability == "input" || capability == "ui"
+			        || capability == "voice")
+			    || !unique_client_capabilities.insert(capability).second)
+				invalid(result.id + " requests an unsupported or duplicate client capability: "
+				    + capability);
 		std::unordered_set<std::string> unique_dependencies;
 		for (const auto &dependency : result.dependencies)
 			if (!valid_resource_id(dependency)
@@ -524,6 +542,30 @@ namespace kcd2o::resources
 		}
 		result.definitions = std::move(ordered);
 
+		std::unordered_map<std::string, std::string> server_feature_providers;
+		std::unordered_map<std::string, std::string> client_feature_providers;
+		for (const auto &definition : result.definitions)
+		{
+			for (const auto &capability : definition.server_capabilities)
+			{
+				if (!builtin_feature_from_capability(capability))
+					continue;
+				const auto [found, inserted] = server_feature_providers.emplace(
+				    capability, definition.id);
+				if (!inserted)
+					invalid("server feature " + capability + " is provided by both "
+					    + found->second + " and " + definition.id);
+			}
+			for (const auto &capability : definition.client_capabilities)
+			{
+				const auto [found, inserted] = client_feature_providers.emplace(
+				    capability, definition.id);
+				if (!inserted)
+					invalid("client feature " + capability + " is provided by both "
+					    + found->second + " and " + definition.id);
+			}
+		}
+
 		std::size_t total{};
 		for (const auto &definition : result.definitions)
 		{
@@ -596,9 +638,15 @@ namespace kcd2o::resources
 		    || result.definition.api_version != resource_api_version
 		    || !result.definition.client_entry
 		    || !safe_relative_path(*result.definition.client_entry)
-		    || !std::string_view(*result.definition.client_entry).starts_with("client/")
-		    || !result.definition.client_capabilities.empty())
+		    || !std::string_view(*result.definition.client_entry).starts_with("client/"))
 			invalid("client manifest fields are invalid");
+		std::unordered_set<std::string> client_capabilities;
+		for (const auto &capability : result.definition.client_capabilities)
+			if (!(builtin_feature_from_capability(capability)
+			        || capability == "input" || capability == "ui"
+			        || capability == "voice")
+			    || !client_capabilities.insert(capability).second)
+				invalid("client manifest capabilities are invalid");
 		std::unordered_set<std::string> dependencies;
 		for (const auto &dependency : result.definition.dependencies)
 			if (!valid_resource_id(dependency)

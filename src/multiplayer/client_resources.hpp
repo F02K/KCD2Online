@@ -6,8 +6,10 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -22,13 +24,19 @@ namespace kcd2o
 		reliability delivery{reliability::reliable};
 	};
 
+	struct client_resource_callbacks
+	{
+		std::function<void(bool, protocol::VoiceRange)> set_voice_transmitting;
+	};
+
 	class client_resources
 	{
 	public:
 		struct instance;
 
 		explicit client_resources(
-		    std::filesystem::path cache_root = resources::resource_cache::default_path());
+		    std::filesystem::path cache_root = resources::resource_cache::default_path(),
+		    client_resource_callbacks callbacks = {});
 		~client_resources();
 		client_resources(const client_resources &) = delete;
 		client_resources &operator=(const client_resources &) = delete;
@@ -46,6 +54,7 @@ namespace kcd2o
 		void connected();
 		void tick(std::chrono::steady_clock::time_point now);
 		void reset();
+		[[nodiscard]] std::uint64_t feature_mask() const noexcept;
 
 		[[nodiscard]] std::vector<client_resource_outgoing> take_outgoing();
 		[[nodiscard]] std::string ui_snapshot_json() const;
@@ -60,6 +69,29 @@ namespace kcd2o
 		    std::string_view event,
 		    const nlohmann::json &payload,
 		    bool reliable);
+		[[nodiscard]] bool dispatch_local_ui_event(
+		    std::string_view resource,
+		    std::string_view document,
+		    std::string_view control,
+		    std::string_view event,
+		    std::string_view payload_json);
+		[[nodiscard]] bool register_local_binding(
+		    std::string_view resource,
+		    std::string_view action,
+		    std::string_view label,
+		    std::uint32_t virtual_key,
+		    bool emit_release);
+		[[nodiscard]] bool update_local_ui(
+		    std::string_view resource,
+		    std::string_view document,
+		    std::string_view operation,
+		    const nlohmann::json &payload);
+		[[nodiscard]] bool queue_local_ui_command(
+		    std::string_view resource,
+		    std::string_view command,
+		    std::string_view target);
+		void set_voice_transmitting(bool transmitting,
+		    protocol::VoiceRange range) const;
 
 	private:
 		struct package_state;
@@ -69,6 +101,7 @@ namespace kcd2o
 		    reliability delivery = reliability::reliable);
 
 		resources::resource_cache m_cache;
+		client_resource_callbacks m_callbacks;
 		std::string m_server_id;
 		std::uint64_t m_generation{};
 		std::string m_root_hash;
@@ -80,9 +113,10 @@ namespace kcd2o
 		std::vector<client_resource_outgoing> m_deferred_events;
 		bool m_connected{};
 		std::uint64_t m_event_sequence{};
+		std::atomic<std::uint64_t> m_feature_mask{};
 
 		mutable std::mutex m_ui_mutex;
-		std::string m_ui_json{R"({"revision":0,"documents":[],"toasts":[],"bindings":[]})"};
+		std::string m_ui_json{R"({"revision":0,"documents":[],"toasts":[],"bindings":[],"commands":[]})"};
 		std::uint64_t m_ui_revision{};
 		std::uint64_t m_ui_sequence{};
 	};

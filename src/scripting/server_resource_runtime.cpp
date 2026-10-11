@@ -65,6 +65,7 @@ namespace kcd2o::scripting
 		std::vector<timer> timers;
 		std::uint64_t next_timer{1};
 		std::uint64_t next_ui_revision{1};
+		std::uint64_t enabled_features{};
 		std::uint32_t errors{};
 		bool disabled{};
 	};
@@ -291,6 +292,19 @@ namespace kcd2o::scripting
 		int api_timer_after(lua_State *state) { return add_timer(state, false); }
 		int api_timer_every(lua_State *state) { return add_timer(state, true); }
 
+		int api_features_enable(lua_State *state)
+		{
+			auto *resource = self(state);
+			const auto *name = luaL_checkstring(state, 1);
+			const auto feature = resources::builtin_feature_from_name(name ? name : "");
+			if (!resource || !feature)
+				return luaL_error(state, "unknown built-in feature");
+			const auto capability = resources::builtin_feature_capability(*feature);
+			need_capability(state, capability);
+			resource->enabled_features |= resources::feature_bit(*feature);
+			return 0;
+		}
+
 		void install_table(lua_State *state, const char *name,
 		    std::initializer_list<std::pair<const char *, lua_CFunction>> functions)
 		{
@@ -356,6 +370,7 @@ namespace kcd2o::scripting
 			    {"register", api_input_register}, {"unregister", api_input_unregister}});
 			install_table(state, "timer", {{"after", api_timer_after},
 			    {"every", api_timer_every}});
+			install_table(state, "features", {{"enable", api_features_enable}});
 			std::string error;
 			const auto source = read_text(definition.root / *definition.server_entry);
 			if (!resource->lua->execute(source, "@" + *definition.server_entry, error))
@@ -501,6 +516,16 @@ namespace kcd2o::scripting
 			dispatch(*resource, resource->lifecycle, "player_death",
 			    [&](lua_State *state) { lua_pushnumber(state, player); return 1; },
 			    m_error_limit, m_callbacks);
+	}
+
+	bool server_resource_runtime::feature_enabled(
+	    resources::builtin_feature feature) const noexcept
+	{
+		const auto bit = resources::feature_bit(feature);
+		return std::ranges::any_of(m_instances, [&](const auto &resource)
+		{
+			return !resource->disabled && (resource->enabled_features & bit) != 0;
+		});
 	}
 
 	bool server_resource_runtime::client_event(std::uint64_t player,

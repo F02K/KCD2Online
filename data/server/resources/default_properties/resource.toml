@@ -1,0 +1,13 @@
+[resource]
+id = "default_properties"
+version = "1.0.0"
+api_version = 1
+dependencies = []
+
+[server]
+entry = "server/main.lua"
+capabilities = ["feature.properties"]
+
+[client]
+entry = "client/main.lua"
+capabilities = ["feature.properties"]

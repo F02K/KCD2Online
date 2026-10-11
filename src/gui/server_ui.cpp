@@ -2,6 +2,9 @@
 
 #include "gui/gui.hpp"
 #include "gui/ingame_chat.hpp"
+#include "gui/ingame_player_hub.hpp"
+#include "gui/ingame_social_panel.hpp"
+#include "gui/ingame_staff_panel.hpp"
 #include "kcse/client_proxy.hpp"
 
 #include <Windows.h>
@@ -12,6 +15,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -36,11 +40,13 @@ namespace big::server_ui
 		std::string g_rebind_resource;
 		std::string g_rebind_action;
 		std::unordered_map<std::string, std::uint32_t> g_key_overrides;
+		std::unordered_set<std::string> g_pressed_local_bindings;
 		std::unordered_map<std::string, std::array<char, 1024>> g_inputs;
 		std::unordered_map<std::uint64_t, std::chrono::steady_clock::time_point>
 		    g_toast_started;
 		std::string g_server_id;
 		bool g_bindings_loaded{};
+		std::uint64_t g_last_command_sequence{};
 
 		std::filesystem::path bindings_path()
 		{
@@ -257,6 +263,98 @@ namespace big::server_ui
 				return std::ranges::find(current, entry.first) == current.end();
 			});
 		}
+
+		ImVec4 color_value(const json &spec, std::string_view name,
+		    ImVec4 fallback)
+		{
+			try
+			{
+				const auto values = spec.at(std::string(name)).get<std::vector<float>>();
+				if (values.size() == 4)
+					return {values[0], values[1], values[2], values[3]};
+			}
+			catch (...) {}
+			return fallback;
+		}
+
+		void render_voice_indicator(const json &spec)
+		{
+			const auto status = kcd2o::kcse::ui_client().status();
+			static float level{};
+			const auto target = status.voice_recording ? status.voice_level : 0.0F;
+			level += (target - level) * (target > level ? 0.38F : 0.16F);
+			if (!status.voice_recording && level < 0.01F)
+			{
+				level = 0.0F;
+				return;
+			}
+
+			const auto *viewport = ImGui::GetMainViewport();
+			const auto scale = std::clamp(
+			    viewport->WorkSize.y / 1080.0F, 0.78F, 1.25F);
+			const auto size = ImVec2(spec.value("width", 68.0F) * scale,
+			    spec.value("height", 28.0F) * scale);
+			const auto center = ImVec2(
+			    viewport->WorkPos.x + spec.value("offset_x", 38.0F) * scale
+			        + size.x * 0.5F,
+			    viewport->WorkPos.y + viewport->WorkSize.y
+			        - spec.value("offset_y", 46.0F) * scale);
+			const auto minimum = ImVec2(
+			    center.x - size.x * 0.5F, center.y - size.y * 0.5F);
+			const auto maximum = ImVec2(minimum.x + size.x, minimum.y + size.y);
+			auto tint = color_value(spec, "normal_color",
+			    {0.76F, 0.61F, 0.34F, 1.0F});
+			if (status.voice_range == kcd2o::protocol::VOICE_RANGE_WHISPER)
+				tint = color_value(spec, "whisper_color",
+				    {0.55F, 0.68F, 0.52F, 1.0F});
+			else if (status.voice_range == kcd2o::protocol::VOICE_RANGE_SHOUT)
+				tint = color_value(spec, "shout_color",
+				    {0.86F, 0.48F, 0.27F, 1.0F});
+			const auto active = status.voice_speaking || level >= 0.08F;
+			auto rgba = [](ImVec4 value, float alpha)
+			{
+				value.w *= alpha;
+				return ImGui::ColorConvertFloat4ToU32(value);
+			};
+			const auto foreground = rgba(tint, active ? 0.92F : 0.60F);
+			const auto quiet = rgba(tint, active ? 0.38F : 0.18F);
+			auto *draw = ImGui::GetForegroundDrawList();
+			draw->AddRectFilled(minimum, maximum,
+			    IM_COL32(18, 15, 12, active ? 154 : 118), size.y * 0.5F);
+			draw->AddRect(minimum, maximum, quiet, size.y * 0.5F, 0, scale);
+
+			const auto microphone = ImVec2(
+			    minimum.x + 21.0F * scale, center.y - scale);
+			draw->AddRectFilled(
+			    {microphone.x - 3.0F * scale, microphone.y - 7.0F * scale},
+			    {microphone.x + 3.0F * scale, microphone.y + 3.0F * scale},
+			    foreground, 3.0F * scale);
+			draw->PathArcTo({microphone.x, microphone.y + scale}, 7.0F * scale,
+			    0.0F, 3.14159265F, 10);
+			draw->PathStroke(foreground, 0, 1.4F * scale);
+			draw->AddLine({microphone.x, microphone.y + 8.0F * scale},
+			    {microphone.x, microphone.y + 11.0F * scale}, foreground,
+			    1.4F * scale);
+			draw->AddLine({microphone.x - 4.0F * scale,
+			        microphone.y + 11.0F * scale},
+			    {microphone.x + 4.0F * scale, microphone.y + 11.0F * scale},
+			    foreground, 1.4F * scale);
+
+			const auto phase = static_cast<float>(ImGui::GetTime() * 4.0);
+			const float factors[]{0.58F + 0.12F * std::sin(phase),
+			    0.90F + 0.10F * std::sin(phase + 1.7F),
+			    0.70F + 0.14F * std::sin(phase + 3.1F)};
+			for (std::size_t index{}; index < 3; ++index)
+			{
+				const auto height =
+				    (2.0F + 13.0F * level * factors[index]) * scale;
+				const auto x = minimum.x
+				    + (40.0F + 7.0F * static_cast<float>(index)) * scale;
+				draw->AddRectFilled({x, center.y - height * 0.5F},
+				    {x + 3.0F * scale, center.y + height * 0.5F},
+				    active ? foreground : quiet, 1.5F * scale);
+			}
+		}
 	}
 
 	void render(bool mod_gui_open)
@@ -273,6 +371,11 @@ namespace big::server_ui
 				{
 					const auto &spec = document.value("spec", json::object());
 					if (!spec.value("visible", true)) continue;
+					if (spec.value("kind", "") == "voice_indicator")
+					{
+						render_voice_indicator(spec);
+						continue;
+					}
 					const auto position = spec.value("position", std::vector<float>{});
 					const auto size = spec.value("size", std::vector<float>{});
 					if (position.size() == 2) ImGui::SetNextWindowPos({position[0], position[1]}, ImGuiCond_Appearing);
@@ -315,20 +418,40 @@ namespace big::server_ui
 	}
 
 	void on_window_message(std::uint32_t message, std::uintptr_t wparam,
-	    std::intptr_t) noexcept
+	    std::intptr_t lparam) noexcept
 	{
 		try
 		{
 			std::scoped_lock lock(g_mutex);
+			if (message == WM_KILLFOCUS)
+			{
+				refresh();
+				for (const auto &binding : g_state.value("bindings", json::array()))
+				{
+					if (!binding.value("local", false)
+					    || !binding.value("emit_release", false))
+						continue;
+					const auto resource = binding.value("resource_id", "");
+					const auto action = binding.value("action_id", "");
+					const auto pressed_id = resource + ":" + action;
+					if (g_pressed_local_bindings.erase(pressed_id) == 0) continue;
+					(void)kcd2o::kcse::ui_client().submit_resource_ui_event(
+					    resource, "", action, "key",
+					    R"({"pressed":false,"control":false,"shift":false,"alt":false})");
+				}
+				return;
+			}
 			if (message == WM_KEYUP && wparam == VK_F8)
 			{
 				g_keybind_editor = !g_keybind_editor;
 				return;
 			}
-			if (message != WM_KEYUP || wparam == 0 || wparam > 255)
+			if ((message != WM_KEYDOWN && message != WM_KEYUP)
+			    || wparam == 0 || wparam > 255)
 				return;
 			if (!g_rebind_resource.empty())
 			{
+				if (message != WM_KEYUP) return;
 				g_key_overrides[binding_key(g_rebind_resource, g_rebind_action)] =
 				    static_cast<std::uint32_t>(wparam);
 				save_bindings();
@@ -342,10 +465,32 @@ namespace big::server_ui
 				return;
 			refresh();
 			for (const auto &binding : g_state.value("bindings", json::array()))
-				if (effective_key(binding) == wparam)
-					(void)kcd2o::kcse::ui_client().submit_resource_ui_event(
-					    binding.value("resource_id", ""), "",
-					    binding.value("action_id", ""), "key", "{\"pressed\":true}");
+			{
+				if (effective_key(binding) != wparam) continue;
+				const bool local = binding.value("local", false);
+				const bool emit_release = binding.value("emit_release", false);
+				if (!local && message != WM_KEYUP) continue;
+				if (local && message == WM_KEYDOWN
+				    && (static_cast<std::uintptr_t>(lparam) & (1ULL << 30)) != 0)
+					continue;
+				if (local && message == WM_KEYUP && !emit_release) continue;
+				const auto pressed_id = binding.value("resource_id", "") + ":"
+				    + binding.value("action_id", "");
+				if (local && emit_release)
+				{
+					if (message == WM_KEYDOWN)
+						g_pressed_local_bindings.insert(pressed_id);
+					else
+						g_pressed_local_bindings.erase(pressed_id);
+				}
+				const json payload{{"pressed", local ? message == WM_KEYDOWN : true},
+				    {"control", (GetKeyState(VK_CONTROL) & 0x8000) != 0},
+				    {"shift", (GetKeyState(VK_SHIFT) & 0x8000) != 0},
+				    {"alt", (GetKeyState(VK_MENU) & 0x8000) != 0}};
+				(void)kcd2o::kcse::ui_client().submit_resource_ui_event(
+				    binding.value("resource_id", ""), "",
+				    binding.value("action_id", ""), "key", payload.dump());
+			}
 		}
 		catch (...) {}
 	}

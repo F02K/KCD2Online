@@ -278,7 +278,13 @@ namespace kcd2o
 	}
 
 	multiplayer_client::multiplayer_client(client_runtime &runtime) :
-	    m_runtime(runtime)
+	    m_runtime(runtime),
+	    m_resources(resources::resource_cache::default_path(),
+	        {.set_voice_transmitting =
+	                [this](bool transmitting, protocol::VoiceRange range)
+	                {
+		                m_runtime.set_voice_transmitting(transmitting, range);
+	                }})
 	{
 	}
 
@@ -1012,7 +1018,9 @@ namespace kcd2o
 	client_status multiplayer_client::status() const
 	{
 		std::scoped_lock lock(m_state_mutex);
-		return m_status;
+		auto result = m_status;
+		result.resource_features = m_resources.feature_mask();
+		return result;
 	}
 
 	client_update_rates multiplayer_client::update_rates() const
@@ -1924,13 +1932,22 @@ namespace kcd2o
 				    std::move(typed.message);
 				(void)send_envelope(envelope, reliability::reliable);
 			}
-			else if constexpr (
-			    std::is_same_v<type, resource_ui_command>)
+						    else if constexpr (
+						        std::is_same_v<type, resource_ui_command>)
 			{
-				protocol::Envelope envelope;
-				*envelope.mutable_client_ui_event() =
-				    std::move(typed.message);
-				(void)send_envelope(envelope, reliability::reliable);
+				const auto handled_locally = m_resources.dispatch_local_ui_event(
+				    typed.message.resource_id(), typed.message.document_id(),
+				    typed.message.control_id(), typed.message.event(),
+				    typed.message.payload_json());
+				if (!handled_locally)
+				{
+					protocol::Envelope envelope;
+					*envelope.mutable_client_ui_event() =
+					    std::move(typed.message);
+					(void)send_envelope(envelope, reliability::reliable);
+				}
+				for (auto &outgoing : m_resources.take_outgoing())
+					(void)send_envelope(outgoing.envelope, outgoing.delivery);
 			}
 					    },
 					    command);
@@ -2459,10 +2476,6 @@ namespace kcd2o
 			        "players={}",
 			        envelope.server_accepted().players_size()));
 			kcse::join_trace::finish_join("connected");
-			lock.unlock();
-			m_runtime.show_multiplayer_notice(
-			    "VOIP: V = sprechen, Strg+V = fluestern, Umschalt+V = rufen.");
-			lock.lock();
 		}
 		else if (envelope.has_server_property_access_updated())
 		{

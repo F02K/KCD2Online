@@ -234,6 +234,7 @@ namespace kcd2o::kcse
 		result.property_operation_generation = value.property_operation_generation;
 		result.property_operation_success = value.property_operation_success != 0;
 		result.property_operation_message = value.property_operation_message;
+		result.resource_features = value.resource_features;
 		if (value.network_role <= static_cast<std::uint32_t>(protocol::NETWORK_ROLE_OWNER))
 		{
 			result.network_role = static_cast<protocol::NetworkRole>(value.network_role);

@@ -30,6 +30,9 @@ Lua resources
 
 The release is self-contained: Lua is linked into KCD2OnlineServer.exe and no
 separate runtime or SDK is required. Resources live in the resources folder.
-The bundled examples include a server-only ImGui UI and a client/server event
-resource. Start with docs\scripting\README.md; its topic guides cover resource
-structure, events, UI, keybinds, timers, security, delivery and complete examples.
+The bundled default_* resources provide text chat, voice chat, the F2/F3/F7
+menus, and Properties. Removing one of those resource directories disables
+that server feature. The bundled examples include a server-only ImGui UI and a
+client/server event resource. Start with docs\scripting\README.md; its topic
+guides cover feature providers, resource structure, events, UI, keybinds,
+timers, security, delivery and complete examples.

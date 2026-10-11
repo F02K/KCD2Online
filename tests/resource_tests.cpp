@@ -16,6 +16,8 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace
 {
@@ -31,25 +33,45 @@ namespace
 int main()
 {
 	using namespace kcd2o::resources;
+	const auto bundled = load_resource_set(
+	    std::filesystem::path(KCD2Online_SOURCE_DIR) / "data" / "server" / "resources");
+	assert(bundled.has_server_capability("feature.text_chat"));
+	assert(bundled.has_server_capability("feature.voice_chat"));
+	assert(bundled.has_server_capability("feature.properties"));
+	assert(std::ranges::any_of(bundled.definitions, [](const auto &definition)
+	{
+		return std::ranges::find(
+		    definition.client_capabilities, "feature.player_hub")
+		    != definition.client_capabilities.end();
+	}));
 	const auto root = std::filesystem::temp_directory_path()
 	    / ("kcd2o-resource-test-" + std::to_string(GetCurrentProcessId()));
 	std::filesystem::remove_all(root);
 
 	write(root / "resources" / "server_only" / "resource.toml",
 	    "[resource]\nid='server_only'\nversion='1.0.0'\n"
-	    "[server]\nentry='server/main.lua'\ncapabilities=['chat', 'input']\n");
+	    "[server]\nentry='server/main.lua'\n"
+	    "capabilities=['chat', 'input', 'feature.text_chat']\n");
 	write(root / "resources" / "server_only" / "server" / "main.lua",
+	    "features.enable('text_chat')\n"
 	    "server.on('start', function() server.say('started') end)\n"
 	    "input.on('ping', function(player, payload) server.say('key') end)\n");
 
 	write(root / "resources" / "mixed" / "resource.toml",
 	    "[resource]\nid='mixed'\nversion='1.2.3'\ndependencies=['server_only']\n"
 	    "[server]\nentry='server/main.lua'\ncapabilities=[]\n"
-	    "[client]\nentry='client/main.lua'\ncapabilities=[]\n"
+	    "[client]\nentry='client/main.lua'\n"
+	    "capabilities=['feature.player_hub','feature.voice_chat','input','voice','ui']\n"
 	    "[shared]\nclient_paths=['shared/data.json']\n"
 	    "[[events]]\nname='hello'\ndirection='bidirectional'\nreliable=false\n");
 	write(root / "resources" / "mixed" / "server" / "main.lua", "SECRET=true\n");
 	write(root / "resources" / "mixed" / "client" / "main.lua",
+	    "features.enable('player_hub')\n"
+	    "features.enable('voice_chat')\n"
+	    "input.bind('talk', 'Push to talk', 0x56, true)\n"
+	    "input.on('talk', function(e) voice.set_transmitting(e.pressed, "
+	    "e.control and 'whisper' or 'normal') end)\n"
+	    "ui.show('hud', { title = 'Local HUD', widgets = {} })\n"
 	    "events.emit_server('hello', { ready = true })\n");
 	write(root / "resources" / "mixed" / "shared" / "data.json", "{\"ok\":true}\n");
 
@@ -73,6 +95,7 @@ int main()
 	kcd2o::scripting::server_resource_runtime runtime(
 	    set, 4 * 1024 * 1024, 50'000, 3, std::move(callbacks));
 	runtime.start();
+	assert(runtime.feature_enabled(builtin_feature::text_chat));
 	assert(says == 1);
 	std::string script_error;
 	assert(runtime.ui_event(42, "server_only", "", "ping", "key",
@@ -95,7 +118,13 @@ int main()
 	}
 	catch (const std::exception &) {}
 
-	kcd2o::client_resources client(root / "client-cache");
+	std::vector<std::pair<bool, kcd2o::protocol::VoiceRange>> transmissions;
+	kcd2o::client_resources client(root / "client-cache",
+	    {.set_voice_transmitting =
+	            [&](bool active, kcd2o::protocol::VoiceRange range)
+	            {
+		            transmissions.emplace_back(active, range);
+	            }});
 	kcd2o::protocol::ServerResourceManifest manifest;
 	manifest.set_generation(set.generation);
 	manifest.set_root_sha256(set.root_hash);
@@ -131,6 +160,17 @@ int main()
 		    : outgoing.front().envelope.has_client_resource_request());
 	}
 	assert(std::filesystem::exists(root / "client-cache" / "servers"));
+	assert((client.feature_mask() & feature_bit(builtin_feature::player_hub)) != 0);
+	assert((client.feature_mask() & feature_bit(builtin_feature::voice_chat)) != 0);
+	const auto ui = nlohmann::json::parse(client.ui_snapshot_json());
+	assert(ui["documents"].size() == 1);
+	assert(ui["bindings"].size() == 1);
+	assert(ui["bindings"][0].value("local", false));
+	assert(client.dispatch_local_ui_event("mixed", "", "talk", "key",
+	    R"({"pressed":true,"control":true})"));
+	assert(!transmissions.empty());
+	assert(transmissions.back().first);
+	assert(transmissions.back().second == kcd2o::protocol::VOICE_RANGE_WHISPER);
 	client.connected();
 	outgoing = client.take_outgoing();
 	assert(outgoing.size() == 1

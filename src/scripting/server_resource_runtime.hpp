@@ -63,6 +63,8 @@ namespace kcd2o::scripting
 		void player_left(const script_player &player, std::string_view reason);
 		void chat(std::uint64_t player, std::string_view text);
 		void death(std::uint64_t player);
+		[[nodiscard]] bool feature_enabled(
+		    resources::builtin_feature feature) const noexcept;
 		[[nodiscard]] bool client_event(
 		    std::uint64_t player,
 		    std::string_view resource,

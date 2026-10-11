@@ -30,9 +30,6 @@ namespace big::ingame_staff_panel
 
 		std::atomic_bool g_open{};
 		std::atomic_bool g_can_open{};
-		std::atomic_bool g_f7_down{};
-		std::atomic_bool g_native_bindings_active{};
-		std::atomic<std::uint64_t> g_suppress_native_until_ms{};
 
 		void set_open(bool open) noexcept
 		{
@@ -385,24 +382,34 @@ namespace big::ingame_staff_panel
 			ImGui::SetNextItemWidth(150.0F * scale);
 			ImGui::Combo("##StaffDuration", &value.duration, duration_labels, 5);
 
-			if (action_button(text("staff.chat_mute"), has_permission(status, "admin.mute"), {half, 0.0F}))
+			const auto text_chat_enabled = status.has_resource_feature(
+			    kcd2o::resources::builtin_feature::text_chat);
+			const auto voice_chat_enabled = status.has_resource_feature(
+			    kcd2o::resources::builtin_feature::voice_chat);
+			if (text_chat_enabled
+			    && action_button(text("staff.chat_mute"), has_permission(status, "admin.mute"), {half, 0.0F}))
 			{
 				if (value.reason.size() < 3) set_feedback(value, text("staff.feedback.reason"));
 				else request_confirmation(value, text("staff.chat_mute"), std::format("/mute chat {} {} {}", player->id, duration_value(value.duration), value.reason), false);
 			}
-			ImGui::SameLine();
-			if (action_button(text("staff.voice_mute"), has_permission(status, "admin.mute"), {half, 0.0F}))
+			if (text_chat_enabled && voice_chat_enabled)
+				ImGui::SameLine();
+			if (voice_chat_enabled
+			    && action_button(text("staff.voice_mute"), has_permission(status, "admin.mute"), {half, 0.0F}))
 			{
 				if (value.reason.size() < 3) set_feedback(value, text("staff.feedback.reason"));
 				else request_confirmation(value, text("staff.voice_mute"), std::format("/mute voice {} {} {}", player->id, duration_value(value.duration), value.reason), false);
 			}
-			if (action_button(text("staff.chat_unmute"), has_permission(status, "admin.mute"), {half, 0.0F}))
+			if (text_chat_enabled
+			    && action_button(text("staff.chat_unmute"), has_permission(status, "admin.mute"), {half, 0.0F}))
 			{
 				if (value.reason.size() < 3) set_feedback(value, text("staff.feedback.reason"));
 				else send_command(value, std::format("/unmute chat {} {}", player->id, value.reason));
 			}
-			ImGui::SameLine();
-			if (action_button(text("staff.voice_unmute"), has_permission(status, "admin.mute"), {half, 0.0F}))
+			if (text_chat_enabled && voice_chat_enabled)
+				ImGui::SameLine();
+			if (voice_chat_enabled
+			    && action_button(text("staff.voice_unmute"), has_permission(status, "admin.mute"), {half, 0.0F}))
 			{
 				if (value.reason.size() < 3) set_feedback(value, text("staff.feedback.reason"));
 				else send_command(value, std::format("/unmute voice {} {}", player->id, value.reason));
@@ -546,25 +553,11 @@ namespace big::ingame_staff_panel
 	{
 		auto &client = kcd2o::kcse::ui_client();
 		const auto status = client.status();
-		static std::uint32_t staff_action_generation{};
-		const auto available = status.state == kcd2o::client_state::connected
+		const auto available = status.has_resource_feature(
+		        kcd2o::resources::builtin_feature::staff_menu)
+		    && status.state == kcd2o::client_state::connected
 		    && has_staff_access(status) && !mod_gui_open;
 		g_can_open.store(available, std::memory_order_release);
-		g_native_bindings_active.store(
-		    status.native_keybinds, std::memory_order_release);
-		if (status.staff_action_generation != staff_action_generation)
-		{
-			staff_action_generation = status.staff_action_generation;
-			const auto suppress_until = g_suppress_native_until_ms.exchange(
-			    0, std::memory_order_acq_rel);
-			if (suppress_until != 0 && GetTickCount64() <= suppress_until)
-			{
-				// F7 already closed the input-capturing panel through the window
-				// message path. Consume the matching native action generation.
-			}
-			else if (available)
-				set_open(!g_open.load(std::memory_order_acquire));
-		}
 		if (!available)
 		{
 			set_open(false);
@@ -691,33 +684,7 @@ namespace big::ingame_staff_panel
 	{
 		if (message == WM_KILLFOCUS)
 		{
-			g_f7_down.store(false, std::memory_order_release);
 			set_open(false);
-			return;
-		}
-		if (wparam == VK_F7)
-		{
-			if (message == WM_KEYUP)
-			{
-				g_f7_down.store(false, std::memory_order_release);
-				return;
-			}
-			if (message == WM_KEYDOWN
-			    && !g_f7_down.exchange(true, std::memory_order_acq_rel))
-			{
-				if (g_open.load(std::memory_order_acquire))
-				{
-					set_open(false);
-					if (g_native_bindings_active.load(std::memory_order_acquire))
-						g_suppress_native_until_ms.store(
-						    GetTickCount64() + 500,
-						    std::memory_order_release);
-				}
-				else if (g_native_bindings_active.load(std::memory_order_acquire))
-					return;
-				else if (g_can_open.load(std::memory_order_acquire))
-					set_open(true);
-			}
 			return;
 		}
 		if (message == WM_KEYDOWN && wparam == VK_ESCAPE
@@ -726,6 +693,12 @@ namespace big::ingame_staff_panel
 			set_open(false);
 			state().pending.reset();
 		}
+	}
+
+	void toggle_from_resource() noexcept
+	{
+		if (g_open.load(std::memory_order_acquire)) set_open(false);
+		else if (g_can_open.load(std::memory_order_acquire)) set_open(true);
 	}
 
 	bool blocks_game_input() noexcept

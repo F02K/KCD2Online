@@ -55,6 +55,12 @@ The packaged dedicated server includes:
 KCD2OnlineServer.exe
 server.toml.example
 resources/
+  default_text_chat/
+  default_voice_chat/
+  default_player_hub/
+  default_social_menu/
+  default_staff_menu/
+  default_properties/
   event_example/
   welcome_ui/
 docs/

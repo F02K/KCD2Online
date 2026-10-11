@@ -187,6 +187,7 @@ namespace kcd2o::server
 				    "invalid persisted world item: " + item_error);
 			}
 		}
+		start_resources();
 	}
 
 	void server_core::on_transport_connected(
@@ -775,6 +776,10 @@ namespace kcd2o::server
 				begin_dummy_input(player, now);
 			}
 		}
+	}
+
+	void server_core::start_resources()
+	{
 		if (m_config.resources_enabled)
 		{
 			scripting::server_resource_callbacks callbacks;
@@ -2171,7 +2176,9 @@ namespace kcd2o::server
 		const bool lock_changed = current_object == m_world_objects.end()
 		    ? message.state().locked()
 		    : message.state().locked() != current_object->second.locked();
-		if (lock_changed && m_properties.property_for(guid)
+		const auto properties_enabled = resource_feature_enabled(
+		    resources::builtin_feature::properties);
+		if (properties_enabled && lock_changed && m_properties.property_for(guid)
 		    && !m_properties.authorize(
 		        player.profile.persistent_id(),
 		        guid,
@@ -2196,7 +2203,7 @@ namespace kcd2o::server
 		        == protocol::WORLD_OBJECT_KIND_CONTAINER
 		    ? property::capability::use_container
 		    : property::capability::enter;
-		if (!m_properties.authorize(
+		if (properties_enabled && !m_properties.authorize(
 		        player.profile.persistent_id(),
 		        guid,
 		        requested,
@@ -2473,6 +2480,8 @@ namespace kcd2o::server
 	    player_session &player,
 	    const protocol::ClientPropertyRoleGrant &message)
 	{
+		if (!resource_feature_enabled(resources::builtin_feature::properties))
+			return;
 		const auto now = unix_milliseconds();
 		const bool global = has_permission(player, "property.manage");
 		std::string error;
@@ -2499,6 +2508,8 @@ namespace kcd2o::server
 	    player_session &player,
 	    const protocol::ClientPropertyRoleRevoke &message)
 	{
+		if (!resource_feature_enabled(resources::builtin_feature::properties))
+			return;
 		std::string error;
 		const bool accepted = has_permission(player, "property.manage")
 		    ? m_properties.system_revoke_role(message.assignment_id(), error)
@@ -2520,6 +2531,8 @@ namespace kcd2o::server
 	    player_session &player,
 	    const protocol::ClientPropertyOwnerSet &message)
 	{
+		if (!resource_feature_enabled(resources::builtin_feature::properties))
+			return;
 		if (!has_permission(player, "property.manage"))
 		{
 			send_property_result(player, false, "Property owner editing requires property.manage.");
@@ -2543,6 +2556,8 @@ namespace kcd2o::server
 	    player_session &player,
 	    const protocol::ClientPropertyResourceLock &message)
 	{
+		if (!resource_feature_enabled(resources::builtin_feature::properties))
+			return;
 		const auto *definition = m_properties.property_for(message.entity_guid());
 		if (!definition)
 		{
@@ -3046,6 +3061,8 @@ namespace kcd2o::server
 	    const protocol::ChatSend &message,
 	    time_point now)
 	{
+		if (!resource_feature_enabled(resources::builtin_feature::text_chat))
+			return;
 		if (player.network_chat_muted
 		    && (message.text().empty() || message.text().front() != '/'))
 		{
@@ -3164,7 +3181,8 @@ namespace kcd2o::server
 	    const protocol::ClientVoiceFrame &message,
 	    time_point now)
 	{
-		if (player.network_voice_muted || !m_config.voice_enabled || !player.connection
+		if (!resource_feature_enabled(resources::builtin_feature::voice_chat)
+		    || player.network_voice_muted || !m_config.voice_enabled || !player.connection
 		    || !player.has_transform)
 			return;
 		if (!message.end_of_talkspurt())
@@ -4014,21 +4032,24 @@ namespace kcd2o::server
 		accepted->set_profile_snapshot_interval_seconds(
 		    m_config.profile_snapshot_interval_seconds);
 		auto *voice = accepted->mutable_voice_config();
-		voice->set_enabled(m_config.voice_enabled);
+		voice->set_enabled(m_config.voice_enabled
+		    && resource_feature_enabled(resources::builtin_feature::voice_chat));
 		voice->set_whisper_range_m(m_config.voice_whisper_range_m);
 		voice->set_normal_range_m(m_config.voice_normal_range_m);
 		voice->set_shout_range_m(m_config.voice_shout_range_m);
 		*accepted->mutable_avatar_policy() = avatar_policy();
-		if (const auto marker = m_properties.home_marker_for(
-		        player.profile.persistent_id(), unix_milliseconds()))
-			*accepted->mutable_home_marker() = *marker;
+		if (resource_feature_enabled(resources::builtin_feature::properties))
+			if (const auto marker = m_properties.home_marker_for(
+			        player.profile.persistent_id(), unix_milliseconds()))
+				*accepted->mutable_home_marker() = *marker;
 		for (const auto &[id, session] : m_players)
 		{
 			(void)id;
 			*accepted->add_players() = snapshot_of(session, true);
 		}
 		queue(*player.connection, std::move(envelope), reliability::reliable);
-		send_property_access(player);
+		if (resource_feature_enabled(resources::builtin_feature::properties))
+			send_property_access(player);
 		send_entity_control(*player.connection);
 		protocol::Envelope sleep;
 		auto *sleep_state = sleep.mutable_server_sleep_state();
@@ -4127,6 +4148,8 @@ namespace kcd2o::server
 
 	void server_core::broadcast_home_markers()
 	{
+		if (!resource_feature_enabled(resources::builtin_feature::properties))
+			return;
 		const auto now = unix_milliseconds();
 		for (const auto &[id, player] : m_players)
 		{
@@ -4155,6 +4178,12 @@ namespace kcd2o::server
 	{
 		return player.network_full_permissions
 		    || m_permissions.has(player.profile.persistent_id(), permission);
+	}
+
+	bool server_core::resource_feature_enabled(
+	    resources::builtin_feature feature) const noexcept
+	{
+		return m_scripts && m_scripts->feature_enabled(feature);
 	}
 
 	protocol::PropertyAccessSnapshot server_core::property_access_for(
@@ -4213,6 +4242,8 @@ namespace kcd2o::server
 
 	void server_core::broadcast_property_access()
 	{
+		if (!resource_feature_enabled(resources::builtin_feature::properties))
+			return;
 		for (auto &[id, player] : m_players)
 		{
 			(void)id;
@@ -4222,7 +4253,8 @@ namespace kcd2o::server
 
 	void server_core::send_property_access(player_session &player)
 	{
-		if (!player.connection)
+		if (!resource_feature_enabled(resources::builtin_feature::properties)
+		    || !player.connection)
 			return;
 		const auto access = property_access_for(player);
 		if (access.properties().empty())

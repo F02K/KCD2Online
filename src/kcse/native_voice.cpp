@@ -1,7 +1,6 @@
 #include "kcse/native_voice.hpp"
 
 #include "kcse/join_trace.hpp"
-#include "kcse/native_keybinds.hpp"
 #include "multiplayer/voice_spatial.hpp"
 
 #include <REL/Relocation.h>
@@ -476,11 +475,24 @@ namespace kcd2o::kcse
 			m_active.store(active, std::memory_order_release);
 			if (!active)
 			{
+				m_transmit_requested.store(false, std::memory_order_release);
 				m_recording.store(false, std::memory_order_release);
 				m_speaking.store(false, std::memory_order_release);
 				m_testing.store(false, std::memory_order_release);
 				m_capture_level.store(0.0F, std::memory_order_release);
 			}
+		}
+
+		void set_transmitting(
+		    bool transmitting, protocol::VoiceRange range) noexcept
+		{
+			if (range != protocol::VOICE_RANGE_WHISPER
+			    && range != protocol::VOICE_RANGE_NORMAL
+			    && range != protocol::VOICE_RANGE_SHOUT)
+				range = protocol::VOICE_RANGE_NORMAL;
+			m_transmit_range.store(
+			    static_cast<std::uint32_t>(range), std::memory_order_release);
+			m_transmit_requested.store(transmitting, std::memory_order_release);
 		}
 
 		[[nodiscard]] voice_capture_state capture_state() const
@@ -655,6 +667,7 @@ namespace kcd2o::kcse
 		void reset()
 		{
 			m_active.store(false, std::memory_order_release);
+			m_transmit_requested.store(false, std::memory_order_release);
 			m_recording.store(false, std::memory_order_release);
 			m_speaking.store(false, std::memory_order_release);
 			m_testing.store(false, std::memory_order_release);
@@ -732,9 +745,7 @@ namespace kcd2o::kcse
 		{
 			return m_active.load(std::memory_order_acquire)
 			    && m_server_voice_enabled.load(std::memory_order_acquire)
-			    && (native_keybinds::available()
-			            ? native_keybinds::voice_held()
-			            : (GetAsyncKeyState('V') & 0x8000) != 0);
+			    && m_transmit_requested.load(std::memory_order_acquire);
 		}
 
 		[[nodiscard]] static std::string device_id(IMMDevice &device)
@@ -1214,13 +1225,8 @@ namespace kcd2o::kcse
 					if (!capture_healthy)
 						break;
 
-					const bool control =
-					    (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-					const bool shift =
-					    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-					talk_range = control ? protocol::VOICE_RANGE_WHISPER
-					    : shift ? protocol::VOICE_RANGE_SHOUT
-					            : protocol::VOICE_RANGE_NORMAL;
+					talk_range = static_cast<protocol::VoiceRange>(
+					    m_transmit_range.load(std::memory_order_acquire));
 					m_capture_range.store(
 					    static_cast<std::uint32_t>(talk_range),
 					    std::memory_order_release);
@@ -1730,6 +1736,9 @@ namespace kcd2o::kcse
 		}
 
 		std::atomic_bool m_active{};
+		std::atomic_bool m_transmit_requested{};
+		std::atomic<std::uint32_t> m_transmit_range{
+			protocol::VOICE_RANGE_NORMAL};
 		std::atomic_bool m_recording{};
 		std::atomic_bool m_speaking{};
 		std::atomic_bool m_testing{};
@@ -1776,6 +1785,12 @@ namespace kcd2o::kcse
 	void native_voice::set_active(bool active) noexcept
 	{
 		m_impl->set_active(active);
+	}
+
+	void native_voice::set_transmitting(
+	    bool transmitting, protocol::VoiceRange range) noexcept
+	{
+		m_impl->set_transmitting(transmitting, range);
 	}
 
 	voice_capture_state native_voice::capture_state() const

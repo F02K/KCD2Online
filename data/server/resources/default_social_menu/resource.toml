@@ -1,0 +1,9 @@
+[resource]
+id = "default_social_menu"
+version = "1.0.0"
+api_version = 1
+dependencies = []
+
+[client]
+entry = "client/main.lua"
+capabilities = ["feature.social_menu"]

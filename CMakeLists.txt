@@ -1012,7 +1012,8 @@ if (BUILD_TESTING)
 	set_property(TARGET KCD2OnlineResourceTests PROPERTY CXX_STANDARD 23)
 	target_link_libraries(KCD2OnlineResourceTests PRIVATE KCD2OnlineScripting)
 	target_compile_definitions(KCD2OnlineResourceTests PRIVATE
-		"NOMINMAX" "WIN32_LEAN_AND_MEAN")
+		"NOMINMAX" "WIN32_LEAN_AND_MEAN"
+		KCD2Online_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 	set_property(TARGET KCD2OnlineResourceTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
 	add_test(NAME KCD2OnlineResourceTests COMMAND KCD2OnlineResourceTests)
 

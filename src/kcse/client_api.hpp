@@ -94,6 +94,7 @@ namespace kcd2o::kcse
 		std::uint32_t property_operation_generation{};
 		std::uint32_t property_operation_success{};
 		char property_operation_message[text_capacity]{};
+		std::uint64_t resource_features{};
 	};
 
 	struct remote_player_view

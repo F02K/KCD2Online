@@ -58,11 +58,35 @@ namespace
 	    const std::filesystem::path &world,
 	    bool configured_spawn = true)
 	{
+		static const auto feature_resources = []
+		{
+			const auto root = std::filesystem::temp_directory_path()
+			    / ("kcd2o-server-test-features-"
+			        + std::to_string(GetCurrentProcessId()));
+			const auto resource = root / "test_default_features";
+			std::filesystem::create_directories(resource / "server");
+			{
+				std::ofstream manifest(resource / "resource.toml");
+				manifest
+				    << "[resource]\nid='test_default_features'\nversion='1.0.0'\n"
+				       "[server]\nentry='server/main.lua'\n"
+				       "capabilities=['feature.text_chat','feature.voice_chat','feature.properties']\n";
+			}
+			{
+				std::ofstream script(resource / "server" / "main.lua");
+				script
+				    << "features.enable('text_chat')\n"
+				       "features.enable('voice_chat')\n"
+				       "features.enable('properties')\n";
+			}
+			return root;
+		}();
 		server_config config;
 		config.name = "Sandbox Test";
 		config.password = "secret";
 		config.level_id = "sandbox";
 		config.world_directory = world;
+		config.resource_directory = feature_resources;
 		if (configured_spawn)
 		{
 			config.initial_spawn = initial_spawn_config{
@@ -577,6 +601,22 @@ int main()
 		assert(reloaded.has(roleplay_owner_id, "admin.announce"));
 		assert(reloaded.has(roleplay_owner_id, "admin.freeze"));
 		assert(!reloaded.has(roleplay_owner_id, "admin.kick"));
+	}
+
+	temporary_world pluginless_world;
+	{
+		auto config = config_for(pluginless_world.path);
+		config.resources_enabled = false;
+		server_core core(config);
+		(void)connect_new_player(core, 201, start, 1, nullptr, "Henry");
+		(void)connect_new_player(core, 202, start + 10ms, 2, nullptr, "Hans");
+		(void)core.take_outbound();
+		core.on_message(201, client_transform(1, 10.0F), start + 100ms);
+		core.on_message(202, client_transform(1, 11.0F), start + 100ms);
+		(void)core.take_outbound();
+		core.on_message(201, chat_message("No chat provider"), start + 200ms);
+		core.on_message(201, voice_frame(1), start + 220ms);
+		assert(core.take_outbound().empty());
 	}
 
 	temporary_world generated_property_world;

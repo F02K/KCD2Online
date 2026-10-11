@@ -65,6 +65,9 @@ Supported capabilities:
 | `ui` | `ui.show`, `ui.patch`, `ui.close`, `ui.toast`, and `server.on("ui", ...)` |
 | `input` | `input.register`, `input.unregister`, and `input.on` |
 | `players.kick` | `server.kick` |
+| `feature.text_chat` | Activation of the native text-chat framework |
+| `feature.voice_chat` | Activation of the native voice framework |
+| `feature.properties` | Activation of the native property framework |
 
 `server.players`, lifecycle callbacks, timers, modules, and declared custom events need no capability.
 
@@ -73,9 +76,15 @@ Supported capabilities:
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `entry` | Yes when the section exists | Lua entry point below `client/`. |
-| `capabilities` | No | Must currently be empty; client capabilities are not implemented. |
+| `capabilities` | No | Local services and native feature-provider capabilities. Defaults to `[]`. |
 
 Declaring `[client]` creates a downloadable package. Omit the entire section for a server-only resource.
+
+Supported local service capabilities are `input`, `ui`, and `voice`. Feature
+capabilities are `feature.text_chat`, `feature.voice_chat`,
+`feature.player_hub`, `feature.social_menu`, `feature.staff_menu`, and
+`feature.properties`. See [client Lua](../api/client-api.md) and
+[built-in feature providers](../api/builtin-features.md).
 
 ## `[shared]`
 
