@@ -80,6 +80,8 @@ namespace big::native_multiplayer_menu
 		constexpr std::string_view refresh_button = "KCD2Online.Servers.Refresh";
 		constexpr std::string_view search_button = "KCD2Online.Servers.Search";
 		constexpr std::string_view clear_search_button = "KCD2Online.Servers.ClearSearch";
+		constexpr std::string_view direct_address_button = "KCD2Online.Direct.Address";
+		constexpr std::string_view default_direct_port = "27020";
 		constexpr std::string_view favorite_button = "KCD2Online.Server.Favorite";
 		constexpr std::string_view support_button = "KCD2Online.Support";
 		constexpr std::string_view support_url =
@@ -91,6 +93,7 @@ namespace big::native_multiplayer_menu
 			name,
 			password,
 			server_search,
+			direct_address,
 			account_username,
 			account_display_name,
 			account_locale,
@@ -326,6 +329,7 @@ namespace big::native_multiplayer_menu
 			std::string edit_original;
 			std::string password;
 			std::string server_search;
+			std::string direct_address;
 			std::string account_username;
 			std::string account_display_name;
 			std::string account_locale;
@@ -398,6 +402,7 @@ namespace big::native_multiplayer_menu
 			case edit_field::name: return settings.display_name;
 			case edit_field::password: return value.password;
 			case edit_field::server_search: return value.server_search;
+			case edit_field::direct_address: return value.direct_address;
 			case edit_field::account_username: return value.account_username;
 			case edit_field::account_display_name: return value.account_display_name;
 			case edit_field::account_locale: return value.account_locale;
@@ -506,6 +511,30 @@ namespace big::native_multiplayer_menu
 			return credential_id.empty()
 			    ? ingame_ui::localized("account.value.unset")
 			    : short_account_id(credential_id);
+		}
+
+		// The master server counts as unreachable once a directory refresh has
+		// finished with an error. Multiplayer then falls back to direct connect,
+		// which needs neither a KCD2Online account nor the server list.
+		bool master_unreachable()
+		{
+			const auto directory = kcd2o::account::directory().snapshot();
+			return !directory.loading && !directory.error.empty();
+		}
+
+		std::string normalized_direct_address(std::string_view input)
+		{
+			const auto first = input.find_first_not_of(" \t");
+			if (first == std::string_view::npos)
+				return {};
+			const auto last = input.find_last_not_of(" \t");
+			std::string address(input.substr(first, last - first + 1));
+			if (address.find(':') == std::string::npos)
+			{
+				address += ':';
+				address += default_direct_port;
+			}
+			return address;
 		}
 
 		void show_account_page()
@@ -746,7 +775,10 @@ namespace big::native_multiplayer_menu
 
 		void show_multiplayer_page()
 		{
-			if (!kcd2o::account::service().status().multiplayer_enabled())
+			const bool direct_mode = master_unreachable();
+			if (!direct_mode
+			    && !kcd2o::account::service().status().multiplayer_enabled()
+			    && !kcd2o::account::directory().snapshot().loading)
 			{
 				show_account_page();
 				return;
@@ -758,6 +790,7 @@ namespace big::native_multiplayer_menu
 			bool start_directory{};
 			std::string password;
 			std::string search;
+			std::string direct_address;
 			std::string selected_id;
 			{
 				std::scoped_lock lock(value.mutex);
@@ -766,6 +799,7 @@ namespace big::native_multiplayer_menu
 				pending_join = value.pending_join;
 				password = value.password;
 				search = value.server_search;
+				direct_address = value.direct_address;
 				selected_id = value.selected_server_id;
 				start_directory = !value.directory_started;
 				value.directory_started = true;
@@ -830,6 +864,32 @@ namespace big::native_multiplayer_menu
 				                 : client_state_text(status), {}};
 				if (!pending_join)
 					page.add_button(std::string(disconnect_button), ingame_ui::localized("menu.action.disconnect"));
+			}
+			else if (direct_mode)
+			{
+				page.information = ingame_ui::information_panel{
+				    ingame_ui::localized("direct.title"),
+				    paragraphs({
+				        ingame_ui::localized("direct.info", {{"error", directory.error}}),
+				        status.error}),
+				    {}};
+				const auto address_text = direct_address.empty()
+				    ? ingame_ui::localized("direct.address.empty") : direct_address;
+				page.add_button(std::string(direct_address_button),
+				    (editing == edit_field::direct_address ? edit_prefix : std::string{})
+				        + ingame_ui::localized("direct.address", {{"value", address_text}}),
+				    settings_locked,
+				    0,
+				    ingame_ui::localized("direct.address.tooltip"));
+				const auto password_text = password.empty()
+				    ? ingame_ui::localized("menu.field.password.empty")
+				    : std::string(password.size(), '*');
+				page.add_button(std::string(password_button),
+				    (editing == edit_field::password ? edit_prefix : std::string{})
+				        + ingame_ui::localized("menu.field.password", {{"value", password_text}}), settings_locked);
+				page.add_button(std::string(connect_button), ingame_ui::localized("menu.action.connect"),
+				    settings_locked || effective_display_name.empty() || direct_address.empty());
+				page.add_button(std::string(refresh_button), ingame_ui::localized("direct.action.retry_master"), directory.loading);
 			}
 			else
 			{
@@ -966,6 +1026,9 @@ namespace big::native_multiplayer_menu
 			case edit_field::server_search:
 				page.selected_button = search_button;
 				break;
+			case edit_field::direct_address:
+				page.selected_button = direct_address_button;
+				break;
 			case edit_field::account_username:
 			case edit_field::account_display_name:
 			case edit_field::account_locale:
@@ -976,6 +1039,7 @@ namespace big::native_multiplayer_menu
 				page.selected_button = pending_join ? cancel_pending_button
 				    : status.state != kcd2o::client_state::disconnected ? disconnect_button
 				    : (is_network_ban_error(status.error) || !status.restriction_kind.empty()) ? support_button
+				    : direct_mode ? (direct_address.empty() ? direct_address_button : connect_button)
 				    : !status.error.empty() ? refresh_button
 				    : selected != matches.end() ? connect_button
 				    : refresh_button;
@@ -1267,7 +1331,9 @@ namespace big::native_multiplayer_menu
 
 		void connect_or_defer()
 		{
-			if (!kcd2o::account::service().status().multiplayer_enabled())
+			const bool direct_mode = master_unreachable();
+			if (!direct_mode
+			    && !kcd2o::account::service().status().multiplayer_enabled())
 			{
 				show_account_page();
 				return;
@@ -1275,6 +1341,7 @@ namespace big::native_multiplayer_menu
 			auto &value = menu_state();
 			kcd2o::client_options options;
 			std::string selected_id;
+			std::string direct_address;
 			{
 				std::scoped_lock lock(value.mutex);
 				auto &settings = kcd2o::ui_settings();
@@ -1285,27 +1352,42 @@ namespace big::native_multiplayer_menu
 				options.password = value.password;
 				options.account_service_url = settings.account_service_url;
 				selected_id = value.selected_server_id;
+				direct_address = value.direct_address;
 			}
-			const auto directory = kcd2o::account::directory().snapshot();
-			const auto selected = std::ranges::find_if(directory.servers,
-			    [&](const kcd2o::account::public_server &server) { return server.id == selected_id; });
-			if (selected == directory.servers.end() || options.display_name.empty())
+			if (direct_mode)
 			{
-				std::scoped_lock lock(value.mutex);
-				value.local_feedback_key = "menu.feedback.required";
-				value.rebuild_requested = true;
-				return;
-			}
-			options.address = selected->address;
-			options.server_id = selected->id;
-			if (selected->password_protected)
-			{
-				if (options.password.empty())
+				options.address = normalized_direct_address(direct_address);
+				if (options.address.empty() || options.display_name.empty())
 				{
-					begin_edit(edit_field::password);
+					std::scoped_lock lock(value.mutex);
+					value.local_feedback_key = "menu.feedback.required";
+					value.rebuild_requested = true;
 					return;
 				}
-				kcd2o::account::directory().set_password(selected->id, options.password);
+			}
+			else
+			{
+				const auto directory = kcd2o::account::directory().snapshot();
+				const auto selected = std::ranges::find_if(directory.servers,
+				    [&](const kcd2o::account::public_server &server) { return server.id == selected_id; });
+				if (selected == directory.servers.end() || options.display_name.empty())
+				{
+					std::scoped_lock lock(value.mutex);
+					value.local_feedback_key = "menu.feedback.required";
+					value.rebuild_requested = true;
+					return;
+				}
+				options.address = selected->address;
+				options.server_id = selected->id;
+				if (selected->password_protected)
+				{
+					if (options.password.empty())
+					{
+						begin_edit(edit_field::password);
+						return;
+					}
+					kcd2o::account::directory().set_password(selected->id, options.password);
+				}
 			}
 
 			if (kcd2o::kcse::ui_client().can_start_join())
@@ -1508,6 +1590,10 @@ namespace big::native_multiplayer_menu
 			else if (button == search_button)
 			{
 				begin_edit(edit_field::server_search);
+			}
+			else if (button == direct_address_button)
+			{
+				begin_edit(edit_field::direct_address);
 			}
 			else if (button == clear_search_button)
 			{
@@ -1791,12 +1877,14 @@ namespace big::native_multiplayer_menu
 				std::scoped_lock lock(value.mutex);
 				pending = value.pending_join;
 			}
+			const bool direct_mode = master_unreachable();
 			if (pending
-			    && kcd2o::account::service().status().multiplayer_enabled()
+			    && (direct_mode || kcd2o::account::service().status().multiplayer_enabled())
 			    && kcd2o::kcse::ui_client().can_start_join())
 			{
 				kcd2o::client_options options;
 				std::string selected_id;
+				std::string direct_address;
 				{
 					std::scoped_lock lock(value.mutex);
 					auto &settings = kcd2o::ui_settings();
@@ -1806,12 +1894,17 @@ namespace big::native_multiplayer_menu
 					options.password = value.password;
 					options.account_service_url = settings.account_service_url;
 					selected_id = value.selected_server_id;
+					direct_address = value.direct_address;
 					value.pending_join = false;
 				}
 				const auto directory = kcd2o::account::directory().snapshot();
 				const auto selected = std::ranges::find_if(directory.servers,
 				    [&](const kcd2o::account::public_server &server) { return server.id == selected_id; });
-				if (selected != directory.servers.end())
+				if (direct_mode)
+				{
+					options.address = normalized_direct_address(direct_address);
+				}
+				else if (selected != directory.servers.end())
 				{
 					options.address = selected->address;
 					options.server_id = selected->id;
