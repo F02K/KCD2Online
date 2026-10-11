@@ -143,6 +143,12 @@ namespace big::ingame_property_panel
 	{
 		auto &client = kcd2o::kcse::ui_client();
 		const auto status = client.status();
+		if (!status.has_resource_feature(
+		        kcd2o::resources::builtin_feature::properties))
+		{
+			set_open(false);
+			return;
+		}
 		const auto snapshot = client.property_access();
 		if (status.property_action_generation != g_action_generation)
 		{

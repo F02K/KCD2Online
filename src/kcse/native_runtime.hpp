@@ -84,6 +84,8 @@ namespace kcd2o::kcse
 		void show_multiplayer_notice(std::string_view message) override;
 		void set_voice_active(bool active) override;
 		void set_voice_server_config(const protocol::VoiceConfig &config) override;
+		void set_voice_transmitting(bool transmitting,
+		    protocol::VoiceRange range) override;
 		[[nodiscard]] voice_capture_state voice_status() const;
 		[[nodiscard]] voice_settings voice_configuration() const;
 		[[nodiscard]] bool set_voice_configuration(const voice_settings &settings);

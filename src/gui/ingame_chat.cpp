@@ -397,72 +397,15 @@ namespace big::ingame_chat
 			return std::clamp(static_cast<float>(1.0 - (age - message_hold_seconds) / message_fade_seconds), 0.0F, 1.0F);
 		}
 
-		void draw_voice_indicator(const kcd2o::client_status &status)
-		{
-			static float displayed_level{};
-			const auto target    = status.voice_recording ? status.voice_level : 0.0F;
-			const auto response  = target > displayed_level ? 0.38F : 0.16F;
-			displayed_level     += (target - displayed_level) * response;
-			if (!status.voice_recording && displayed_level < 0.01F)
-			{
-				displayed_level = 0.0F;
-				return;
-			}
-
-			const auto *viewport = ImGui::GetMainViewport();
-			const auto scale     = std::clamp(viewport->WorkSize.y / 1080.0F, 0.78F, 1.25F);
-			const auto size      = ImVec2(68.0F * scale, 28.0F * scale);
-			const auto center =
-			    ImVec2(viewport->WorkPos.x + 38.0F * scale + size.x * 0.5F, viewport->WorkPos.y + viewport->WorkSize.y - 46.0F * scale);
-			const auto minimum = ImVec2(center.x - size.x * 0.5F, center.y - size.y * 0.5F);
-			const auto maximum = ImVec2(minimum.x + size.x, minimum.y + size.y);
-			auto *draw         = ImGui::GetForegroundDrawList();
-
-			ImVec4 tint = ImVec4(0.76F, 0.61F, 0.34F, 1.0F);
-			if (status.voice_range == kcd2o::protocol::VOICE_RANGE_WHISPER)
-			{
-				tint = ImVec4(0.55F, 0.68F, 0.52F, 1.0F);
-			}
-			else if (status.voice_range == kcd2o::protocol::VOICE_RANGE_SHOUT)
-			{
-				tint = ImVec4(0.86F, 0.48F, 0.27F, 1.0F);
-			}
-			const auto active     = status.voice_speaking || displayed_level >= 0.08F;
-			const auto foreground = ImGui::ColorConvertFloat4ToU32(with_alpha(tint, active ? 0.92F : 0.60F));
-			const auto quiet      = ImGui::ColorConvertFloat4ToU32(with_alpha(tint, active ? 0.38F : 0.18F));
-
-			draw->AddRectFilled(minimum, maximum, IM_COL32(18, 15, 12, active ? 154 : 118), 14.0F * scale);
-			draw->AddRect(minimum, maximum, quiet, 14.0F * scale, 0, 1.0F * scale);
-
-			const auto microphone = ImVec2(minimum.x + 21.0F * scale, center.y - 1.0F * scale);
-			draw->AddRectFilled({microphone.x - 3.0F * scale, microphone.y - 7.0F * scale},
-			                    {microphone.x + 3.0F * scale, microphone.y + 3.0F * scale},
-			                    foreground,
-			                    3.0F * scale);
-			draw->PathArcTo({microphone.x, microphone.y + 1.0F * scale}, 7.0F * scale, 0.0F, 3.14159265F, 10);
-			draw->PathStroke(foreground, 0, 1.4F * scale);
-			draw->AddLine({microphone.x, microphone.y + 8.0F * scale}, {microphone.x, microphone.y + 11.0F * scale}, foreground, 1.4F * scale);
-			draw->AddLine({microphone.x - 4.0F * scale, microphone.y + 11.0F * scale},
-			              {microphone.x + 4.0F * scale, microphone.y + 11.0F * scale},
-			              foreground,
-			              1.4F * scale);
-
-			const auto phase = static_cast<float>(ImGui::GetTime() * 4.0);
-			const float factors[] = {0.58F + 0.12F * std::sin(phase), 0.90F + 0.10F * std::sin(phase + 1.7F), 0.70F + 0.14F * std::sin(phase + 3.1F)};
-			for (std::size_t index{}; index < 3; ++index)
-			{
-				const auto height = (2.0F + 13.0F * displayed_level * factors[index]) * scale;
-				const auto x      = minimum.x + (40.0F + 7.0F * static_cast<float>(index)) * scale;
-				draw->AddRectFilled({x, center.y - height * 0.5F}, {x + 3.0F * scale, center.y + height * 0.5F}, active ? foreground : quiet, 1.5F * scale);
-			}
-		}
 	} // namespace
 
 	void render(bool mod_gui_open)
 	{
 		auto &client         = kcd2o::kcse::ui_client();
 		const auto status    = client.status();
-		const auto connected = status.state == kcd2o::client_state::connected;
+		const auto connected = status.state == kcd2o::client_state::connected
+		    && status.has_resource_feature(
+		        kcd2o::resources::builtin_feature::text_chat);
 		static std::uint32_t chat_action_generation{};
 		static bool emote_action_held{};
 		g_native_bindings_active.store(status.native_keybinds, std::memory_order_release);
@@ -538,8 +481,6 @@ namespace big::ingame_chat
 		{
 			draw_emote_wheel(client);
 		}
-
-		draw_voice_indicator(status);
 
 		const auto open = g_open.load(std::memory_order_acquire);
 		if (!open && history.empty())

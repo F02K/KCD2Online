@@ -8,6 +8,7 @@
 #include "gui/ingame_property_panel.hpp"
 #include "gui/ingame_social_panel.hpp"
 #include "gui/ingame_staff_panel.hpp"
+#include "gui/server_ui.hpp"
 #include "hooks/hooking.hpp"
 
 #include <backends/imgui_impl_dx12.h>
@@ -313,7 +314,8 @@ namespace big
 		    || ingame_player_hub::blocks_game_input()
 		    || ingame_social_panel::blocks_game_input()
 		    || ingame_staff_panel::blocks_game_input()
-		    || ingame_property_panel::blocks_game_input())
+		    || ingame_property_panel::blocks_game_input()
+		    || server_ui::blocks_game_input())
 		{
 			return;
 		}
@@ -1010,9 +1012,11 @@ namespace big
 					    || ingame_player_hub::blocks_game_input()
 					    || ingame_social_panel::blocks_game_input()
 					    || ingame_staff_panel::blocks_game_input()
-					    || ingame_property_panel::blocks_game_input())
+					    || ingame_property_panel::blocks_game_input()
+					    || server_ui::blocks_game_input())
 					{
 						ingame_chat::render(true);
+						server_ui::render(true);
 						ingame_player_hub::render(true);
 						ingame_social_panel::render(true);
 						ingame_staff_panel::render(true);
@@ -1028,22 +1032,32 @@ namespace big
 					    ingame_player_hub::blocks_game_input()
 					    || ingame_social_panel::blocks_game_input()
 					    || ingame_staff_panel::blocks_game_input()
-					    || ingame_property_panel::blocks_game_input());
+					    || ingame_property_panel::blocks_game_input()
+					    || server_ui::blocks_game_input());
 					ingame_property_panel::render(
 					    ingame_player_hub::blocks_game_input()
 					    || ingame_social_panel::blocks_game_input()
-					    || ingame_staff_panel::blocks_game_input());
+					    || ingame_staff_panel::blocks_game_input()
+					    || server_ui::blocks_game_input());
 					ingame_player_hub::render(
 					    ingame_social_panel::blocks_game_input()
 					    || ingame_staff_panel::blocks_game_input()
-					    || ingame_property_panel::blocks_game_input());
+					    || ingame_property_panel::blocks_game_input()
+					    || server_ui::blocks_game_input());
 					ingame_social_panel::render(
 					    ingame_player_hub::blocks_game_input()
 					    || ingame_staff_panel::blocks_game_input()
-					    || ingame_property_panel::blocks_game_input());
+					    || ingame_property_panel::blocks_game_input()
+					    || server_ui::blocks_game_input());
 					ingame_staff_panel::render(
 					    ingame_player_hub::blocks_game_input()
 					    || ingame_social_panel::blocks_game_input()
+					    || ingame_property_panel::blocks_game_input()
+					    || server_ui::blocks_game_input());
+					server_ui::render(
+					    ingame_player_hub::blocks_game_input()
+					    || ingame_social_panel::blocks_game_input()
+					    || ingame_staff_panel::blocks_game_input()
 					    || ingame_property_panel::blocks_game_input());
 					ImGui::Render();
 					chat_draw_data = ImGui::GetDrawData();

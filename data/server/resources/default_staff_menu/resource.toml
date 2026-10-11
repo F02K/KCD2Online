@@ -1,0 +1,9 @@
+[resource]
+id = "default_staff_menu"
+version = "1.0.0"
+api_version = 1
+dependencies = ["default_text_chat"]
+
+[client]
+entry = "client/main.lua"
+capabilities = ["feature.staff_menu"]

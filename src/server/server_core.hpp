@@ -8,16 +8,21 @@
 #include "server/permission_store.hpp"
 #include "server/server_config.hpp"
 #include "server/world_store.hpp"
+#include "resources/resource_package.hpp"
+#include "scripting/server_resource_runtime.hpp"
 
 #include <chrono>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <nlohmann/json_fwd.hpp>
 
 namespace kcd2o::server
 {
@@ -151,6 +156,7 @@ namespace kcd2o::server
 		{
 			hello,
 			authenticate,
+			resources,
 			waiting_for_initializer,
 			loading_world
 		};
@@ -192,6 +198,11 @@ namespace kcd2o::server
 			std::deque<time_point> chat_times;
 			std::deque<time_point> avatar_update_times;
 			std::deque<time_point> voice_frame_times;
+			std::unordered_map<std::string, std::deque<time_point>>
+			    resource_event_times;
+			std::unordered_map<std::string, std::uint64_t>
+			    last_resource_sequences;
+			std::uint64_t last_ui_sequence{};
 			protocol::AvatarDescriptor avatar;
 			protocol::PlayerProfile profile;
 			time_point last_persisted_at;
@@ -253,6 +264,33 @@ namespace kcd2o::server
 		    player_session &player,
 		    const protocol::ClientNpcDiscovery &message,
 		    time_point now);
+		void handle_resource_request(
+		    connection_id connection,
+		    const protocol::ClientResourceRequest &message);
+		void handle_resources_ready(
+		    connection_id connection,
+		    const protocol::ClientResourcesReady &message);
+		void send_resource_manifest(connection_id connection);
+		void begin_bootstrap(connection_id connection);
+		void send_resource_event(
+		    std::string_view resource,
+		    std::optional<player_id> target,
+		    std::string_view event,
+		    const nlohmann::json &payload,
+		    bool reliable);
+		void send_resource_ui(
+		    std::string_view resource,
+		    player_id target,
+		    std::string_view document,
+		    std::string_view operation,
+		    const nlohmann::json &payload);
+		void send_resource_binding(
+		    std::string_view resource,
+		    player_id target,
+		    std::string_view action,
+		    std::string_view label,
+		    std::uint32_t key,
+		    bool unregister);
 		void handle_npc_update(
 		    player_session &player,
 		    const protocol::ClientNpcUpdate &message,
@@ -339,6 +377,8 @@ namespace kcd2o::server
 		[[nodiscard]] bool has_permission(
 		    const player_session &player,
 		    std::string_view permission) const;
+		[[nodiscard]] bool resource_feature_enabled(
+		    resources::builtin_feature feature) const noexcept;
 		void send_property_result(
 		    player_session &player,
 		    bool success,
@@ -369,6 +409,7 @@ namespace kcd2o::server
 		void persist_world_items();
 		void remove_owned_items_from_world();
 		void rebuild_avatar_equipment(player_session &player);
+		void start_resources();
 		void tick_dummies(time_point now);
 		void begin_dummy_input(player_session &player, time_point now);
 		[[nodiscard]] static std::uint64_t next_dummy_random(
@@ -396,6 +437,8 @@ namespace kcd2o::server
 		    bool include_avatar);
 
 		server_config m_config;
+		resources::resource_set m_resources;
+		std::unique_ptr<scripting::server_resource_runtime> m_scripts;
 		token_generator m_generate_token;
 		account_authenticator m_authenticate_account;
 		moderation_executor m_moderate_account;
@@ -439,6 +482,8 @@ namespace kcd2o::server
 		std::uint64_t m_sleep_revision{1};
 		std::unordered_map<std::uint64_t, player_id> m_station_owners;
 		std::uint64_t m_next_activity_session_id{1};
+		std::uint64_t m_resource_sequence{};
+		std::uint64_t m_resource_ui_revision{};
 		std::vector<outbound_message> m_outbound;
 	};
 }

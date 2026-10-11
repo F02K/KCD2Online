@@ -62,6 +62,8 @@ namespace kcd2o::kcse
 		native_voice &operator=(const native_voice &) = delete;
 
 		void set_active(bool active) noexcept;
+		void set_transmitting(bool transmitting,
+		    protocol::VoiceRange range = protocol::VOICE_RANGE_NORMAL) noexcept;
 		[[nodiscard]] voice_capture_state capture_state() const;
 		[[nodiscard]] voice_settings settings() const;
 		[[nodiscard]] bool set_settings(const voice_settings &settings);

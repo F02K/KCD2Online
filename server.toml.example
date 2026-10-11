@@ -23,6 +23,16 @@ movement_tolerance_m = 2.0
 world_directory = "world"
 starter_profile = "starter_profile.toml"
 
+[resources]
+# Resource folders live beside the dedicated server. Lua is statically linked;
+# server hosts do not need a separate Lua installation or SDK.
+enabled = true
+directory = "resources"
+# Per-resource sandbox limits. A resource is disabled after repeated errors.
+memory_limit_mb = 32
+instruction_limit = 250000
+error_limit = 3
+
 [auth]
 enabled = true
 # When enabled, regular accounts must have a centrally managed membership

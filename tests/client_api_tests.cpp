@@ -112,6 +112,17 @@ namespace
 	void __cdecl refresh_voice_devices() noexcept
 	{
 	}
+
+	std::uint32_t __cdecl resource_ui(char *, std::uint32_t) noexcept
+	{
+		return 0;
+	}
+
+	std::uint32_t __cdecl submit_resource_ui(
+	    const kcd2o::kcse::resource_ui_event_request *) noexcept
+	{
+		return 1;
+	}
 } // namespace
 
 int main()
@@ -135,19 +146,53 @@ int main()
 	static_assert(std::is_trivially_copyable_v<voice_device_view>);
 	static_assert(std::is_standard_layout_v<client_api>);
 	static_assert(std::is_trivially_copyable_v<client_api>);
+	static_assert(std::is_standard_layout_v<resource_ui_event_request>);
+	static_assert(std::is_trivially_copyable_v<resource_ui_event_request>);
 #ifdef _WIN64
 	static_assert(sizeof(fixed_string) == 64);
 	static_assert(sizeof(connect_request) == 836);
 	static_assert(sizeof(runtime_status) == 424);
-	static_assert(sizeof(client_status_view) == 2064);
+	static_assert(sizeof(client_status_view) == 2072);
 	static_assert(sizeof(remote_player_view) == 152);
 	static_assert(sizeof(chat_entry_view) == 344);
+	static_assert(sizeof(resource_ui_event_request) == 33028);
 	static_assert(sizeof(voice_settings_view) == 808);
 	static_assert(sizeof(voice_device_view) == 516);
-	static_assert(sizeof(client_api) == 208);
+	static_assert(sizeof(client_api) == 224);
 #endif
 
-	client_api valid{sizeof(client_api), kcd2o::kcd2o_version_major, kcd2o::kcd2o_version_minor, kcd2o::kcd2o_version_patch, runtime, connect, disconnect, text, action_with_value, text, action, action, status, players, chat, archetypes, diagnostic_logging, sizeof(client_status_view), sizeof(remote_player_view), player_voice_volume, property_access, property_role, one_text, two_texts, property_lock, voice_settings, set_voice_settings, voice_devices, refresh_voice_devices};
+	client_api valid{
+	    sizeof(client_api),
+	    kcd2o::kcd2o_version_major,
+	    kcd2o::kcd2o_version_minor,
+	    kcd2o::kcd2o_version_patch,
+	    runtime,
+	    connect,
+	    disconnect,
+	    text,
+	    action_with_value,
+	    text,
+	    action,
+	    action,
+	    status,
+	    players,
+	    chat,
+	    archetypes,
+	    diagnostic_logging,
+	    sizeof(client_status_view),
+	    sizeof(remote_player_view),
+	    player_voice_volume,
+	    property_access,
+	    property_role,
+	    one_text,
+	    two_texts,
+	    property_lock,
+	    voice_settings,
+	    set_voice_settings,
+	    voice_devices,
+	    refresh_voice_devices,
+	    resource_ui,
+	    submit_resource_ui};
 	assert(compatible(&valid));
 	static_assert(kcd2o::kcd2o_version == "0.1.7");
 	static_assert(kcd2o::kcd2o_version_major == 0);

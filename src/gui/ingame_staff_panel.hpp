@@ -6,8 +6,9 @@ namespace big::ingame_staff_panel
 {
 	// Draws the permission-gated staff workspace independently of the mod menu.
 	void render(bool mod_gui_open);
+	void toggle_from_resource() noexcept;
 
-	// F7 toggles the panel; Escape closes it.
+	// Resource Lua owns the open key; Escape remains a universal close action.
 	void on_window_message(std::uint32_t message, std::uintptr_t wparam) noexcept;
 
 	[[nodiscard]] bool blocks_game_input() noexcept;

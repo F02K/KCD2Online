@@ -7,6 +7,8 @@
 #include "multiplayer/world_catalog.hpp"
 #include "kcse/join_trace.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -81,6 +83,8 @@ namespace kcd2o
 				return "protocol-preflight";
 			case client_state::authenticating:
 				return "authenticating";
+			case client_state::downloading_resources:
+				return "downloading-resources";
 			case client_state::waiting_for_bootstrap:
 				return "waiting-for-bootstrap";
 			case client_state::loading_sandbox:
@@ -274,7 +278,13 @@ namespace kcd2o
 	}
 
 	multiplayer_client::multiplayer_client(client_runtime &runtime) :
-	    m_runtime(runtime)
+	    m_runtime(runtime),
+	    m_resources(resources::resource_cache::default_path(),
+	        {.set_voice_transmitting =
+	                [this](bool transmitting, protocol::VoiceRange range)
+	                {
+		                m_runtime.set_voice_transmitting(transmitting, range);
+	                }})
 	{
 	}
 
@@ -1008,7 +1018,9 @@ namespace kcd2o
 	client_status multiplayer_client::status() const
 	{
 		std::scoped_lock lock(m_state_mutex);
-		return m_status;
+		auto result = m_status;
+		result.resource_features = m_resources.feature_mask();
+		return result;
 	}
 
 	client_update_rates multiplayer_client::update_rates() const
@@ -1068,6 +1080,41 @@ namespace kcd2o
 		auto correction = std::move(m_local_correction);
 		m_local_correction.reset();
 		return correction;
+	}
+
+	std::string multiplayer_client::resource_ui_json() const
+	{
+		return m_resources.ui_snapshot_json();
+	}
+
+	bool multiplayer_client::send_resource_ui_event(std::string resource,
+	    std::string document, std::string control, std::string event,
+	    std::string payload_json)
+	{
+		if (!resources::valid_resource_id(resource)
+		    || (!resources::valid_resource_event_name(document)
+		        && !(event == "key" && document.empty()))
+		    || !resources::valid_resource_event_name(control)
+		    || !resources::valid_resource_event_name(event)
+		    || payload_json.size() > max_resource_json_bytes)
+			return false;
+		{
+			std::scoped_lock lock(m_state_mutex);
+			if (m_status.state != client_state::connected)
+				return false;
+		}
+		try
+		{
+			(void)nlohmann::json::parse(payload_json);
+		}
+		catch (...)
+		{
+			return false;
+		}
+		queue_network(resource_ui_command{m_resources.make_ui_event(
+		    std::move(resource), std::move(document), std::move(control),
+		    std::move(event), std::move(payload_json))});
+		return true;
 	}
 
 	void multiplayer_client::network_loop(std::stop_token stop)
@@ -1304,7 +1351,65 @@ namespace kcd2o
 						        }
 						        return;
 					        }
-					        if (envelope->has_server_accepted())
+					        if (envelope->has_server_resource_manifest())
+					        {
+						        if (!set_state(client_state::downloading_resources))
+							        return;
+						        std::string resource_error;
+						        try
+						        {
+							        if (!m_resources.accept_manifest(
+							                envelope->server_resource_manifest(),
+							                m_server_id, resource_error))
+								        throw std::runtime_error(resource_error);
+							        for (auto &outgoing : m_resources.take_outgoing())
+								        (void)send_envelope(outgoing.envelope, outgoing.delivery);
+						        }
+						        catch (const std::exception &exception)
+						        {
+							        set_state(client_state::disconnected,
+							            std::string("server resource activation failed: ") + exception.what());
+							        if (transport) transport->abort_connection("resource activation failed");
+						        }
+						        return;
+					        }
+					        else if (envelope->has_server_resource_chunk())
+					        {
+						        std::string resource_error;
+						        try
+						        {
+							        if (!m_resources.accept_chunk(
+							                envelope->server_resource_chunk(), resource_error))
+								        throw std::runtime_error(resource_error);
+							        for (auto &outgoing : m_resources.take_outgoing())
+								        (void)send_envelope(outgoing.envelope, outgoing.delivery);
+						        }
+						        catch (const std::exception &exception)
+						        {
+							        set_state(client_state::disconnected,
+							            std::string("server resource download failed: ") + exception.what());
+							        if (transport) transport->abort_connection("resource download failed");
+						        }
+						        return;
+					        }
+					        else if (envelope->has_server_resource_event())
+					        {
+						        m_resources.accept_event(envelope->server_resource_event());
+						        for (auto &outgoing : m_resources.take_outgoing())
+							        (void)send_envelope(outgoing.envelope, outgoing.delivery);
+						        return;
+					        }
+					        else if (envelope->has_server_ui_update())
+					        {
+						        m_resources.accept_ui(envelope->server_ui_update());
+						        return;
+					        }
+					        else if (envelope->has_server_input_binding())
+					        {
+						        m_resources.accept_binding(envelope->server_input_binding());
+						        return;
+					        }
+					        else if (envelope->has_server_accepted())
 					        {
 						        const auto &accepted =
 						            envelope->server_accepted();
@@ -1352,6 +1457,9 @@ namespace kcd2o
 						                accepted.level_id(),
 						                accepted.players_size()));
 						        reconnect_attempt = 0;
+						        m_resources.connected();
+						        for (auto &outgoing : m_resources.take_outgoing())
+							        (void)send_envelope(outgoing.envelope, outgoing.delivery);
 					        }
 					        else if (envelope->has_server_challenge())
 					        {
@@ -1602,6 +1710,7 @@ namespace kcd2o
 						    using type = std::decay_t<decltype(typed)>;
 						    if constexpr (std::is_same_v<type, connect_command>)
 						    {
+							    m_resources.reset();
 							    options = std::move(typed.options);
 							    reconnect_attempt = 0;
 							    first_world_snapshot_seen = false;
@@ -1778,8 +1887,8 @@ namespace kcd2o
 				    envelope,
 				    reliability::reliable);
 			}
-			else if constexpr (
-			    std::is_same_v<type, voice_command>)
+							else if constexpr (
+							    std::is_same_v<type, voice_command>)
 			{
 				if (std::chrono::steady_clock::now() - typed.queued_at
 				    > std::chrono::milliseconds(300))
@@ -1822,6 +1931,23 @@ namespace kcd2o
 				*envelope.mutable_client_property_resource_lock() =
 				    std::move(typed.message);
 				(void)send_envelope(envelope, reliability::reliable);
+			}
+						    else if constexpr (
+						        std::is_same_v<type, resource_ui_command>)
+			{
+				const auto handled_locally = m_resources.dispatch_local_ui_event(
+				    typed.message.resource_id(), typed.message.document_id(),
+				    typed.message.control_id(), typed.message.event(),
+				    typed.message.payload_json());
+				if (!handled_locally)
+				{
+					protocol::Envelope envelope;
+					*envelope.mutable_client_ui_event() =
+					    std::move(typed.message);
+					(void)send_envelope(envelope, reliability::reliable);
+				}
+				for (auto &outgoing : m_resources.take_outgoing())
+					(void)send_envelope(outgoing.envelope, outgoing.delivery);
 			}
 					    },
 					    command);
@@ -2350,10 +2476,6 @@ namespace kcd2o
 			        "players={}",
 			        envelope.server_accepted().players_size()));
 			kcse::join_trace::finish_join("connected");
-			lock.unlock();
-			m_runtime.show_multiplayer_notice(
-			    "VOIP: V = sprechen, Strg+V = fluestern, Umschalt+V = rufen.");
-			lock.lock();
 		}
 		else if (envelope.has_server_property_access_updated())
 		{

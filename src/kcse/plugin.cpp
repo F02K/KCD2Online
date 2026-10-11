@@ -655,6 +655,7 @@ namespace
 			result->property_operation_generation = status.property_operation_generation;
 			result->property_operation_success = status.property_operation_success ? 1U : 0U;
 			copy_text(result->property_operation_message, status.property_operation_message);
+			result->resource_features = status.resource_features;
 			result->network_role                 = static_cast<std::uint32_t>(status.network_role);
 			std::string permissions;
 			for (const auto &permission : status.effective_permissions)
@@ -773,6 +774,52 @@ namespace
 		catch (...)
 		{
 			KCD2Online_JOIN_TRACE("join.abi-copy-avatar-archetypes.exception", "type=unknown");
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_copy_resource_ui_json(
+	    char *output, std::uint32_t capacity) noexcept
+	{
+		try
+		{
+			if (!g_client)
+				return 0;
+			const auto json = g_client->resource_ui_json();
+			const auto required = narrow_count(json.size() + 1);
+			if (!output || capacity == 0)
+				return required;
+			if (capacity < required)
+				return required;
+			std::memcpy(output, json.data(), json.size());
+			output[json.size()] = '\0';
+			return required;
+		}
+		catch (...)
+		{
+			return 0;
+		}
+	}
+
+	std::uint32_t __cdecl abi_submit_resource_ui_event(
+	    const kcd2o::kcse::resource_ui_event_request *request) noexcept
+	{
+		try
+		{
+			if (!g_client || !request
+			    || request->struct_size != sizeof(*request)
+			    || !valid_text(request->resource_id)
+			    || !valid_text(request->document_id)
+			    || !valid_text(request->control_id)
+			    || !valid_text(request->event)
+			    || !valid_text(request->payload_json))
+				return 0;
+			return g_client->send_resource_ui_event(request->resource_id,
+			    request->document_id, request->control_id, request->event,
+			    request->payload_json) ? 1U : 0U;
+		}
+		catch (...)
+		{
 			return 0;
 		}
 	}
@@ -988,7 +1035,38 @@ namespace
 		}
 	}
 
-	const kcd2o::kcse::client_api g_api{sizeof(kcd2o::kcse::client_api), kcd2o::kcd2o_version_major, kcd2o::kcd2o_version_minor, kcd2o::kcd2o_version_patch, abi_get_runtime_status, abi_connect, abi_disconnect, abi_send_chat, abi_play_emote, abi_select_avatar, abi_attempt_sleep, abi_request_respawn, abi_get_status, abi_copy_players, abi_copy_chat, abi_copy_avatar_archetypes, abi_set_diagnostic_logging, sizeof(kcd2o::kcse::client_status_view), sizeof(kcd2o::kcse::remote_player_view), abi_set_player_voice_volume, abi_copy_property_access, abi_request_property_role, abi_revoke_property_role, abi_set_property_owner, abi_set_property_locked, abi_get_voice_settings, abi_set_voice_settings, abi_copy_voice_devices, abi_refresh_voice_devices};
+	const kcd2o::kcse::client_api g_api{
+	    sizeof(kcd2o::kcse::client_api),
+	    kcd2o::kcd2o_version_major,
+	    kcd2o::kcd2o_version_minor,
+	    kcd2o::kcd2o_version_patch,
+	    abi_get_runtime_status,
+	    abi_connect,
+	    abi_disconnect,
+	    abi_send_chat,
+	    abi_play_emote,
+	    abi_select_avatar,
+	    abi_attempt_sleep,
+	    abi_request_respawn,
+	    abi_get_status,
+	    abi_copy_players,
+	    abi_copy_chat,
+	    abi_copy_avatar_archetypes,
+	    abi_set_diagnostic_logging,
+	    sizeof(kcd2o::kcse::client_status_view),
+	    sizeof(kcd2o::kcse::remote_player_view),
+	    abi_set_player_voice_volume,
+	    abi_copy_property_access,
+	    abi_request_property_role,
+	    abi_revoke_property_role,
+	    abi_set_property_owner,
+	    abi_set_property_locked,
+	    abi_get_voice_settings,
+	    abi_set_voice_settings,
+	    abi_copy_voice_devices,
+	    abi_refresh_voice_devices,
+	    abi_copy_resource_ui_json,
+	    abi_submit_resource_ui_event};
 } // namespace
 
 KCSE_EXPORT KCSE::PluginVersionData KCSEPlugin_Version = {

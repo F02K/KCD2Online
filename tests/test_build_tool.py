@@ -47,7 +47,18 @@ class BuildTargetCoverageTests(unittest.TestCase):
         )
         self.assertIsNotNone(aggregate_match)
         aggregate = aggregate_match.group("body")
-        missing = sorted(name for name in registered if name not in aggregate)
+        conditional = "\n".join(
+            re.findall(
+                r"add_dependencies\s*\(\s*KCD2OnlineTests\b(?P<body>.*?)\)",
+                cmake,
+                re.DOTALL,
+            )
+        )
+        missing = sorted(
+            name
+            for name in registered
+            if name not in aggregate and name not in conditional
+        )
         self.assertEqual(missing, [], "KCD2OnlineTests misses registered test targets")
 
 
@@ -437,6 +448,27 @@ class PackagingTests(unittest.TestCase):
         (project / "data" / "server" / "README.txt").write_text(
             "Generate game_data first.\n", encoding="utf-8"
         )
+        (project / "data" / "server" / "resources" / "example").mkdir(
+            parents=True
+        )
+        (
+            project / "data" / "server" / "resources" / "example" / "resource.toml"
+        ).write_text(
+            "[resource]\nid='example'\nversion='1.0.0'\n", encoding="utf-8"
+        )
+        (project / "docs" / "scripting" / "getting-started").mkdir(
+            parents=True
+        )
+        (project / "docs" / "scripting" / "README.md").write_text(
+            "# Server scripting\n", encoding="utf-8"
+        )
+        (
+            project
+            / "docs"
+            / "scripting"
+            / "getting-started"
+            / "quick-start.md"
+        ).write_text("# Quick start\n", encoding="utf-8")
         (project / "data" / "lang").mkdir()
         (project / "data" / "lang" / "en.lang").write_text(
             "menu.title=Multiplayer\n", encoding="utf-8"
@@ -568,6 +600,18 @@ class PackagingTests(unittest.TestCase):
                 )
                 self.assertIn(
                     "KCD2Online-Server-v0.1.0/KCD2OnlineGameDataGenerator.exe",
+                    names,
+                )
+                self.assertIn(
+                    "KCD2Online-Server-v0.1.0/resources/example/resource.toml",
+                    names,
+                )
+                self.assertIn(
+                    "KCD2Online-Server-v0.1.0/docs/scripting/README.md",
+                    names,
+                )
+                self.assertIn(
+                    "KCD2Online-Server-v0.1.0/docs/scripting/getting-started/quick-start.md",
                     names,
                 )
                 self.assertFalse(any("/game_data/" in name for name in names))

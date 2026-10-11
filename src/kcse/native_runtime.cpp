@@ -2258,6 +2258,12 @@ namespace kcd2o::kcse
 		m_voice.set_server_config(config);
 	}
 
+	void native_runtime::set_voice_transmitting(
+	    bool transmitting, protocol::VoiceRange range)
+	{
+		m_voice.set_transmitting(transmitting, range);
+	}
+
 	voice_capture_state native_runtime::voice_status() const
 	{
 		return m_voice.capture_state();

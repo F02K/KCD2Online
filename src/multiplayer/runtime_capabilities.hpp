@@ -22,6 +22,10 @@ namespace kcd2o
 		runtime_capability_address_library_identity = 1ULL << 13,
 		runtime_capability_environment = 1ULL << 14,
 		runtime_capability_npc_sync = 1ULL << 15,
+		runtime_capability_resource_transfer = 1ULL << 16,
+		runtime_capability_client_lua = 1ULL << 17,
+		runtime_capability_server_ui = 1ULL << 18,
+		runtime_capability_dynamic_input = 1ULL << 19,
 	};
 
 	constexpr std::uint64_t known_client_runtime_capabilities =

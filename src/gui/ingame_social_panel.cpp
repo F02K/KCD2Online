@@ -30,9 +30,6 @@ namespace big::ingame_social_panel
 
 		std::atomic_bool g_open{};
 		std::atomic_bool g_can_open{};
-		std::atomic_bool g_f3_down{};
-		std::atomic_bool g_native_bindings_active{};
-		std::atomic<std::uint64_t> g_suppress_native_until_ms{};
 
 		struct panel_state
 		{
@@ -341,38 +338,36 @@ namespace big::ingame_social_panel
 				ImGui::TextWrapped("%s", text("social.local_hint").c_str());
 				ImGui::BeginDisabled(!controls_enabled);
 
-				auto chat_hidden = ingame_social_preferences::chat_hidden(player->id);
-				if (ImGui::Checkbox(text("social.hide_chat").c_str(), &chat_hidden))
+				if (status.has_resource_feature(
+				        kcd2o::resources::builtin_feature::text_chat))
 				{
-					ingame_social_preferences::set_chat_hidden(player->id, chat_hidden);
+					auto chat_hidden = ingame_social_preferences::chat_hidden(player->id);
+					if (ImGui::Checkbox(text("social.hide_chat").c_str(), &chat_hidden))
+						ingame_social_preferences::set_chat_hidden(player->id, chat_hidden);
 				}
 
-				auto voice_volume = ingame_social_preferences::voice_volume(player->id);
-				int voice_percent = static_cast<int>(std::round(voice_volume * 100.0F));
-				ImGui::SetNextItemWidth(std::min(440.0F * scale, ImGui::GetContentRegionAvail().x));
-				if (ImGui::SliderInt(text("social.voice_volume").c_str(), &voice_percent, 0, 150, "%d%%"))
+				if (status.has_resource_feature(
+				        kcd2o::resources::builtin_feature::voice_chat))
 				{
-					voice_volume = static_cast<float>(voice_percent) / 100.0F;
-					if (kcd2o::kcse::ui_client().set_player_voice_volume(player->id, voice_volume))
+					auto voice_volume = ingame_social_preferences::voice_volume(player->id);
+					int voice_percent = static_cast<int>(std::round(voice_volume * 100.0F));
+					ImGui::SetNextItemWidth(std::min(440.0F * scale, ImGui::GetContentRegionAvail().x));
+					if (ImGui::SliderInt(text("social.voice_volume").c_str(), &voice_percent, 0, 150, "%d%%"))
 					{
-						ingame_social_preferences::set_voice_volume(player->id, voice_volume);
+						voice_volume = static_cast<float>(voice_percent) / 100.0F;
+						if (kcd2o::kcse::ui_client().set_player_voice_volume(player->id, voice_volume))
+							ingame_social_preferences::set_voice_volume(player->id, voice_volume);
+						else
+							set_feedback(value, text("social.voice_failed"));
 					}
-					else
+					const auto voice_muted = voice_volume <= 0.001F;
+					if (ImGui::Button(text(voice_muted ? "social.voice_unmute" : "social.voice_mute").c_str(), {210.0F * scale, 0.0F}))
 					{
-						set_feedback(value, text("social.voice_failed"));
-					}
-				}
-				const auto voice_muted = voice_volume <= 0.001F;
-				if (ImGui::Button(text(voice_muted ? "social.voice_unmute" : "social.voice_mute").c_str(), {210.0F * scale, 0.0F}))
-				{
-					const auto next_volume = voice_muted ? 1.0F : 0.0F;
-					if (kcd2o::kcse::ui_client().set_player_voice_volume(player->id, next_volume))
-					{
-						ingame_social_preferences::set_voice_volume(player->id, next_volume);
-					}
-					else
-					{
-						set_feedback(value, text("social.voice_failed"));
+						const auto next_volume = voice_muted ? 1.0F : 0.0F;
+						if (kcd2o::kcse::ui_client().set_player_voice_volume(player->id, next_volume))
+							ingame_social_preferences::set_voice_volume(player->id, next_volume);
+						else
+							set_feedback(value, text("social.voice_failed"));
 					}
 				}
 				ImGui::EndDisabled();
@@ -405,25 +400,13 @@ namespace big::ingame_social_panel
 	{
 		auto &client      = kcd2o::kcse::ui_client();
 		const auto status = client.status();
-		static std::uint32_t social_action_generation{};
-		const auto available = (status.state == kcd2o::client_state::connected || status.state == kcd2o::client_state::reconnecting) && !another_panel_open;
+		const auto available = status.has_resource_feature(
+		        kcd2o::resources::builtin_feature::social_menu)
+		    && (status.state == kcd2o::client_state::connected
+		        || status.state == kcd2o::client_state::reconnecting)
+		    && !another_panel_open;
 		g_can_open.store(available, std::memory_order_release);
-		g_native_bindings_active.store(status.native_keybinds, std::memory_order_release);
 		ingame_social_preferences::set_session(status.session_id);
-
-		if (status.social_action_generation != social_action_generation)
-		{
-			social_action_generation  = status.social_action_generation;
-			const auto suppress_until = g_suppress_native_until_ms.exchange(0, std::memory_order_acq_rel);
-			if (suppress_until != 0 && GetTickCount64() <= suppress_until)
-			{
-				// F3 already closed the panel through the window message path.
-			}
-			else if (available)
-			{
-				set_open(!g_open.load(std::memory_order_acquire));
-			}
-		}
 		if (!available)
 		{
 			set_open(false);
@@ -529,42 +512,19 @@ namespace big::ingame_social_panel
 	{
 		if (message == WM_KILLFOCUS)
 		{
-			g_f3_down.store(false, std::memory_order_release);
 			set_open(false);
-			return;
-		}
-		if (wparam == VK_F3)
-		{
-			if (message == WM_KEYUP)
-			{
-				g_f3_down.store(false, std::memory_order_release);
-				return;
-			}
-			if (message == WM_KEYDOWN && !g_f3_down.exchange(true, std::memory_order_acq_rel))
-			{
-				if (g_open.load(std::memory_order_acquire))
-				{
-					set_open(false);
-					if (g_native_bindings_active.load(std::memory_order_acquire))
-					{
-						g_suppress_native_until_ms.store(GetTickCount64() + 500, std::memory_order_release);
-					}
-				}
-				else if (g_native_bindings_active.load(std::memory_order_acquire))
-				{
-					return;
-				}
-				else if (g_can_open.load(std::memory_order_acquire))
-				{
-					set_open(true);
-				}
-			}
 			return;
 		}
 		if (message == WM_KEYDOWN && wparam == VK_ESCAPE && g_open.load(std::memory_order_acquire))
 		{
 			set_open(false);
 		}
+	}
+
+	void toggle_from_resource() noexcept
+	{
+		if (g_open.load(std::memory_order_acquire)) set_open(false);
+		else if (g_can_open.load(std::memory_order_acquire)) set_open(true);
 	}
 
 	bool blocks_game_input() noexcept

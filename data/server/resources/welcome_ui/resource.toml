@@ -1,0 +1,9 @@
+[resource]
+id = "welcome_ui"
+version = "1.0.0"
+api_version = 1
+dependencies = []
+
+[server]
+entry = "server/main.lua"
+capabilities = ["chat", "ui", "input"]

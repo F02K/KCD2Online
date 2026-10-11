@@ -216,6 +216,10 @@ namespace kcd2o
 		virtual void set_voice_server_config(const protocol::VoiceConfig &)
 		{
 		}
+		virtual void set_voice_transmitting(
+		    bool, protocol::VoiceRange = protocol::VOICE_RANGE_NORMAL)
+		{
+		}
 		[[nodiscard]] virtual std::vector<protocol::ClientVoiceFrame>
 		poll_outbound_voice()
 		{

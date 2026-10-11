@@ -6,6 +6,8 @@
 #include "multiplayer/networking.hpp"
 #include "multiplayer/remote_transform_sequence.hpp"
 #include "multiplayer/runtime.hpp"
+#include "multiplayer/client_resources.hpp"
+#include "resources/resource_features.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -93,6 +95,7 @@ namespace kcd2o
 		std::uint32_t property_operation_generation{};
 		bool property_operation_success{};
 		std::string property_operation_message;
+		std::uint64_t resource_features{};
 		bool environment_available{};
 		double time_of_day_hours{};
 		float time_scale{};
@@ -106,6 +109,12 @@ namespace kcd2o
 		std::uint64_t restriction_expires_at_unix_ms{};
 		std::string restriction_reference_id;
 		std::string support_url;
+
+		[[nodiscard]] bool has_resource_feature(
+		    resources::builtin_feature feature) const noexcept
+		{
+			return (resource_features & resources::feature_bit(feature)) != 0;
+		}
 	};
 
 	struct client_update_rates
@@ -157,6 +166,13 @@ namespace kcd2o
 		[[nodiscard]] std::vector<remote_player_view> remote_players() const;
 		[[nodiscard]] std::vector<chat_entry> chat_history() const;
 		[[nodiscard]] std::optional<protocol::TransformState> take_local_correction();
+		[[nodiscard]] std::string resource_ui_json() const;
+		[[nodiscard]] bool send_resource_ui_event(
+		    std::string resource,
+		    std::string document,
+		    std::string control,
+		    std::string event,
+		    std::string payload_json = "{}");
 
 	private:
 		client_runtime &m_runtime;
@@ -270,7 +286,35 @@ namespace kcd2o
 			protocol::ClientPropertyResourceLock message;
 		};
 
-		using network_command = std::variant<connect_command, disconnect_command, transform_command, chat_command, world_ready_command, world_failed_command, profile_command, avatar_command, world_object_command, world_item_command, npc_discovery_command, npc_update_batch_command, sleep_command, death_command, respawn_command, activity_start_command, activity_end_command, voice_command, property_role_grant_command, property_role_revoke_command, property_owner_set_command, property_resource_lock_command>;
+		struct resource_ui_command
+		{
+			protocol::ClientUiEvent message;
+		};
+
+		using network_command = std::variant<
+		    connect_command,
+		    disconnect_command,
+		    transform_command,
+		    chat_command,
+		    world_ready_command,
+		    world_failed_command,
+		    profile_command,
+		    avatar_command,
+		    world_object_command,
+		    world_item_command,
+		    npc_discovery_command,
+		    npc_update_batch_command,
+		    sleep_command,
+		    death_command,
+		    respawn_command,
+		    activity_start_command,
+		    activity_end_command,
+		    voice_command,
+		    property_role_grant_command,
+		    property_role_revoke_command,
+		    property_owner_set_command,
+		    property_resource_lock_command,
+		    resource_ui_command>;
 
 		struct timed_transform
 		{
@@ -308,6 +352,7 @@ namespace kcd2o
 		mutable std::mutex m_state_mutex;
 		client_status m_status;
 		client_update_rates m_update_rates;
+		client_resources m_resources;
 		std::string m_resume_token;
 		std::string m_server_id;
 		identity_store m_identities;

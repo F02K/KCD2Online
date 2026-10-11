@@ -14,6 +14,7 @@
 #include <gui/ingame_staff_panel.hpp>
 #include <gui/native_multiplayer_menu.hpp>
 #include <gui/renderer.hpp>
+#include <gui/server_ui.hpp>
 #include <kcse/client_proxy.hpp>
 #include <logger/stack_trace.hpp>
 #include <lua_extensions/lua_manager_extension.hpp>
@@ -396,6 +397,10 @@ namespace big
 			return;
 		}
 		const auto *event = reinterpret_cast<const Offsets::SInputEvent *>(a2);
+		if (server_ui::blocks_game_input())
+		{
+			return;
+		}
 		if (ingame_chat::blocks_game_input()
 		    && (!event || !ingame_chat::allows_blocked_input(
 		                      static_cast<std::uint32_t>(event->state))))

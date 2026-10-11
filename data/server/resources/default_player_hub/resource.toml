@@ -1,0 +1,9 @@
+[resource]
+id = "default_player_hub"
+version = "1.0.0"
+api_version = 1
+dependencies = []
+
+[client]
+entry = "client/main.lua"
+capabilities = ["feature.player_hub"]

@@ -12,6 +12,7 @@ namespace kcd2o::kcse
 
 	inline constexpr std::size_t short_text_capacity = 64;
 	inline constexpr std::size_t text_capacity       = 256;
+	inline constexpr std::size_t resource_payload_capacity = 32 * 1024;
 
 	struct fixed_string
 	{
@@ -93,6 +94,7 @@ namespace kcd2o::kcse
 		std::uint32_t property_operation_generation{};
 		std::uint32_t property_operation_success{};
 		char property_operation_message[text_capacity]{};
+		std::uint64_t resource_features{};
 	};
 
 	struct remote_player_view
@@ -139,6 +141,16 @@ namespace kcd2o::kcse
 		std::uint32_t is_default{};
 	};
 
+	struct resource_ui_event_request
+	{
+		std::uint32_t struct_size{sizeof(resource_ui_event_request)};
+		char resource_id[short_text_capacity]{};
+		char document_id[short_text_capacity]{};
+		char control_id[short_text_capacity]{};
+		char event[short_text_capacity]{};
+		char payload_json[resource_payload_capacity]{};
+	};
+
 	struct client_api
 	{
 		std::uint32_t struct_size{};
@@ -170,12 +182,30 @@ namespace kcd2o::kcse
 		std::uint32_t(__cdecl *set_voice_settings)(const voice_settings_view *settings) noexcept {};
 		std::uint32_t(__cdecl *copy_voice_devices)(voice_device_view *output, std::uint32_t capacity) noexcept {};
 		void(__cdecl *refresh_voice_devices)() noexcept {};
+		std::uint32_t(__cdecl *copy_resource_ui_json)(char *output, std::uint32_t capacity) noexcept {};
+		std::uint32_t(__cdecl *submit_resource_ui_event)(const resource_ui_event_request *request) noexcept {};
 	};
 
 	using query_client = const client_api *(__cdecl *)(std::uint32_t requested_version_major, std::uint32_t requested_version_minor, std::uint32_t requested_version_patch) noexcept;
 
 	[[nodiscard]] constexpr bool compatible(const client_api *api) noexcept
 	{
-		return api && api->struct_size == sizeof(client_api) && api->status_view_size == sizeof(client_status_view) && api->remote_player_view_size == sizeof(remote_player_view) && api->version_major == kcd2o_version_major && api->version_minor == kcd2o_version_minor && api->version_patch == kcd2o_version_patch && api->get_runtime_status && api->connect && api->disconnect && api->send_chat && api->play_emote && api->select_avatar && api->get_status && api->attempt_sleep && api->request_respawn && api->copy_players && api->copy_chat && api->copy_avatar_archetypes && api->set_diagnostic_logging && api->set_player_voice_volume && api->copy_property_access && api->request_property_role && api->revoke_property_role && api->set_property_owner && api->set_property_locked && api->get_voice_settings && api->set_voice_settings && api->copy_voice_devices && api->refresh_voice_devices;
+		return api && api->struct_size == sizeof(client_api)
+		    && api->status_view_size == sizeof(client_status_view)
+		    && api->remote_player_view_size == sizeof(remote_player_view)
+		    && api->version_major == kcd2o_version_major
+		    && api->version_minor == kcd2o_version_minor
+		    && api->version_patch == kcd2o_version_patch
+		    && api->get_runtime_status && api->connect && api->disconnect
+		    && api->send_chat && api->play_emote && api->select_avatar
+		    && api->get_status && api->attempt_sleep && api->request_respawn
+		    && api->copy_players && api->copy_chat
+		    && api->copy_avatar_archetypes && api->set_diagnostic_logging
+		    && api->set_player_voice_volume && api->copy_property_access
+		    && api->request_property_role && api->revoke_property_role
+		    && api->set_property_owner && api->set_property_locked
+		    && api->get_voice_settings && api->set_voice_settings
+		    && api->copy_voice_devices && api->refresh_voice_devices
+		    && api->copy_resource_ui_json && api->submit_resource_ui_event;
 	}
 } // namespace kcd2o::kcse

@@ -46,6 +46,13 @@ namespace kcd2o::kcse
 		[[nodiscard]] bool set_property_locked(
 		    std::uint64_t entity_guid,
 		    bool locked) const;
+		[[nodiscard]] std::string resource_ui_json() const;
+		[[nodiscard]] bool submit_resource_ui_event(
+		    std::string resource,
+		    std::string document,
+		    std::string control,
+		    std::string event,
+		    std::string payload_json = "{}") const;
 
 	private:
 		[[nodiscard]] const client_api *load() const noexcept;

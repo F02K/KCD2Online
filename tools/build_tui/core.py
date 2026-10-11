@@ -1267,6 +1267,20 @@ def package_artifacts(
         for source in server_sources:
             shutil.copy2(source, server_root / source.name)
 
+        # Resource examples and their dedicated authoring documentation are part of
+        # the standalone server distribution. Server operators must not need a
+        # source checkout, KCSE, or a separate Lua installation.
+        for source_name, destination_name in (("resources", "resources"),):
+            source = project_root / "data" / "server" / source_name
+            if source.is_dir():
+                shutil.copytree(source, server_root / destination_name)
+        scripting_docs = project_root / "docs" / "scripting"
+        if not scripting_docs.is_dir():
+            raise BuildToolError(
+                f"Cannot package missing server scripting documentation: {scripting_docs}"
+            )
+        shutil.copytree(scripting_docs, server_root / "docs" / "scripting")
+
         if game_data_dir is not None:
             required_game_data = (
                 "content_manifest.json",

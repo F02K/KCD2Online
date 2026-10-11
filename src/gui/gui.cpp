@@ -7,6 +7,7 @@
 #include "gui/ingame_staff_panel.hpp"
 #include "gui/native_multiplayer_menu.hpp"
 #include "gui/renderer.hpp"
+#include "gui/server_ui.hpp"
 #include "hooks/hooking.hpp"
 #include "kcd2_address.hpp"
 #include "kcse/client_proxy.hpp"
@@ -2214,35 +2215,48 @@ namespace big
 		    ingame_social_panel::blocks_game_input();
 		const auto staff_was_open = ingame_staff_panel::blocks_game_input();
 		const auto property_was_open = ingame_property_panel::blocks_game_input();
-		if (!social_was_open && !staff_was_open && !property_was_open)
+		const auto server_ui_was_open = server_ui::blocks_game_input();
+		if (!social_was_open && !staff_was_open && !property_was_open
+		    && !server_ui_was_open)
 		{
 			ingame_player_hub::on_window_message(
 			    msg,
 			    static_cast<std::uintptr_t>(wparam));
 		}
-		if (!player_hub_was_open && !staff_was_open && !property_was_open)
+		if (!player_hub_was_open && !staff_was_open && !property_was_open
+		    && !server_ui_was_open)
 		{
 			ingame_social_panel::on_window_message(
 			    msg,
 			    static_cast<std::uintptr_t>(wparam));
 		}
-		if (!player_hub_was_open && !social_was_open && !property_was_open)
+		if (!player_hub_was_open && !social_was_open && !property_was_open
+		    && !server_ui_was_open)
 		{
 			ingame_staff_panel::on_window_message(
 			    msg,
 			    static_cast<std::uintptr_t>(wparam));
 		}
-		if (!player_hub_was_open && !social_was_open && !staff_was_open)
+		if (!player_hub_was_open && !social_was_open && !staff_was_open
+		    && !server_ui_was_open)
 		{
 			ingame_property_panel::on_window_message(
 			    msg, static_cast<std::uintptr_t>(wparam));
 		}
 		if (!player_hub_was_open && !social_was_open && !staff_was_open
-		    && !property_was_open
+		    && !property_was_open)
+		{
+			server_ui::on_window_message(msg,
+			    static_cast<std::uintptr_t>(wparam),
+			    static_cast<std::intptr_t>(lparam));
+		}
+		if (!player_hub_was_open && !social_was_open && !staff_was_open
+		    && !property_was_open && !server_ui_was_open
 		    && !ingame_player_hub::blocks_game_input()
 		    && !ingame_social_panel::blocks_game_input()
 		    && !ingame_staff_panel::blocks_game_input()
-		    && !ingame_property_panel::blocks_game_input())
+		    && !ingame_property_panel::blocks_game_input()
+		    && !server_ui::blocks_game_input())
 		{
 			ingame_chat::on_window_message(
 			    msg,
@@ -2253,7 +2267,8 @@ namespace big
 		    ingame_player_hub::blocks_game_input()
 		    || ingame_social_panel::blocks_game_input()
 		    || ingame_staff_panel::blocks_game_input()
-		    || ingame_property_panel::blocks_game_input();
+		    || ingame_property_panel::blocks_game_input()
+		    || server_ui::blocks_game_input();
 
 		if (msg == WM_RBUTTONUP && !ingame_panel_open)
 		{
@@ -2308,7 +2323,8 @@ namespace big
 		        && !ingame_player_hub::blocks_game_input()
 		        && !ingame_social_panel::blocks_game_input()
 		        && !ingame_staff_panel::blocks_game_input()
-		        && !ingame_property_panel::blocks_game_input()))
+		        && !ingame_property_panel::blocks_game_input()
+		        && !server_ui::blocks_game_input()))
 		{
 			return orig_ClipCursor(lpRect);
 		}
@@ -2323,7 +2339,8 @@ namespace big
 		    || ingame_player_hub::blocks_game_input()
 		    || ingame_social_panel::blocks_game_input()
 		    || ingame_staff_panel::blocks_game_input()
-		    || ingame_property_panel::blocks_game_input();
+		    || ingame_property_panel::blocks_game_input()
+		    || server_ui::blocks_game_input();
 
 		// Install the guard during GUI initialization so an in-game panel can be
 		// the first overlay opened in a session.
