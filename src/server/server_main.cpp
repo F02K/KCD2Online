@@ -110,40 +110,59 @@ int main(int argc, char **argv)
 		std::unique_ptr<kcd2o::server::backend_client> backend;
 		if (config.account_auth_enabled)
 		{
-			if (config.account_server_id.empty())
+			try
 			{
-				auto credentials =
-				    kcd2o::server::load_server_credentials(
-				        config.account_identity_file);
-				if (!credentials)
+				if (config.account_server_id.empty())
 				{
-					std::cout << "registering this dedicated server with KCD2Online...\n";
-					kcd2o::server::backend_client registrar(
-					    config.account_service_url, {}, {});
-					credentials = registrar.register_server(
-					    {config.name,
-					     config.public_address,
-					     std::string(kcd2o::kcd2o_version),
-					     0,
-					     config.max_players,
-					     !config.password.empty(),
-					     config.level_id,
-					     config.permission_owners,
-					     {}});
-					kcd2o::server::save_server_credentials(
-					    config.account_identity_file,
-					    *credentials);
-					std::cout << "registered as " << credentials->id
-					          << "; identity saved to "
-					          << config.account_identity_file.string() << '\n';
+					auto credentials =
+					    kcd2o::server::load_server_credentials(
+					        config.account_identity_file);
+					if (!credentials)
+					{
+						std::cout << "registering this dedicated server with KCD2Online...\n";
+						kcd2o::server::backend_client registrar(
+						    config.account_service_url, {}, {});
+						credentials = registrar.register_server(
+						    {config.name,
+						     config.public_address,
+						     std::string(kcd2o::kcd2o_version),
+						     0,
+						     config.max_players,
+						     !config.password.empty(),
+						     config.level_id,
+						     config.permission_owners,
+						     {}});
+						kcd2o::server::save_server_credentials(
+						    config.account_identity_file,
+						    *credentials);
+						std::cout << "registered as " << credentials->id
+						          << "; identity saved to "
+						          << config.account_identity_file.string() << '\n';
+					}
+					config.account_server_id = credentials->id;
+					config.account_server_key = credentials->api_key;
 				}
-				config.account_server_id = credentials->id;
-				config.account_server_key = credentials->api_key;
+				backend = std::make_unique<kcd2o::server::backend_client>(
+				    config.account_service_url,
+				    config.account_server_id,
+				    config.account_server_key);
 			}
-			backend = std::make_unique<kcd2o::server::backend_client>(
-			    config.account_service_url,
-			    config.account_server_id,
-			    config.account_server_key);
+			catch (const std::exception &exception)
+			{
+				// Without a whitelist the server can still run: it just cannot
+				// be verified by the master server, so it is not listed publicly
+				// and accepts direct connects only.
+				if (config.account_whitelist_enabled)
+					throw;
+				std::cerr << "KCD2Online master server is unavailable ("
+				          << exception.what()
+				          << "); starting unlisted in direct-connect mode"
+				          << std::endl;
+				config.account_auth_enabled = false;
+				config.account_server_id.clear();
+				config.account_server_key.clear();
+				backend.reset();
+			}
 		}
 		kcd2o::server::server_core core(
 		    config,
